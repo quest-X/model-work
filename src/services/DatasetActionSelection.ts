@@ -1,6 +1,7 @@
 export interface DatasetActionTarget {
     id: string;
     name: string;
+    projectName?: string | null;
     revision: number;
     imageCount: number;
     classCount: number;

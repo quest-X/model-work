@@ -75,6 +75,9 @@ const QueueItemCard: React.FC<CardProps> = ({ item, isActive, language, onSelect
         [QueueDataSyncStatus.ERROR]: texts.queueDataSync.error,
     }[dataSyncStatus];
     const supportsDataSync = item.type !== QueueItemType.VIDEO;
+    const showSyncAction = supportsDataSync
+        && dataSyncStatus !== QueueDataSyncStatus.SYNCING
+        && dataSyncStatus !== QueueDataSyncStatus.SYNCED;
 
     return (
         <div
@@ -113,7 +116,7 @@ const QueueItemCard: React.FC<CardProps> = ({ item, isActive, language, onSelect
                 )}
             </div>
 
-            {supportsDataSync && dataSyncStatus !== QueueDataSyncStatus.SYNCING && (
+            {showSyncAction && (
                 <button
                     type='button'
                     className='card-sync-btn'

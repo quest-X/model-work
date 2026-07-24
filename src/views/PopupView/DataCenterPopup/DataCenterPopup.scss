@@ -2,7 +2,7 @@
 
 .GenericYesNoPopup:has(.DataCenterPopupContent) {
   width: min(980px, calc(100vw - 32px));
-  height: min(680px, calc(100vh - 32px));
+  height: min(740px, calc(100vh - 32px));
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
   box-sizing: border-box;
@@ -33,6 +33,95 @@
 
   button {
     font: inherit;
+  }
+
+  .ResourceModuleTabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    flex: 0 0 auto;
+    gap: 10px;
+
+    > button {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-width: 0;
+      min-height: 62px;
+      gap: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.025);
+      padding: 11px 13px;
+      color: rgba(255, 255, 255, 0.66);
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+
+      &:hover {
+        border-color: rgba(255, 255, 255, 0.23);
+        background: rgba(255, 255, 255, 0.045);
+      }
+
+      &:focus-visible {
+        outline: 2px solid #5ca8ff;
+        outline-offset: -2px;
+      }
+
+      &.active {
+        color: white;
+
+        &.data {
+          border-color: rgba(52, 178, 248, 0.74);
+          background: rgba(33, 132, 191, 0.18);
+          box-shadow: inset 0 0 0 1px rgba(52, 178, 248, 0.08);
+        }
+
+        &.models {
+          border-color: rgba(174, 126, 255, 0.65);
+          background: rgba(122, 79, 196, 0.17);
+          box-shadow: inset 0 0 0 1px rgba(174, 126, 255, 0.07);
+        }
+      }
+    }
+  }
+
+  .ResourceModuleCopy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+
+    strong {
+      overflow: hidden;
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    small {
+      overflow: hidden;
+      color: rgba(255, 255, 255, 0.38);
+      font-size: 9px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .ResourceModuleStatus {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 6px;
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 10px;
+
+    i {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #58d58b;
+      box-shadow: 0 0 7px rgba(88, 213, 139, 0.7);
+    }
   }
 
   .DataWorkspace {
@@ -131,6 +220,16 @@
             color: #7ddc9b;
           }
         }
+
+        &.models {
+          border-color: rgba(174, 126, 255, 0.52);
+          background: rgba(122, 79, 196, 0.17);
+
+          > strong {
+            background: rgba(174, 126, 255, 0.2);
+            color: #c9a8ff;
+          }
+        }
       }
     }
   }
@@ -197,6 +296,16 @@
       background: rgba(91, 201, 126, 0.055);
     }
 
+    &.models {
+      border-left-color: #ad7eff;
+      background: rgba(151, 103, 235, 0.06);
+    }
+
+    &.temporary-models {
+      border-left-color: #5ca8ff;
+      background: rgba(92, 168, 255, 0.06);
+    }
+
     > div {
       display: flex;
       min-width: 0;
@@ -214,7 +323,8 @@
       }
     }
 
-    > button {
+    > button,
+    .TierHeaderActions > button {
       flex: 0 0 auto;
       border: 1px solid rgba(255, 255, 255, 0.14);
       border-radius: 4px;
@@ -234,17 +344,252 @@
         opacity: 0.45;
       }
     }
+
+    .TierHeaderActions {
+      display: flex;
+      align-items: center;
+      flex: 0 0 auto;
+      gap: 7px;
+    }
+
   }
 
   .LocalDataList,
-  .DatasetList {
+  .DatasetList,
+  .ModelResourceList {
     display: flex;
     min-height: 0;
     flex: 1;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     overflow-y: auto;
     padding-right: 3px;
+  }
+
+  .ModelActionError {
+    border: 1px solid rgba(255, 105, 105, 0.25);
+    border-radius: 5px;
+    background: rgba(255, 105, 105, 0.07);
+    padding: 8px 10px;
+    color: #ffaaaa;
+    font-size: 10px;
+  }
+
+  .ModelCatalogFilter {
+    display: grid;
+    grid-template-columns: auto auto minmax(140px, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.025);
+    padding: 7px 9px;
+
+    small {
+      color: rgba(255, 255, 255, 0.48);
+      font-size: 9px;
+      white-space: nowrap;
+    }
+
+    input,
+    select {
+      min-width: 0;
+      height: 28px;
+      box-sizing: border-box;
+      border: 1px solid rgba(255, 255, 255, 0.13);
+      border-radius: 4px;
+      outline: none;
+      background: rgba(0, 0, 0, 0.18);
+      padding: 0 8px;
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 10px;
+
+      &:focus {
+        border-color: rgba(174, 126, 255, 0.55);
+      }
+    }
+
+    select {
+      padding-right: 22px;
+      cursor: pointer;
+
+      option {
+        background: #252525;
+        color: white;
+      }
+    }
+  }
+
+  .ModelCatalogSelect {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 4px;
+
+    span {
+      flex: 0 0 auto;
+      color: rgba(255, 255, 255, 0.48);
+      font-size: 9px;
+    }
+
+    select {
+      width: 80px;
+    }
+
+    &:nth-child(2) select {
+      width: 80px;
+    }
+  }
+
+  .ModelCatalogSearch {
+    position: relative;
+    display: block;
+    min-width: 0;
+
+    > span {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    input {
+      width: 100%;
+    }
+  }
+
+  .ModelResourceCard {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.025);
+    padding: 11px 12px;
+
+    &.active {
+      border-color: rgba(91, 201, 126, 0.4);
+      background: rgba(91, 201, 126, 0.055);
+    }
+  }
+
+  .ModelResourceIdentity {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .ModelResourceTitle {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 6px;
+
+    strong {
+      min-width: 0;
+      overflow: hidden;
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .ModelTypeBadge,
+  .ModelLoadedBadge {
+    flex: 0 0 auto;
+    border-radius: 8px;
+    padding: 2px 6px;
+    font-size: 8px;
+  }
+
+  .ModelTypeBadge {
+    background: rgba(174, 126, 255, 0.14);
+    color: #c9a8ff;
+
+    &.detection {
+      background: rgba(92, 168, 255, 0.14);
+      color: #91c6ff;
+    }
+
+    &.segmentation {
+      background: rgba(242, 174, 78, 0.14);
+      color: #f2bd72;
+    }
+  }
+
+  .ModelLoadedBadge {
+    background: rgba(91, 201, 126, 0.16);
+    color: #72d993;
+  }
+
+  .ModelResourceMeta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+
+    span {
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 3px 6px;
+      color: rgba(255, 255, 255, 0.53);
+      font-size: 9px;
+    }
+  }
+
+  .ModelResourceTime {
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 9px;
+  }
+
+  .ModelResourcePath {
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.33);
+    font-family: monospace;
+    font-size: 8px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ModelResourceActions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 7px;
+
+    button {
+      min-width: 72px;
+      border: 1px solid rgba(174, 126, 255, 0.4);
+      border-radius: 4px;
+      background: transparent;
+      padding: 7px 11px;
+      color: #cfb4ff;
+      font-size: 10px;
+      cursor: pointer;
+
+      &:hover:not(:disabled) {
+        background: rgba(174, 126, 255, 0.11);
+        color: white;
+      }
+
+      &:disabled {
+        cursor: default;
+        opacity: 0.5;
+      }
+    }
+
+    .SyncAction {
+      border-color: rgba(91, 201, 126, 0.42);
+      color: #79dda0;
+
+      &:hover:not(:disabled) {
+        border-color: rgba(91, 201, 126, 0.65);
+        background: rgba(91, 201, 126, 0.1);
+      }
+    }
   }
 
   .EmptyState {
@@ -494,27 +839,67 @@
   }
 
   .DatasetChevron {
+    display: inline-flex;
+    width: 32px;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 32px;
     color: rgba(255, 255, 255, 0.5);
-    font-size: 15px;
-    transition: transform 0.18s ease;
 
-    &.expanded {
-      transform: rotate(180deg);
+    &::before {
+      width: 6px;
+      height: 6px;
+      border-right: 1px solid currentColor;
+      border-bottom: 1px solid currentColor;
+      content: '';
+      transform: rotate(45deg);
+      transition: transform 0.18s ease;
+    }
+
+    &.expanded::before {
+      transform: rotate(225deg);
     }
   }
 
   .DeleteButton {
+    position: relative;
+    display: inline-flex;
     width: 38px;
+    min-height: 100%;
+    align-items: center;
+    justify-content: center;
     flex: 0 0 38px;
     border: 0;
     background: transparent;
     color: rgba(255, 255, 255, 0.42);
-    font-size: 17px;
     cursor: pointer;
+
+    &::before,
+    &::after {
+      position: absolute;
+      width: 9px;
+      height: 1px;
+      background: currentColor;
+      content: '';
+    }
+
+    &::before {
+      transform: rotate(45deg);
+    }
+
+    &::after {
+      transform: rotate(-45deg);
+    }
 
     &:hover {
       background: rgba(255, 107, 107, 0.06);
       color: #ff8585;
+    }
+
+    &:focus-visible {
+      outline: 2px solid #ff8585;
+      outline-offset: -2px;
     }
   }
 
@@ -762,16 +1147,38 @@
       padding: 10px;
     }
 
-    .LocalDataCard {
+    .LocalDataCard,
+    .ModelResourceCard {
       grid-template-columns: minmax(0, 1fr);
       gap: 10px;
     }
 
-    .DataCardActions {
+    .DataCardActions,
+    .ModelResourceActions {
       justify-content: stretch;
 
       button {
         flex: 1;
+      }
+    }
+
+    .ModelCatalogFilter {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+
+      .ModelCatalogSelect {
+        select {
+          width: auto;
+          flex: 1;
+        }
+      }
+
+      .ModelCatalogSearch {
+        grid-column: 1 / -1;
+      }
+
+      > small {
+        grid-column: 1 / -1;
+        text-align: right;
       }
     }
 
@@ -809,6 +1216,14 @@
     .TierExplanation {
       align-items: flex-start;
       flex-direction: column;
+
+      .TierHeaderActions {
+        width: 100%;
+
+        button {
+          flex: 1;
+        }
+      }
     }
   }
 }

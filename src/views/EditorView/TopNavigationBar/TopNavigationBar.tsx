@@ -1,4 +1,4 @@
-import React, {useState, useEffect} from 'react';
+import React, {useState, useEffect, useRef} from 'react';
 import './TopNavigationBar.scss';
 import StateBar from '../StateBar/StateBar';
 import {PopupWindowType} from '../../../data/enums/PopupWindowType';
@@ -10,12 +10,18 @@ import {ProjectData} from '../../../store/general/types';
 import DropDownMenu from './DropDownMenu/DropDownMenu';
 import {TextButton} from '../../Common/TextButton/TextButton';
 import {Language, LanguageConfig} from '../../../data/LanguageConfig';
+import {QueueItem} from '../../../store/queue/types';
+import {updateQueueItem} from '../../../store/queue/actionCreators';
+import {getEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
 
 interface IProps {
     updateActivePopupTypeAction: (activePopupType: PopupWindowType) => any;
     updateProjectDataAction: (projectData: ProjectData) => any;
     updateLanguageAction: (language: Language) => any;
+    updateQueueItemAction: (itemId: string, updates: Partial<QueueItem>) => any;
     projectData: ProjectData;
+    queueItems: QueueItem[];
+    activeQueueItemId: string | null;
     language: Language;
     hasCoreEngine: boolean;
     hasExtensionEngine: boolean;
@@ -27,6 +33,8 @@ const TopNavigationBar: React.FC<IProps> = (props) => {
     const currentTexts = LanguageConfig[props.language];
     const [showActionsDropdown, setShowActionsDropdown] = useState(false);
     const [activeServicesDropdown, setActiveServicesDropdown] = useState<ServicesDropdown>(null);
+    const renameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const activeQueueItem = props.queueItems.find(item => item.id === props.activeQueueItemId);
 
     const onFocus = (event: React.FocusEvent<HTMLInputElement>) => {
         event.target.setSelectionRange(0, event.target.value.length);
@@ -40,8 +48,46 @@ const TopNavigationBar: React.FC<IProps> = (props) => {
         props.updateProjectDataAction({
             ...props.projectData,
             name: value
-        })
+        });
     };
+
+    useEffect(() => {
+        const cleanName = props.projectData.name.trim();
+        if (!activeQueueItem || !cleanName) return undefined;
+        if (activeQueueItem.name !== cleanName) {
+            props.updateQueueItemAction(activeQueueItem.id, {name: cleanName});
+        }
+
+        const datasetId = activeQueueItem.datasetId;
+        if (!datasetId) return undefined;
+        renameTimerRef.current = setTimeout(() => {
+            renameTimerRef.current = null;
+            fetch(`${getEngineBaseUrl()}/datasets/${encodeURIComponent(datasetId)}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: cleanName, project_name: cleanName}),
+            }).then(response => {
+                if (!response.ok) throw new Error(`${response.status}`);
+                window.dispatchEvent(new CustomEvent('opensight:data-center-updated', {
+                    detail: {datasetId, queueItemId: activeQueueItem.id},
+                }));
+            }).catch(error => {
+                console.warn('[ProjectRename] Failed to rename server dataset', error);
+            });
+        }, 500);
+        return () => {
+            if (renameTimerRef.current !== null) {
+                clearTimeout(renameTimerRef.current);
+                renameTimerRef.current = null;
+            }
+        };
+    }, [
+        props.projectData.name,
+        activeQueueItem?.id,
+        activeQueueItem?.name,
+        activeQueueItem?.datasetId,
+        props.updateQueueItemAction,
+    ]);
 
     const closePopup = () => props.updateActivePopupTypeAction(PopupWindowType.EXIT_PROJECT)
     
@@ -249,11 +295,14 @@ const TopNavigationBar: React.FC<IProps> = (props) => {
 const mapDispatchToProps = {
     updateActivePopupTypeAction: updateActivePopupType,
     updateProjectDataAction: updateProjectData,
-    updateLanguageAction: updateLanguage
+    updateLanguageAction: updateLanguage,
+    updateQueueItemAction: updateQueueItem,
 };
 
 const mapStateToProps = (state: AppState) => ({
     projectData: state.general.projectData,
+    queueItems: state.queue.items,
+    activeQueueItemId: state.queue.activeQueueItemId,
     language: state.general.language,
     hasCoreEngine: !!state.aimodels?.models.some(model => model.modelType === 'core'),
     hasExtensionEngine: !!state.aimodels?.models.some(model => model.modelType === 'extension')

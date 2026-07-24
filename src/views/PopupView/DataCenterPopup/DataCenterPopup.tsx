@@ -62,14 +62,39 @@ interface DatasetStats {
     annotation_coverage: number;
 }
 
-type DataTier = 'temporary' | 'persistent';
+type ModelAssetType = 'custom' | 'detection' | 'segmentation';
 
-const TIER_BY_NAVIGATION_KEY: Partial<Record<string, DataTier>> = {
-    ArrowDown: 'persistent',
-    End: 'persistent',
-    ArrowUp: 'temporary',
-    Home: 'temporary',
-};
+interface ModelAsset {
+    id?: string;
+    name: string;
+    type: ModelAssetType;
+    format?: string;
+    size_bytes?: number;
+    modified_at?: string | null;
+    source?: 'managed' | 'cache' | 'legacy' | 'local' | 'server';
+    project?: string;
+    category?: string;
+    path?: string;
+    relative_path?: string;
+    callable?: boolean;
+}
+
+type ModelCatalogSort = 'relevance' | 'recent' | 'name' | 'size';
+
+interface ModelRuntimeStatus {
+    model?: string;
+    model_asset_id?: string;
+    segmentation_model?: string;
+    segmentation_model_asset_id?: string;
+    loaded_models?: string[];
+    model_tasks?: Record<string, string>;
+}
+
+type ResourceModule = 'data' | 'models';
+type StorageTier = 'temporary' | 'persistent';
+
+const RESOURCE_MODULES: ResourceModule[] = ['data', 'models'];
+const STORAGE_TIERS: StorageTier[] = ['temporary', 'persistent'];
 
 interface IProps {
     language: Language;
@@ -140,6 +165,30 @@ const taskTypeLabel = (taskType: string | null | undefined, zh: boolean): string
     return zh ? label[0] : label[1];
 };
 
+const comparableModelName = (name: string | null | undefined): string =>
+    (name || '').toLowerCase().replace(/\.(pt|onnx|mlpackage|mlmodel)$/i, '');
+
+const modelAssetFormat = (model: ModelAsset): string => {
+    const explicitFormat = model.format?.trim().replace(/^\./, '');
+    if (explicitFormat) return explicitFormat.toUpperCase();
+    const filename = model.path || model.name;
+    const extension = filename.match(/\.([a-z0-9]+)$/i)?.[1];
+    return extension?.toUpperCase() || 'UNKNOWN';
+};
+
+const modelAssetDisplayName = (model: ModelAsset): string =>
+    /\.[a-z0-9]+$/i.test(model.name)
+        ? model.name
+        : `${model.name}.${modelAssetFormat(model).toLowerCase()}`;
+
+const formatBytes = (value: number | null | undefined): string => {
+    const bytes = Math.max(0, value || 0);
+    if (bytes === 0) return '—';
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KiB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+    return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GiB`;
+};
+
 export const DataCenterPopup: React.FC<IProps> = ({
     language,
     projectName,
@@ -153,7 +202,8 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const zh = language === Language.CHINESE;
     const baseUrl = getEngineBaseUrl();
 
-    const [activeTier, setActiveTier] = useState<DataTier>('temporary');
+    const [activeModule, setActiveModule] = useState<ResourceModule>('data');
+    const [activeTier, setActiveTier] = useState<StorageTier>('temporary');
     const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
     const [datasetsLoading, setDatasetsLoading] = useState(true);
     const [datasetsError, setDatasetsError] = useState<string | null>(null);
@@ -163,14 +213,59 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const [statsError, setStatsError] = useState<string | null>(null);
     const [datasetActionId, setDatasetActionId] = useState<string | null>(null);
     const [datasetActionError, setDatasetActionError] = useState<string | null>(null);
+    const [models, setModels] = useState<ModelAsset[]>([]);
+    const [modelRuntime, setModelRuntime] = useState<ModelRuntimeStatus>({});
+    const [modelsLoading, setModelsLoading] = useState(true);
+    const [modelsError, setModelsError] = useState<string | null>(null);
+    const [modelActionName, setModelActionName] = useState<string | null>(null);
+    const [modelActionError, setModelActionError] = useState<string | null>(null);
+    const [modelSyncName, setModelSyncName] = useState<string | null>(null);
+    const [modelQuery, setModelQuery] = useState('');
+    const [modelSort, setModelSort] = useState<ModelCatalogSort>('relevance');
+    const [modelFormat, setModelFormat] = useState('all');
 
-    const selectTier = (tier: DataTier) => {
+    const selectModule = (module: ResourceModule) => {
+        setActiveModule(module);
+        setActiveTier('temporary');
+        document.getElementById(`resource-module-${module}`)?.focus();
+    };
+
+    const handleModuleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+        const currentIndex = RESOURCE_MODULES.indexOf(activeModule);
+        let nextModule: ResourceModule | undefined;
+        if (event.key === 'Home') nextModule = RESOURCE_MODULES[0];
+        if (event.key === 'End') nextModule = RESOURCE_MODULES[RESOURCE_MODULES.length - 1];
+        if (event.key === 'ArrowRight') {
+            nextModule = RESOURCE_MODULES[(currentIndex + 1) % RESOURCE_MODULES.length];
+        }
+        if (event.key === 'ArrowLeft') {
+            nextModule = RESOURCE_MODULES[
+                (currentIndex - 1 + RESOURCE_MODULES.length) % RESOURCE_MODULES.length
+            ];
+        }
+        if (!nextModule) return;
+        event.preventDefault();
+        selectModule(nextModule);
+    };
+
+    const selectTier = (tier: StorageTier) => {
         setActiveTier(tier);
-        document.getElementById(`data-tier-${tier}`)?.focus();
+        document.getElementById(`resource-tier-${activeModule}-${tier}`)?.focus();
     };
 
     const handleTierKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-        const nextTier = TIER_BY_NAVIGATION_KEY[event.key];
+        const currentIndex = STORAGE_TIERS.indexOf(activeTier);
+        let nextTier: StorageTier | undefined;
+        if (event.key === 'Home') nextTier = STORAGE_TIERS[0];
+        if (event.key === 'End') nextTier = STORAGE_TIERS[STORAGE_TIERS.length - 1];
+        if (event.key === 'ArrowDown') {
+            nextTier = STORAGE_TIERS[(currentIndex + 1) % STORAGE_TIERS.length];
+        }
+        if (event.key === 'ArrowUp') {
+            nextTier = STORAGE_TIERS[
+                (currentIndex - 1 + STORAGE_TIERS.length) % STORAGE_TIERS.length
+            ];
+        }
         if (!nextTier) return;
         event.preventDefault();
         selectTier(nextTier);
@@ -183,6 +278,51 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const temporaryItems = useMemo(
         () => queueItems.filter(item => item.dataSyncStatus !== QueueDataSyncStatus.SYNCED),
         [queueItems],
+    );
+    const runtimeModels = useMemo(() => {
+        const seen = new Set<string>();
+        return [
+            {
+                name: modelRuntime.model,
+                id: modelRuntime.model_asset_id,
+                type: 'detection' as ModelAssetType,
+            },
+            {
+                name: modelRuntime.segmentation_model,
+                id: modelRuntime.segmentation_model_asset_id,
+                type: 'segmentation' as ModelAssetType,
+            },
+        ].reduce<ModelAsset[]>((result, slot) => {
+            if (!slot.name) return result;
+            const comparableName = slot.id || comparableModelName(slot.name);
+            if (!comparableName || seen.has(comparableName)) return result;
+            seen.add(comparableName);
+            const persisted = models.find(model => (
+                slot.id ? model.id === slot.id : comparableModelName(model.name) === comparableName
+            ));
+            result.push(persisted || {
+                name: slot.name,
+                id: slot.id,
+                type: slot.type,
+                source: 'local',
+            });
+            return result;
+        }, []);
+    }, [
+        modelRuntime.model,
+        modelRuntime.model_asset_id,
+        modelRuntime.segmentation_model,
+        modelRuntime.segmentation_model_asset_id,
+        models,
+    ]);
+    const persistentModels = useMemo(
+        () => models.filter(model => model.source === 'managed' || model.source === 'server'),
+        [models],
+    );
+    const persistentModelFormats = useMemo(
+        () => Array.from(new Set(persistentModels.map(modelAssetFormat)))
+            .sort((left, right) => left.localeCompare(right)),
+        [persistentModels],
     );
 
     const refreshDatasets = useCallback(() => {
@@ -202,11 +342,56 @@ export const DataCenterPopup: React.FC<IProps> = ({
         }).finally(() => setDatasetsLoading(false));
     }, [baseUrl, zh]);
 
+    const refreshModels = useCallback(() => {
+        setModelsLoading(true);
+        setModelsError(null);
+        return Promise.all([
+            fetch(`${baseUrl}/available-models`),
+            fetch(`${baseUrl}/health`),
+        ]).then(async ([modelsResponse, healthResponse]) => {
+            if (!modelsResponse.ok) throw new Error(`${modelsResponse.status}`);
+            const modelData = await modelsResponse.json();
+            const healthData = healthResponse.ok ? await healthResponse.json() : {};
+            const nextModels = Array.isArray(modelData.models)
+                ? modelData.models.map((item: unknown): ModelAsset => {
+                    if (typeof item === 'string') {
+                        return {name: item, type: 'custom'};
+                    }
+                    const value = item as Partial<ModelAsset>;
+                    return {
+                        name: value.name || '',
+                        type: value.type || 'custom',
+                        format: value.format,
+                        size_bytes: value.size_bytes,
+                        modified_at: value.modified_at,
+                        source: value.source,
+                        id: value.id,
+                        project: value.project,
+                        category: value.category,
+                        path: value.path,
+                        relative_path: value.relative_path,
+                        callable: value.callable,
+                    };
+                }).filter((item: ModelAsset) => item.name)
+                : [];
+            setModels(nextModels);
+            setModelRuntime(healthData);
+        }).catch(() => {
+            setModelsError(zh ? '无法读取模型资源' : 'Unable to load model resources');
+        }).finally(() => setModelsLoading(false));
+    }, [baseUrl, zh]);
+
     useEffect(() => {
         refreshDatasets();
         window.addEventListener('opensight:data-center-updated', refreshDatasets);
         return () => window.removeEventListener('opensight:data-center-updated', refreshDatasets);
     }, [refreshDatasets]);
+
+    useEffect(() => {
+        refreshModels();
+        window.addEventListener('opensight:model-loaded', refreshModels);
+        return () => window.removeEventListener('opensight:model-loaded', refreshModels);
+    }, [refreshModels]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -236,6 +421,57 @@ export const DataCenterPopup: React.FC<IProps> = ({
             });
         return () => controller.abort();
     }, [selectedId, baseUrl, zh]);
+
+    const useModel = async (model: ModelAsset) => {
+        const identifier = model.id || model.name;
+        setModelActionName(identifier);
+        setModelActionError(null);
+        try {
+            const response = await fetch(`${baseUrl}/switch-model`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({model: identifier}),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(typeof body.detail === 'string' ? body.detail : `${response.status}`);
+            }
+            await refreshModels();
+            window.dispatchEvent(new CustomEvent('opensight:model-loaded', {
+                detail: {model: body.active || model.name},
+            }));
+        } catch (cause) {
+            setModelActionError(cause instanceof Error
+                ? cause.message
+                : (zh ? '模型加载失败' : 'Failed to load model'));
+        } finally {
+            setModelActionName(null);
+        }
+    };
+
+    const syncModelToServer = async (model: ModelAsset) => {
+        const identifier = model.id || model.name;
+        setModelSyncName(identifier);
+        setModelActionError(null);
+        try {
+            const response = await fetch(`${baseUrl}/model-assets/sync`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({model: identifier}),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(typeof body.detail === 'string' ? body.detail : `${response.status}`);
+            }
+            await refreshModels();
+        } catch (cause) {
+            setModelActionError(cause instanceof Error
+                ? cause.message
+                : (zh ? '模型同步失败' : 'Failed to sync model'));
+        } finally {
+            setModelSyncName(null);
+        }
+    };
 
     const datasetDisplayName = (dataset: DatasetSummary): string => {
         const localSource = dataset.source_id ? queueItemById.get(dataset.source_id) : null;
@@ -275,6 +511,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const actionTarget = (dataset: DatasetSummary): DatasetActionTarget => ({
         id: dataset.id,
         name: datasetDisplayName(dataset),
+        projectName: dataset.project_name || datasetDisplayName(dataset),
         revision: dataset.revision || 1,
         imageCount: dataset.image_count,
         classCount: dataset.classes.length,
@@ -346,8 +583,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const syncActionLabel = (item: QueueItem, hasReliableSnapshot: boolean): string => {
         if (item.dataSyncStatus === QueueDataSyncStatus.SYNCING) return zh ? '同步中…' : 'Syncing…';
         if (!hasReliableSnapshot) return zh ? '先打开后同步' : 'Open before syncing';
-        if (item.datasetId) return zh ? '更新服务器' : 'Update server';
-        return zh ? '同步到服务器' : 'Sync to server';
+        return zh ? '同步至服务器' : 'Sync to server';
     };
 
     const renderLocalDataCard = (item: QueueItem) => {
@@ -369,7 +605,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
             </div>
             <div className='DataCardActions'>
                 <button type='button' onClick={() => openLocalItem(item)}>
-                    {zh ? '查看 / 标注' : 'View / annotate'}
+                    {zh ? '使用' : 'Use'}
                 </button>
                 {supportsSync && <button
                     type='button'
@@ -457,7 +693,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
                         disabled={datasetActionId === dataset.id}
                         onClick={() => openDatasetForEditing(dataset)}
                     >
-                        {datasetActionId === dataset.id ? (zh ? '正在打开…' : 'Opening…') : (zh ? '编辑' : 'Edit')}
+                        {datasetActionId === dataset.id ? (zh ? '正在打开…' : 'Opening…') : (zh ? '使用' : 'Use')}
                     </button>
                     <button type='button' className='TaskLink' onClick={() => openInferenceSettings(dataset.id)}>
                         {zh ? '推理' : 'Inference'}
@@ -472,8 +708,8 @@ export const DataCenterPopup: React.FC<IProps> = ({
                 {datasetActionError && <p className='TaskActionError'>{datasetActionError}</p>}
                 <p className='TaskCapabilityHint'>
                     {zh
-                        ? '编辑会创建可继续标注的前端工作副本；推理完成后生成新版本；训练引用当前快照；导出先确认再生成压缩包。'
-                        : 'Edit creates a frontend working copy; inference creates a new revision; training references this snapshot; export confirms before building an archive.'}
+                        ? '使用会创建可继续标注的前端工作副本；推理完成后生成新版本；训练引用当前快照；导出先确认再生成压缩包。'
+                        : 'Use creates a frontend working copy; inference creates a new revision; training references this snapshot; export confirms before building an archive.'}
                 </p>
             </div>
         </div>
@@ -515,14 +751,14 @@ export const DataCenterPopup: React.FC<IProps> = ({
                         <span className='DatasetMeta'>{dataset.image_count} {zh ? '张图片' : 'images'} · {dataset.classes.length} {zh ? '类' : 'classes'}</span>
                         <span className='DatasetSource'>{sourceLabel}</span>
                     </span>
-                    <span className={`DatasetChevron${expanded ? ' expanded' : ''}`} aria-hidden='true'>⌄</span>
+                    <span className={`DatasetChevron${expanded ? ' expanded' : ''}`} aria-hidden='true' />
                 </button>
                 <button
                     type='button'
                     className='DeleteButton'
                     aria-label={`${zh ? '删除' : 'Delete'} ${datasetName}`}
                     onClick={(event) => deleteDataset(dataset, event)}
-                >×</button>
+                />
             </div>
             {expanded && renderDatasetDetails(dataset, detailsId)}
         </article>;
@@ -560,26 +796,317 @@ export const DataCenterPopup: React.FC<IProps> = ({
         </div>}
         {!datasetsError && !datasetsLoading && datasets.length === 0 && <div className='EmptyState'>
             <strong>{zh ? '暂无持久化数据' : 'No persistent data'}</strong>
-            <span>{zh ? '在“临时数据”中选择一个批次并同步到服务器。' : 'Choose a temporary batch and sync it to the server.'}</span>
+            <span>{zh ? '在“临时数据”中选择一个批次并同步至服务器。' : 'Choose a temporary batch and sync it to the server.'}</span>
         </div>}
         <div className='DatasetList'>
             {datasets.map(renderDatasetItem)}
         </div>
     </section>;
 
+    const modelTypeLabel = (type: ModelAssetType): string => {
+        const labels: Record<ModelAssetType, [string, string]> = {
+            custom: ['自定义模型', 'Custom'],
+            detection: ['检测模型', 'Detection'],
+            segmentation: ['分割模型', 'Segmentation'],
+        };
+        return labels[type][zh ? 0 : 1];
+    };
+
+    const modelSourceLabel = (source: ModelAsset['source']): string => {
+        const labels: Record<NonNullable<ModelAsset['source']>, [string, string]> = {
+            managed: ['资源目录', 'Managed storage'],
+            cache: ['内置缓存', 'Built-in cache'],
+            legacy: ['兼容目录', 'Legacy storage'],
+            local: ['本地模型', 'Local model'],
+            server: ['205 资产目录', '205 asset catalog'],
+        };
+        return labels[source || 'local'][zh ? 0 : 1];
+    };
+
+    const currentModelSlot = (model: ModelAsset): 'detection' | 'segmentation' | null => {
+        if (model.id && modelRuntime.model_asset_id === model.id) return 'detection';
+        if (model.id && modelRuntime.segmentation_model_asset_id === model.id) return 'segmentation';
+        const name = comparableModelName(model.name);
+        if (comparableModelName(modelRuntime.model) === name) return 'detection';
+        if (comparableModelName(modelRuntime.segmentation_model) === name) return 'segmentation';
+        return null;
+    };
+
+    const renderModelItem = (
+        model: ModelAsset,
+        context: 'temporary' | 'persistent' = 'persistent',
+    ) => {
+        const currentSlot = currentModelSlot(model);
+        const identifier = model.id || model.name;
+        const busy = modelActionName === identifier;
+        const syncBusy = modelSyncName === identifier;
+        const persisted = model.source === 'managed' || model.source === 'server';
+        const format = modelAssetFormat(model);
+        const displayName = modelAssetDisplayName(model);
+        const callable = model.callable !== false;
+        return <article className={`ModelResourceCard${currentSlot ? ' active' : ''}`} key={identifier}>
+            <div className='ModelResourceIdentity'>
+                <div className='ModelResourceTitle'>
+                    <strong title={displayName}>{displayName}</strong>
+                    <span className={`ModelTypeBadge ${model.type}`}>{modelTypeLabel(model.type)}</span>
+                    {currentSlot && <span className='ModelLoadedBadge'>
+                        {currentSlot === 'segmentation'
+                            ? (zh ? '分割槽正在使用' : 'Active in segmentation')
+                            : (zh ? '检测槽正在使用' : 'Active in detection')}
+                    </span>}
+                </div>
+                <div className='ModelResourceMeta'>
+                    <span>{zh ? '模型文件版本' : 'Model-file version'}</span>
+                    <span>{format}</span>
+                    <span>{formatBytes(model.size_bytes)}</span>
+                    <span>{modelSourceLabel(model.source)}</span>
+                    {model.project && <span>{model.project}</span>}
+                    {model.category && <span>{model.category}</span>}
+                </div>
+                {model.path && <div className='ModelResourcePath' title={model.path}>{model.path}</div>}
+                <div className='ModelResourceTime'>
+                    {zh ? '更新时间' : 'Updated'}：{formatDatasetTime(model.modified_at, zh)}
+                </div>
+            </div>
+            <div className='ModelResourceActions'>
+                <button
+                    type='button'
+                    className='PrimaryAction'
+                    disabled={!callable || busy || !!currentSlot}
+                    onClick={() => void useModel(model)}
+                >
+                    {busy
+                        ? (zh ? '加载中…' : 'Loading…')
+                        : !callable
+                            ? (zh ? '仅归档' : 'Archive only')
+                            : currentSlot
+                                ? (zh ? '已使用' : 'In use')
+                                : (zh ? '使用' : 'Use')}
+                </button>
+                {context === 'temporary' && !persisted && <button
+                    type='button'
+                    className='SyncAction'
+                    disabled={syncBusy}
+                    onClick={() => void syncModelToServer(model)}
+                >
+                    {syncBusy
+                        ? (zh ? '同步中…' : 'Syncing…')
+                        : (zh ? '同步至服务器' : 'Sync to server')}
+                </button>}
+            </div>
+        </article>;
+    };
+
+    const renderTemporaryModels = () => <section
+        className='DataTierPanel'
+        aria-label={zh ? '临时模型' : 'Temporary models'}
+    >
+        <div className='TierExplanation models temporary-models'>
+            <div>
+                <strong>{zh ? '临时模型（运行内存）' : 'Temporary runtime models'}</strong>
+                <span>{zh
+                    ? `${runtimeModels.length} 个模型正在运行。切换模型会更新运行槽，不会删除服务器上的模型文件。`
+                    : `${runtimeModels.length} models are running. Switching updates the runtime slots without deleting server model files.`}</span>
+            </div>
+            <button type='button' onClick={refreshModels} disabled={modelsLoading}>
+                {modelsLoading ? (zh ? '刷新中…' : 'Refreshing…') : (zh ? '刷新' : 'Refresh')}
+            </button>
+        </div>
+        {modelActionError && <div className='ModelActionError' role='alert'>{modelActionError}</div>}
+        {modelsError && <div className='EmptyState error'>
+            <strong>{modelsError}</strong>
+            <span>{zh ? '请确认核心引擎的模型服务可用。' : 'Check that the core-engine model service is available.'}</span>
+        </div>}
+        {!modelsError && !modelsLoading && runtimeModels.length === 0 && <div className='EmptyState'>
+            <strong>{zh ? '暂无临时模型' : 'No temporary models'}</strong>
+            <span>{zh
+                ? '前往“持久化模型”选择一个模型并点击“使用”。'
+                : 'Open Persistent models, choose a model, and select Use.'}</span>
+        </div>}
+        <div className='ModelResourceList RuntimeModelList'>
+            {runtimeModels.map(model => renderModelItem(model, 'temporary'))}
+        </div>
+    </section>;
+
+    const renderPersistentModels = () => {
+        const normalizedQuery = modelQuery.trim().toLowerCase();
+        const modelTime = (model: ModelAsset): number =>
+            model.modified_at ? new Date(model.modified_at).getTime() || 0 : 0;
+        const modelNameCompare = (left: ModelAsset, right: ModelAsset): number =>
+            modelAssetDisplayName(left).localeCompare(
+                modelAssetDisplayName(right),
+                undefined,
+                {numeric: true, sensitivity: 'base'},
+            );
+        const relevanceScore = (model: ModelAsset): number =>
+            (currentModelSlot(model) ? 4 : 0)
+            + (model.callable !== false ? 2 : 0)
+            + (model.source === 'managed' ? 1 : 0);
+        const orderedModels = persistentModels.filter(model => {
+            if (modelFormat !== 'all' && modelAssetFormat(model) !== modelFormat) return false;
+            return !normalizedQuery || [
+                model.name,
+                model.project,
+                model.category,
+                model.path,
+                modelAssetFormat(model),
+            ].some(value => value?.toLowerCase().includes(normalizedQuery));
+        }).sort((left, right) => {
+            if (modelSort === 'recent') {
+                return modelTime(right) - modelTime(left) || modelNameCompare(left, right);
+            }
+            if (modelSort === 'name') return modelNameCompare(left, right);
+            if (modelSort === 'size') {
+                return (right.size_bytes || 0) - (left.size_bytes || 0)
+                    || modelNameCompare(left, right);
+            }
+            return relevanceScore(right) - relevanceScore(left)
+                || modelTime(right) - modelTime(left)
+                || modelNameCompare(left, right);
+        });
+        return <section className='DataTierPanel' aria-label={zh ? '持久化模型' : 'Persistent models'}>
+            <div className='TierExplanation models'>
+                <div>
+                    <strong>{zh ? '持久化模型资源' : 'Persistent model resources'}</strong>
+                    <span>{zh
+                        ? `${persistentModels.length} 个持久化版本 · ${persistentModels.filter(model => model.callable !== false).length} 个可直接调用 · ${runtimeModels.length} 个正在运行。`
+                        : `${persistentModels.length} persistent versions · ${persistentModels.filter(model => model.callable !== false).length} directly callable · ${runtimeModels.length} running.`}</span>
+                </div>
+                <div className='TierHeaderActions'>
+                    <button type='button' onClick={refreshModels} disabled={modelsLoading}>
+                        {modelsLoading ? (zh ? '刷新中…' : 'Refreshing…') : (zh ? '刷新' : 'Refresh')}
+                    </button>
+                </div>
+            </div>
+            {modelActionError && <div className='ModelActionError' role='alert'>{modelActionError}</div>}
+            <div className='ModelCatalogFilter'>
+                <label className='ModelCatalogSelect'>
+                    <span>{zh ? '排序' : 'Sort'}</span>
+                    <select
+                        value={modelSort}
+                        aria-label={zh ? '模型排序' : 'Model sort'}
+                        onChange={event => setModelSort(event.target.value as ModelCatalogSort)}
+                    >
+                        <option value='relevance'>{zh ? '综合' : 'Relevance'}</option>
+                        <option value='recent'>{zh ? '最近上传' : 'Recently uploaded'}</option>
+                        <option value='name'>{zh ? '名称' : 'Name'}</option>
+                        <option value='size'>{zh ? '文件大小' : 'File size'}</option>
+                    </select>
+                </label>
+                <label className='ModelCatalogSelect'>
+                    <span>{zh ? '类型' : 'Type'}</span>
+                    <select
+                        value={modelFormat}
+                        aria-label={zh ? '模型类型' : 'Model type'}
+                        onChange={event => setModelFormat(event.target.value)}
+                    >
+                        <option value='all'>{zh ? '全部类型' : 'All types'}</option>
+                        {persistentModelFormats.map(format => (
+                            <option value={format} key={format}>{format}</option>
+                        ))}
+                    </select>
+                </label>
+                <label className='ModelCatalogSearch'>
+                    <span>{zh ? '筛选模型资产' : 'Filter model assets'}</span>
+                    <input
+                        type='search'
+                        value={modelQuery}
+                        onChange={event => setModelQuery(event.target.value)}
+                        placeholder={zh ? '名称、项目、分类或路径' : 'Name, project, category, or path'}
+                    />
+                </label>
+                <small>{zh ? `显示 ${orderedModels.length} / ${persistentModels.length}` : `Showing ${orderedModels.length} / ${persistentModels.length}`}</small>
+            </div>
+            {modelsError && <div className='EmptyState error'>
+                <strong>{modelsError}</strong>
+                <span>{zh ? '请确认核心引擎的模型服务可用。' : 'Check that the core-engine model service is available.'}</span>
+            </div>}
+            {!modelsError && !modelsLoading && persistentModels.length === 0 && <div className='EmptyState'>
+                <strong>{zh ? '暂无模型资源' : 'No model resources'}</strong>
+                <span>{zh
+                    ? '可在“临时模型”中同步至服务器。'
+                    : 'Sync a temporary model to the server.'}</span>
+            </div>}
+            <div className='ModelResourceList'>
+                {orderedModels.map(renderModelItem)}
+            </div>
+        </section>;
+    };
+
+    const renderModuleSelector = () => <div
+        className='ResourceModuleTabs'
+        role='tablist'
+        aria-label={zh ? '资源类型' : 'Resource type'}
+    >
+        <button
+            id='resource-module-data'
+            type='button'
+            role='tab'
+            aria-label={zh ? '数据' : 'Data'}
+            aria-controls='resource-module-panel'
+            aria-selected={activeModule === 'data'}
+            tabIndex={activeModule === 'data' ? 0 : -1}
+            className={activeModule === 'data' ? 'active data' : 'data'}
+            onClick={() => {
+                setActiveModule('data');
+                setActiveTier('temporary');
+            }}
+            onKeyDown={handleModuleKeyDown}
+        >
+            <span className='ResourceModuleCopy'>
+                <strong>{zh ? '数据' : 'Data'}</strong>
+                <small>{zh ? '工作副本与版本快照' : 'Work copies and version snapshots'}</small>
+            </span>
+            <span className='ResourceModuleStatus'>
+                <i aria-hidden='true' />
+                {temporaryItems.length + datasets.length}
+            </span>
+        </button>
+        <button
+            id='resource-module-models'
+            type='button'
+            role='tab'
+            aria-label={zh ? '模型' : 'Models'}
+            aria-controls='resource-module-panel'
+            aria-selected={activeModule === 'models'}
+            tabIndex={activeModule === 'models' ? 0 : -1}
+            className={activeModule === 'models' ? 'active models' : 'models'}
+            onClick={() => {
+                setActiveModule('models');
+                setActiveTier('temporary');
+            }}
+            onKeyDown={handleModuleKeyDown}
+        >
+            <span className='ResourceModuleCopy'>
+                <strong>{zh ? '模型' : 'Models'}</strong>
+                <small>{zh ? '运行模型与文件版本' : 'Runtime models and file versions'}</small>
+            </span>
+            <span className='ResourceModuleStatus'>
+                <i aria-hidden='true' />
+                {persistentModels.length}
+            </span>
+        </button>
+    </div>;
+
     const renderTierSidebar = () => <aside className='DataTierSidebar'>
-        <div className='DataTierNavTitle'>{zh ? '数据来源' : 'Data source'}</div>
+        <div className='DataTierNavTitle'>{zh ? '存储状态' : 'Storage state'}</div>
         <div
             className='DataTierTabs'
             role='tablist'
-            aria-label={zh ? '数据存储层级' : 'Data storage tier'}
+            aria-label={activeModule === 'data'
+                ? (zh ? '数据存储层级' : 'Data storage tiers')
+                : (zh ? '模型存储层级' : 'Model storage tiers')}
             aria-orientation='vertical'
         >
             <button
-                id='data-tier-temporary'
+                id={`resource-tier-${activeModule}-temporary`}
                 type='button'
                 role='tab'
-                aria-label={`${zh ? '临时数据' : 'Temporary data'} ${temporaryItems.length}`}
+                aria-label={`${activeModule === 'data'
+                    ? (zh ? '临时数据' : 'Temporary data')
+                    : (zh ? '临时模型' : 'Temporary models')} ${
+                    activeModule === 'data' ? temporaryItems.length : runtimeModels.length
+                }`}
                 aria-controls='data-tier-panel'
                 aria-selected={activeTier === 'temporary'}
                 tabIndex={activeTier === 'temporary' ? 0 : -1}
@@ -588,16 +1115,24 @@ export const DataCenterPopup: React.FC<IProps> = ({
                 onKeyDown={handleTierKeyDown}
             >
                 <span className='DataTierTabCopy'>
-                    <span>{zh ? '临时数据' : 'Temporary data'}</span>
-                    <small>{zh ? '当前前端' : 'Frontend'}</small>
+                    <span>{activeModule === 'data'
+                        ? (zh ? '临时数据' : 'Temporary data')
+                        : (zh ? '临时模型' : 'Temporary models')}</span>
+                    <small>{activeModule === 'data'
+                        ? (zh ? '浏览器工作副本' : 'Browser work copies')
+                        : (zh ? '运行内存' : 'Runtime memory')}</small>
                 </span>
-                <strong>{temporaryItems.length}</strong>
+                <strong>{activeModule === 'data' ? temporaryItems.length : runtimeModels.length}</strong>
             </button>
             <button
-                id='data-tier-persistent'
+                id={`resource-tier-${activeModule}-persistent`}
                 type='button'
                 role='tab'
-                aria-label={`${zh ? '持久化数据' : 'Persistent data'} ${datasets.length}`}
+                aria-label={`${activeModule === 'data'
+                    ? (zh ? '持久化数据' : 'Persistent data')
+                    : (zh ? '持久化模型' : 'Persistent models')} ${
+                    activeModule === 'data' ? datasets.length : persistentModels.length
+                }`}
                 aria-controls='data-tier-panel'
                 aria-selected={activeTier === 'persistent'}
                 tabIndex={activeTier === 'persistent' ? 0 : -1}
@@ -606,28 +1141,46 @@ export const DataCenterPopup: React.FC<IProps> = ({
                 onKeyDown={handleTierKeyDown}
             >
                 <span className='DataTierTabCopy'>
-                    <span>{zh ? '持久化数据' : 'Persistent data'}</span>
-                    <small>{zh ? '核心后端' : 'Backend'}</small>
+                    <span>{activeModule === 'data'
+                        ? (zh ? '持久化数据' : 'Persistent data')
+                        : (zh ? '持久化模型' : 'Persistent models')}</span>
+                    <small>{activeModule === 'data'
+                        ? (zh ? '服务器数据集' : 'Server datasets')
+                        : (zh ? '服务器模型文件' : 'Server model files')}</small>
                 </span>
-                <strong>{datasets.length}</strong>
+                <strong>{activeModule === 'data' ? datasets.length : persistentModels.length}</strong>
             </button>
         </div>
         <p className='DataTierSidebarHint'>
-            {zh ? '选择左侧来源，在右侧检查各批次状态。' : 'Choose a source to inspect batch status on the right.'}
+            {activeModule === 'data'
+                ? (zh
+                    ? '临时数据可继续编辑，持久化数据用于复用、追溯和下游任务。'
+                    : 'Temporary data remains editable; persistent data supports reuse, traceability, and downstream tasks.')
+                : (zh
+                    ? '临时模型代表当前运行状态，持久化模型代表可调用的文件版本。'
+                    : 'Temporary models show runtime state; persistent models are callable file versions.')}
         </p>
     </aside>;
 
     const renderContent = () => (
         <div className='DataCenterPopupContent'>
-            <div className='DataWorkspace'>
+            {renderModuleSelector()}
+            <div
+                id='resource-module-panel'
+                className='DataWorkspace'
+                role='tabpanel'
+                aria-labelledby={`resource-module-${activeModule}`}
+            >
                 {renderTierSidebar()}
                 <div
                     id='data-tier-panel'
                     className='DataTierMain'
-                    role='tabpanel'
-                    aria-labelledby={`data-tier-${activeTier}`}
+                    role='region'
+                    aria-labelledby={`resource-tier-${activeModule}-${activeTier}`}
                 >
-                    {activeTier === 'temporary' ? renderTemporaryData() : renderPersistentData()}
+                    {activeModule === 'data'
+                        ? (activeTier === 'temporary' ? renderTemporaryData() : renderPersistentData())
+                        : (activeTier === 'temporary' ? renderTemporaryModels() : renderPersistentModels())}
                 </div>
             </div>
         </div>
@@ -635,7 +1188,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
 
     return (
         <GenericYesNoPopup
-            title={zh ? '数据管理' : 'Data Management'}
+            title={zh ? '资源中心' : 'Resource Center'}
             renderContent={renderContent}
             skipAcceptButton
             rejectLabel={zh ? '关闭' : 'Close'}

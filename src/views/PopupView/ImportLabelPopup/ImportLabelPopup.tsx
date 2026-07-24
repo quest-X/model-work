@@ -34,6 +34,8 @@ import {DataBatchSyncService} from '../../../services/DataBatchSyncService';
 import {ImageRepository} from '../../../logic/imageRepository/ImageRepository';
 import {QueueActions} from '../../../logic/actions/QueueActions';
 import {DatasetEditSelection} from '../../../services/DatasetActionSelection';
+import {updateProjectData} from '../../../store/general/actionCreators';
+import {ProjectData} from '../../../store/general/types';
 
 interface IProps {
     activeLabelType: LabelType;
@@ -42,7 +44,9 @@ interface IProps {
     updateActiveLabelTypeAction: (activeLabelType: LabelType) => any;
     addQueueItemsAction: (items: QueueItem[]) => any;
     updateQueueItemAction: (itemId: string, updates: Partial<QueueItem>) => any;
+    updateProjectDataAction: (projectData: ProjectData) => any;
     queueItems: QueueItem[];
+    projectData: ProjectData;
     language: Language;
 }
 
@@ -54,6 +58,8 @@ const ImportLabelPopup: React.FC<IProps> = ({
     addQueueItemsAction,
     updateQueueItemAction,
     queueItems,
+    projectData,
+    updateProjectDataAction,
     language
 }) => {
     const currentTexts = LanguageConfig[language];
@@ -495,6 +501,13 @@ const ImportLabelPopup: React.FC<IProps> = ({
                             syncedAt: Date.now(),
                         } : {}),
                     };
+                if (editTarget) {
+                    const restoredProjectName = (editTarget.projectName || editTarget.name).trim();
+                    updateProjectDataAction({
+                        ...projectData,
+                        name: restoredProjectName || editTarget.name,
+                    });
+                }
                 // Re-opening the same active server dataset intentionally replaces
                 // its stale workspace snapshot. Prevent QueueActions from saving the
                 // old active data back over the freshly imported cache first.
@@ -653,11 +666,13 @@ const mapDispatchToProps = {
     updateActiveLabelTypeAction: updateActiveLabelType,
     addQueueItemsAction: addQueueItems,
     updateQueueItemAction: updateQueueItem,
+    updateProjectDataAction: updateProjectData,
 };
 
 const mapStateToProps = (state: AppState) => ({
     activeLabelType: state.labels.activeLabelType,
     language: state.general.language,
+    projectData: state.general.projectData,
     queueItems: state.queue.items,
 });
 

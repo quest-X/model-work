@@ -108,7 +108,7 @@ export class DataBatchSyncService {
 
         const files = filesForItem(item);
         if (files.length === 0) {
-            return Promise.reject(new Error('Only image batches can be synchronized to Data Management'));
+            return Promise.reject(new Error('Only image batches can be synchronized to Resource Center'));
         }
 
         const promise = this.performSync(item, files, imagesData, labels)
@@ -153,7 +153,7 @@ export class DataBatchSyncService {
             });
             if (!response.ok) throw new Error(await readError(response));
             const result = await response.json() as BatchUploadResponse;
-            if (!result.dataset_id) throw new Error('Data Management returned no dataset id');
+            if (!result.dataset_id) throw new Error('Resource Center returned no dataset id');
             store.dispatch(updateQueueItem(item.id, {
                 dataSyncStatus: QueueDataSyncStatus.SYNCED,
                 datasetId: result.dataset_id,

@@ -504,7 +504,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
         languageToggle: '中文',
         
         // EmptyProjectView
-        welcomeTitle: '欢迎使用 OpenSight Platform',
+        welcomeTitle: '欢迎使用 opensight Platform',
         welcomeDescription: '点击上传或拖拽到此处释放',
         dragActiveMessage: '释放文件以上传图像',
         uploadHints: {
@@ -796,12 +796,12 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
             error: '错误',
         },
         queueDataSync: {
-            local: '待同步到数据管理',
+            local: '待同步到资源中心',
             syncing: '正在同步数据批次',
-            synced: '数据管理 · v{revision}',
+            synced: '资源中心 · v{revision}',
             dirty: '标注有更新，待同步',
             error: '数据同步失败',
-            action: '同步到数据管理',
+            action: '同步到资源中心',
         },
         queueEmpty: '队列为空',
         queueEmptyHint: '点击上传或拖拽到此处释放',
@@ -853,7 +853,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
             callModels: '推理设置',
             providedServices: '提供服务',
             modelEngines: '引擎管理',
-            dataCenter: '数据管理',
+            dataCenter: '资源中心',
             trainingTask: '训练设置',
             taskCenter: '任务中心',
             vectorDb: '向量数据库',
@@ -920,7 +920,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
         },
 
         // Common
-        makeSense: 'OpenSight Platform',
+        makeSense: 'opensight Platform',
         ok: '确定',
         cancel: '取消',
         delete: '删除',
@@ -994,7 +994,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
         languageToggle: 'English',
         
         // EmptyProjectView
-        welcomeTitle: 'Welcome to OpenSight Platform',
+        welcomeTitle: 'Welcome to opensight Platform',
         welcomeDescription: 'Click to upload or drag here to release',
         dragActiveMessage: 'Drop files to upload images',
         uploadHints: {
@@ -1286,12 +1286,12 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
             error: 'Error',
         },
         queueDataSync: {
-            local: 'Waiting for Data Management sync',
+            local: 'Waiting for Resource Center sync',
             syncing: 'Syncing data batch',
-            synced: 'Data Management · v{revision}',
+            synced: 'Resource Center · v{revision}',
             dirty: 'Annotations changed; sync required',
             error: 'Data sync failed',
-            action: 'Sync to Data Management',
+            action: 'Sync to Resource Center',
         },
         queueEmpty: 'Queue is empty',
         queueEmptyHint: 'Click to upload or drag here to release',
@@ -1343,7 +1343,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
             callModels: 'Inference Settings',
             providedServices: 'Provided Services',
             modelEngines: 'Engine Management',
-            dataCenter: 'Data Management',
+            dataCenter: 'Resource Center',
             trainingTask: 'Training Settings',
             taskCenter: 'Task Center',
             vectorDb: 'Vector Database',
@@ -1410,7 +1410,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
         },
 
         // Common
-        makeSense: 'OpenSight Platform',
+        makeSense: 'opensight Platform',
         ok: 'OK',
         cancel: 'Cancel',
         delete: 'Delete',

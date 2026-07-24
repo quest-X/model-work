@@ -45,6 +45,7 @@ import {submitNewNotification, updateNotificationById, deleteNotificationById} f
 import {NotificationUtil} from '../../../utils/NotificationUtil';
 import {PendingImportFiles} from '../../../utils/PendingImportFiles';
 import {DataBatchSyncService} from '../../../services/DataBatchSyncService';
+import {getDatasetContentSignature} from '../../../services/DatasetContentSignature';
 // import {inferenceEventEmitter, InferenceResultsEvent} from '../../../logic/actions/AISegmentationActions';
 
 interface IProps {
@@ -104,7 +105,7 @@ const EditorContainer: React.FC<IProps> = (
     const [taskPanelPinned, setTaskPanelPinned] = useState(false);
     const taskButtonRef = useRef<HTMLDivElement>(null);
     const taskClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const previousImagesDataRef = useRef<ImageData[]>(imagesData);
+    const previousDatasetSignatureRef = useRef<string>(getDatasetContentSignature(imagesData));
     const previousActiveQueueItemIdRef = useRef<string | null>(activeQueueItemId);
 
     const handleTaskButtonClick = useCallback(() => {
@@ -138,11 +139,12 @@ const EditorContainer: React.FC<IProps> = (
     useEffect(() => {
         const activeItem = queueItems.find(item => item.id === activeQueueItemId);
         const sameBatch = previousActiveQueueItemIdRef.current === activeQueueItemId;
-        const annotationsChanged = previousImagesDataRef.current !== imagesData;
+        const currentSignature = getDatasetContentSignature(imagesData);
+        const annotationsChanged = previousDatasetSignatureRef.current !== currentSignature;
         if (sameBatch && annotationsChanged && activeItem?.dataSyncStatus === QueueDataSyncStatus.SYNCED) {
             updateQueueItemAction(activeItem.id, {dataSyncStatus: QueueDataSyncStatus.DIRTY});
         }
-        previousImagesDataRef.current = imagesData;
+        previousDatasetSignatureRef.current = currentSignature;
         previousActiveQueueItemIdRef.current = activeQueueItemId;
     }, [activeQueueItemId, imagesData, queueItems, updateQueueItemAction]);
 

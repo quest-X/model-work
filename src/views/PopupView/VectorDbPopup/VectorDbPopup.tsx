@@ -1,4 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {useDropzone} from 'react-dropzone';
 import {connect} from 'react-redux';
 import {GenericYesNoPopup} from '../GenericYesNoPopup/GenericYesNoPopup';
@@ -65,6 +66,7 @@ interface CollectionInfo {
     scene_name?: string;
     world_id?: string | null;
     version: number;
+    data_version?: number;
     active: boolean;
     index_type: string;
     index_params: Record<string, unknown>;
@@ -98,6 +100,7 @@ interface SceneGroup {
 interface IngestJob {
     job_id: string;
     state: string;
+    data_version?: number | null;
     collection: string;
     granularity: Granularity;
     mode?: 'objects' | 'images';
@@ -119,6 +122,33 @@ interface IngestJob {
     finished_at?: string | null;
 }
 
+interface IngestJobImage {
+    index: number;
+    filename: string;
+}
+
+interface IngestJobImagePage {
+    status: string;
+    job_id: string;
+    total: number;
+    offset: number;
+    limit: number;
+    images: IngestJobImage[];
+}
+
+interface JobImageState {
+    images: IngestJobImage[];
+    total: number;
+    loading: boolean;
+    error: string | null;
+}
+
+interface ImagePreview {
+    jobId: string;
+    index: number;
+    filename: string;
+}
+
 interface DatasetSummary {
     id: string;
     name: string;
@@ -130,14 +160,15 @@ interface IProps {
 }
 
 const TERMINAL_JOB_STATES = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
+const HISTORY_IMAGE_PAGE_SIZE = 12;
 
 const JOB_STATE_LABELS: Record<string, [string, string]> = {
-    completed: ['入库完成', 'Ingest completed'],
-    failed: ['入库失败', 'Ingest failed'],
-    cancelled: ['已取消', 'Cancelled'],
-    interrupted: ['任务已中断', 'Ingest interrupted'],
-    running: ['正在入库', 'Ingesting'],
-    queued: ['等待入库', 'Queued'],
+    completed: ['版本更新', 'Version updated'],
+    failed: ['版本更新失败', 'Version update failed'],
+    cancelled: ['版本更新已取消', 'Version update cancelled'],
+    interrupted: ['版本更新中断', 'Version update interrupted'],
+    running: ['正在更新版本', 'Updating version'],
+    queued: ['等待版本更新', 'Version update queued'],
 };
 
 const collectionTargetId = (collection: CollectionInfo) =>
@@ -162,6 +193,9 @@ const normalizeCollection = (collection: CollectionInfo): CollectionInfo => {
         granularity: collectionGranularity(collection),
         schema_version: collection.schema_version || 1,
         version: collection.version || 1,
+        data_version: typeof collection.data_version === 'number' && Number.isFinite(collection.data_version)
+            ? Math.max(0, Math.floor(collection.data_version))
+            : 0,
         search_count: typeof collection.search_count === 'number' && Number.isFinite(collection.search_count)
             ? Math.max(0, collection.search_count)
             : 0,
@@ -223,6 +257,13 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
     const [jobsLoading, setJobsLoading] = useState(true);
     const [jobsError, setJobsError] = useState<string | null>(null);
     const [ingestError, setIngestError] = useState<string | null>(null);
+    const [deleteJobConfirmId, setDeleteJobConfirmId] = useState<string | null>(null);
+    const [deleteJobConfirmationText, setDeleteJobConfirmationText] = useState('');
+    const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
+    const [jobDeleteError, setJobDeleteError] = useState<string | null>(null);
+    const [expandedJobIds, setExpandedJobIds] = useState<Set<string>>(() => new Set());
+    const [jobImages, setJobImages] = useState<Record<string, JobImageState>>({});
+    const [imagePreview, setImagePreview] = useState<ImagePreview | null>(null);
 
     const selected = collections.find(collection => collection.name === selectedName) || null;
     const hierarchy = useMemo<SceneGroup[]>(() => {
@@ -281,6 +322,14 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         () => collections.reduce((total, collection) => total + collection.count, 0),
         [collections],
     );
+    const totalDataVersions = useMemo(
+        () => collections.reduce((total, collection) => total + (collection.data_version || 0), 0),
+        [collections],
+    );
+    const dataVersionLabel = (collection: CollectionInfo): string =>
+        (collection.data_version || 0) > 0
+            ? `v${collection.data_version}`
+            : t('未入库', 'Not ingested');
     const storeBad = !!status && ['missing_dep', 'error'].includes(status.vector_store.state);
     const embedderBad = !!status && ['missing_dep', 'error'].includes(status.embedder.state);
     const embedderReady = status?.embedder.state === 'ready';
@@ -328,7 +377,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             const data = await readResponse<{datasets?: DatasetSummary[]}>(response);
             setDatasets(Array.isArray(data.datasets) ? data.datasets : []);
         } catch (cause) {
-            setDatasetsError(cause instanceof Error ? cause.message : t('数据管理不可用', 'Data Management unavailable'));
+            setDatasetsError(cause instanceof Error ? cause.message : t('资源中心不可用', 'Resource Center unavailable'));
         } finally {
             setDatasetsLoading(false);
         }
@@ -351,6 +400,84 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             setJobsLoading(false);
         }
     }, [baseUrl, t]);
+
+    const loadJobImages = useCallback(async (jobId: string, offset = 0) => {
+        setJobImages(current => ({
+            ...current,
+            [jobId]: {
+                images: offset > 0 ? current[jobId]?.images || [] : [],
+                total: current[jobId]?.total || 0,
+                loading: true,
+                error: null,
+            },
+        }));
+        try {
+            const query = new URLSearchParams({
+                offset: String(offset),
+                limit: String(HISTORY_IMAGE_PAGE_SIZE),
+            });
+            const response = await fetch(
+                `${baseUrl}/jobs/${encodeURIComponent(jobId)}/images?${query.toString()}`,
+            );
+            const page = await readResponse<IngestJobImagePage>(response);
+            setJobImages(current => {
+                const previous = offset > 0 ? current[jobId]?.images || [] : [];
+                const existingIndexes = new Set(previous.map(image => image.index));
+                return {
+                    ...current,
+                    [jobId]: {
+                        images: [
+                            ...previous,
+                            ...page.images.filter(image => !existingIndexes.has(image.index)),
+                        ],
+                        total: page.total,
+                        loading: false,
+                        error: null,
+                    },
+                };
+            });
+        } catch (cause) {
+            setJobImages(current => ({
+                ...current,
+                [jobId]: {
+                    images: offset > 0 ? current[jobId]?.images || [] : [],
+                    total: current[jobId]?.total || 0,
+                    loading: false,
+                    error: cause instanceof Error
+                        ? cause.message
+                        : t('入库图片加载失败', 'Failed to load ingest images'),
+                },
+            }));
+        }
+    }, [baseUrl, t]);
+
+    const toggleJobImages = (jobId: string) => {
+        const opening = !expandedJobIds.has(jobId);
+        setExpandedJobIds(current => {
+            const next = new Set(current);
+            if (next.has(jobId)) next.delete(jobId);
+            else next.add(jobId);
+            return next;
+        });
+        if (opening && !jobImages[jobId]) {
+            void loadJobImages(jobId);
+        }
+    };
+
+    const moveImagePreview = useCallback((step: -1 | 1) => {
+        setImagePreview(current => {
+            if (!current) return current;
+            const images = jobImages[current.jobId]?.images || [];
+            const currentPosition = images.findIndex(image => image.index === current.index);
+            const nextImage = images[currentPosition + step];
+            if (!nextImage) return current;
+            return {
+                jobId: current.jobId,
+                index: nextImage.index,
+                filename: nextImage.filename,
+            };
+        });
+    }, [jobImages]);
 
     useEffect(() => {
         refreshStatus();
@@ -398,7 +525,39 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         setIngestError(null);
         setDeleteConfirm(false);
         setDeleteError(null);
+        setDeleteJobConfirmId(null);
+        setDeleteJobConfirmationText('');
+        setJobDeleteError(null);
     }, [selectedName]);
+
+    useEffect(() => {
+        if (!imagePreview) return undefined;
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setImagePreview(null);
+            if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                moveImagePreview(-1);
+            }
+            if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                moveImagePreview(1);
+            }
+        };
+        window.addEventListener('keydown', closeOnEscape);
+        return () => window.removeEventListener('keydown', closeOnEscape);
+    }, [imagePreview, moveImagePreview]);
+
+    useEffect(() => {
+        if (!deleteJobConfirmId || deletingJobId) return undefined;
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') return;
+            setDeleteJobConfirmId(null);
+            setDeleteJobConfirmationText('');
+            setJobDeleteError(null);
+        };
+        window.addEventListener('keydown', closeOnEscape);
+        return () => window.removeEventListener('keydown', closeOnEscape);
+    }, [deleteJobConfirmId, deletingJobId]);
 
     const warmup = async () => {
         setWarmingUp(true);
@@ -478,7 +637,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             await refreshCollections();
             setSelectedName(created.name);
         } catch (cause) {
-            setIngestError(cause instanceof Error ? cause.message : t('创建版本失败', 'Failed to create version'));
+            setIngestError(cause instanceof Error ? cause.message : t('创建特征索引失败', 'Failed to create feature index'));
         } finally {
             setVersioning(false);
         }
@@ -495,7 +654,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             await readResponse(response);
             await refreshCollections();
         } catch (cause) {
-            setIngestError(cause instanceof Error ? cause.message : t('切换版本失败', 'Failed to activate version'));
+            setIngestError(cause instanceof Error ? cause.message : t('切换特征索引失败', 'Failed to activate feature index'));
         } finally {
             setVersioning(false);
         }
@@ -591,6 +750,39 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         }
     };
 
+    const deleteHistoryJob = async (jobId: string) => {
+        if (deletingJobId) return;
+        setDeletingJobId(jobId);
+        setJobDeleteError(null);
+        try {
+            const response = await fetch(
+                `${baseUrl}/jobs/${encodeURIComponent(jobId)}`,
+                {method: 'DELETE'},
+            );
+            await readResponse(response);
+            setJobs(current => current.filter(item => item.job_id !== jobId));
+            setJob(current => current?.job_id === jobId ? null : current);
+            setExpandedJobIds(current => {
+                const next = new Set(current);
+                next.delete(jobId);
+                return next;
+            });
+            setJobImages(current => {
+                const next = {...current};
+                delete next[jobId];
+                return next;
+            });
+            setDeleteJobConfirmId(null);
+            setDeleteJobConfirmationText('');
+        } catch (cause) {
+            setJobDeleteError(cause instanceof Error
+                ? cause.message
+                : t('版本记录删除失败', 'Failed to delete version record'));
+        } finally {
+            setDeletingJobId(null);
+        }
+    };
+
     const granularityLabel = (granularity: Granularity) => granularity === 'bbox'
         ? t('目标框', 'Bounding boxes')
         : t('整张图片', 'Whole images');
@@ -623,7 +815,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             className='SecondaryButton'
             disabled={versioning}
             onClick={activateVersion}
-        >{t('设为当前版本', 'Make active')}</button>;
+        >{t('设为当前索引', 'Make active index')}</button>;
     };
 
     const renderProfileWarning = (collection: CollectionInfo) => {
@@ -634,7 +826,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         );
         return <div className='ProfileWarning' role='alert'>
             <div>
-                <strong>{t('当前特征模型与这个版本不兼容', 'Current feature model is incompatible with this version')}</strong>
+                <strong>{t('当前特征模型与这个索引不兼容', 'Current feature model is incompatible with this index')}</strong>
                 <span>{collection.compatibility_reason}</span>
             </div>
             {compatibleSibling
@@ -644,7 +836,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                     onClick={() => setSelectedName(compatibleSibling.name)}
                 >{t(`切换到兼容的 v${compatibleSibling.version}`, `Open compatible v${compatibleSibling.version}`)}</button>
                 : <button type='button' className='PrimaryButton' disabled={versioning} onClick={createCurrentVersion}>
-                    {versioning ? t('创建中…', 'Creating…') : t('新建当前模型版本', 'Create current-model version')}
+                    {versioning ? t('创建中…', 'Creating…') : t('新建当前模型索引', 'Create current-model index')}
                 </button>}
         </div>;
     };
@@ -740,7 +932,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                     disabled={!newSceneName.trim() || !newTargetName.trim() || creating || !storeReady || storeBad || backendDown}
                     onClick={createTarget}
                 >
-                    {creating ? t('创建中…', 'Creating…') : t('创建目标及 v1', 'Create target and v1')}
+                    {creating ? t('创建中…', 'Creating…') : t('创建目标', 'Create target')}
                 </button>
             </div>
         </div>
@@ -774,7 +966,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             {!collectionsLoading && !collectionsError && collections.length === 0 && (
                 <div className='CollectionState empty'>
                     <strong>{t('还没有目标', 'No targets yet')}</strong>
-                    <span>{t('新建场景下的目标后，即可生成第一个向量版本。', 'Create a target in a scene to generate its first vector version.')}</span>
+                    <span>{t('新建目标并完成首次入库后，即生成数据版本 v1。', 'Create a target and complete its first ingest to generate data version v1.')}</span>
                 </div>
             )}
             <div className='HierarchyList' role='tree' aria-label={t('向量目录', 'Vector catalog')}>
@@ -802,7 +994,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                                                 onClick={() => setSelectedName(collection.name)}
                                             >
                                                 <span className={`VersionDot ${collection.active ? 'active' : ''}`}/>
-                                                <strong>v{collection.version}</strong>
+                                                <strong>{dataVersionLabel(collection)}</strong>
                                                 <span>{granularityLabel(collection.granularity)}</span>
                                                 <small>{collection.count.toLocaleString()}</small>
                                             </button>
@@ -837,7 +1029,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                 </select>
             </label>
             {datasetsError && <div className='InlineError' role='alert'>
-                {t('数据管理不可用；你仍可切换到本地上传。', 'Data Management is unavailable; local upload is still available.')}
+                {t('资源中心不可用；你仍可切换到本地上传。', 'Resource Center is unavailable; local upload is still available.')}
                 <button type='button' onClick={refreshDatasets}>{t('重试', 'Retry')}</button>
             </div>}
             {!datasetsLoading && !datasetsError && datasets.length === 0 && (
@@ -864,7 +1056,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             || activeJob || submittingIngest || noSource;
         return <div className='WorkspaceBody'>
             <div className='ImmutableModeNotice'>
-                <span>{t('本版本向量单位', 'Version vector unit')}</span>
+                <span>{t('目标向量单位', 'Target vector unit')}</span>
                 <strong>{granularityLabel(selected.granularity)}</strong>
                 <small>{t('创建时已固定，后续入库将始终使用该粒度。', 'Fixed at creation; every ingest uses this granularity.')}</small>
             </div>
@@ -877,7 +1069,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                         aria-selected={ingestSource === 'dataset'}
                         className={ingestSource === 'dataset' ? 'active' : ''}
                         onClick={() => { setIngestSource('dataset'); setPendingFiles([]); }}
-                    >{t('数据管理', 'Data Management')}</button>
+                    >{t('资源中心', 'Resource Center')}</button>
                     <button
                         type='button'
                         role='tab'
@@ -898,6 +1090,24 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
     const renderHistory = () => {
         if (!selected) return null;
         const selectedJobs = jobs.filter(item => item.collection === selected.name);
+        const completedJobs = selectedJobs
+            .filter(item => item.state === 'completed')
+            .sort((left, right) => {
+                const leftTime = new Date(left.finished_at || left.updated_at || left.started_at || 0).getTime();
+                const rightTime = new Date(right.finished_at || right.updated_at || right.started_at || 0).getTime();
+                if (leftTime !== rightTime) return leftTime - rightTime;
+                return left.job_id.localeCompare(right.job_id);
+            });
+        const firstVisibleVersion = Math.max(
+            1,
+            (selected.data_version || completedJobs.length) - completedJobs.length + 1,
+        );
+        const versionByJobId = new Map(
+            completedJobs.map((item, index) => [
+                item.job_id,
+                item.data_version || firstVisibleVersion + index,
+            ]),
+        );
         return <div className='WorkspaceBody IngestHistory'>
             <div className='HistoryHeading'>
                 <div>
@@ -911,52 +1121,283 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             </div>
             {jobsError && <div className='InlineError' role='alert'>{jobsError}</div>}
             {!jobsLoading && !jobsError && selectedJobs.length === 0 && (
-                <div className='HistoryEmpty'>{t('这个版本还没有入库记录。', 'This version has no ingest history yet.')}</div>
+                <div className='HistoryEmpty'>{t('这个目标还没有入库记录。', 'This target has no ingest history yet.')}</div>
             )}
             <div className='HistoryList'>
                 {selectedJobs.map(item => {
                     const label = JOB_STATE_LABELS[item.state] || JOB_STATE_LABELS.queued;
-                    const source = item.source === 'dataset'
-                        ? item.dataset_id || t('数据管理', 'Data Management')
+                    const dataVersion = versionByJobId.get(item.job_id);
+                    const fromDataset = Boolean(item.dataset_id)
+                        || item.source === 'dataset'
+                        || item.source.startsWith('dataset:');
+                    const source = fromDataset
+                        ? item.dataset_id || item.source.replace(/^dataset:/, '') || t('资源中心', 'Resource Center')
                         : t('本地上传', 'Local upload');
-                    return <article className={`HistoryRow ${item.state}`} key={item.job_id}>
-                        <div className='HistoryState'>
-                            <span className='HistoryDot'/>
-                            <div>
-                                <strong>{t(label[0], label[1])}</strong>
-                                <small title={item.job_id}>{item.job_id.slice(0, 12)}</small>
-                            </div>
+                    const expanded = expandedJobIds.has(item.job_id);
+                    const imageState = jobImages[item.job_id];
+                    const imageCount = imageState?.total ?? item.total_images;
+                    const panelId = `ingest-images-${item.job_id}`;
+                    const versionName = dataVersion ? `v${dataVersion}` : t('这条', 'this');
+                    const versionIdentifier = dataVersion ? `v${dataVersion}` : item.job_id.slice(0, 12);
+                    const deleteConfirmationToken = [
+                        selected.scene_name || selected.scene_id || 'default-scene',
+                        selected.target_name || selected.target_id || selected.display_name,
+                        versionIdentifier,
+                    ].join('/');
+                    const deleteDialogTitleId = `delete-history-title-${item.job_id}`;
+                    const deleteConfirmationMatches = deleteJobConfirmationText === deleteConfirmationToken;
+                    return <article className={`HistoryRow ${item.state}${expanded ? ' expanded' : ''}`} key={item.job_id}>
+                        <div className='HistoryRowHeader'>
+                            <button
+                                type='button'
+                                className='HistorySummary'
+                                aria-expanded={expanded}
+                                aria-controls={panelId}
+                                aria-label={`${t(label[0], label[1])}，${expanded
+                                    ? t('收起入库图片', 'Hide ingest images')
+                                    : t(`查看 ${imageCount} 张入库图片`, `View ${imageCount} ingest images`)}`}
+                                onClick={() => toggleJobImages(item.job_id)}
+                            >
+                                <span className='HistoryState'>
+                                {dataVersion
+                                    ? <span className='HistoryVersion'>v{dataVersion}</span>
+                                    : <span className='HistoryDot'/>}
+                                <span>
+                                    <strong>{t(label[0], label[1])}</strong>
+                                    <small title={item.job_id}>{item.job_id.slice(0, 12)}</small>
+                                </span>
+                                </span>
+                                <span className='HistoryMetric'>
+                                    <span>{t('数据来源', 'Source')}</span>
+                                <strong title={source}>{source}</strong>
+                                </span>
+                                <span className='HistoryMetric'>
+                                    <span>{t('处理结果', 'Processed')}</span>
+                                <strong>{item.processed_images}/{item.total_images} · {item.inserted_vectors ?? item.inserted_objects} {t('向量', 'vectors')}</strong>
+                                </span>
+                                <span className='HistoryMetric'>
+                                    <span>{t('开始时间 / 耗时', 'Started / duration')}</span>
+                                <strong>{formatDate(item.started_at)} · {formatDuration(item)}</strong>
+                                </span>
+                                <span className='HistoryMetric anomalies'>
+                                    <span>{t('异常', 'Anomalies')}</span>
+                                <strong>{item.failed_images} {t('失败', 'failed')} · {item.skipped_images} {t('跳过', 'skipped')} · {item.invalid_vectors} {t('无效', 'invalid')}</strong>
+                                </span>
+                                <span className='HistoryExpand' aria-hidden='true'>
+                                    <small>{imageCount} {t('张', 'images')}</small>
+                                    <i className='HistoryExpandIcon' />
+                                </span>
+                            </button>
+                            {TERMINAL_JOB_STATES.has(item.state) && <button
+                                type='button'
+                                className='HistoryDeleteButton'
+                                aria-label={t(`删除 ${versionName} 版本记录`, `Delete ${versionName} version record`)}
+                                title={t('删除版本记录', 'Delete version record')}
+                                onClick={() => {
+                                    setDeleteJobConfirmId(item.job_id);
+                                    setDeleteJobConfirmationText('');
+                                    setJobDeleteError(null);
+                                }}
+                            >{t('删除', 'Delete')}</button>}
                         </div>
-                        <div className='HistoryMetric'>
-                            <span>{t('数据来源', 'Source')}</span>
-                            <strong title={source}>{source}</strong>
-                        </div>
-                        <div className='HistoryMetric'>
-                            <span>{t('处理结果', 'Processed')}</span>
-                            <strong>{item.processed_images}/{item.total_images} · {item.inserted_vectors ?? item.inserted_objects} {t('向量', 'vectors')}</strong>
-                        </div>
-                        <div className='HistoryMetric'>
-                            <span>{t('开始时间 / 耗时', 'Started / duration')}</span>
-                            <strong>{formatDate(item.started_at)} · {formatDuration(item)}</strong>
-                        </div>
-                        <div className='HistoryMetric anomalies'>
-                            <span>{t('异常', 'Anomalies')}</span>
-                            <strong>{item.failed_images} {t('失败', 'failed')} · {item.skipped_images} {t('跳过', 'skipped')} · {item.invalid_vectors} {t('无效', 'invalid')}</strong>
-                        </div>
+                        {deleteJobConfirmId === item.job_id && createPortal(
+                            <div
+                                className='HistoryDeleteDialogBackdrop'
+                                role='presentation'
+                                onMouseDown={event => {
+                                    if (event.target !== event.currentTarget || deletingJobId) return;
+                                    setDeleteJobConfirmId(null);
+                                    setDeleteJobConfirmationText('');
+                                    setJobDeleteError(null);
+                                }}
+                            >
+                                <section
+                                    className='HistoryDeleteDialog'
+                                    role='dialog'
+                                    aria-modal='true'
+                                    aria-labelledby={deleteDialogTitleId}
+                                    onMouseDown={event => event.stopPropagation()}
+                                >
+                                    <header>
+                                        <strong id={deleteDialogTitleId}>
+                                            {t(`删除版本 ${deleteConfirmationToken}`, `Delete version ${deleteConfirmationToken}`)}
+                                        </strong>
+                                        <button
+                                            type='button'
+                                            aria-label={t('关闭删除确认', 'Close delete confirmation')}
+                                            disabled={deletingJobId === item.job_id}
+                                            onClick={() => {
+                                                setDeleteJobConfirmId(null);
+                                                setDeleteJobConfirmationText('');
+                                                setJobDeleteError(null);
+                                            }}
+                                        >×</button>
+                                    </header>
+                                    <div className='HistoryDeleteDialogBody'>
+                                        <div className='HistoryDeleteTarget' aria-hidden='true'>
+                                            <span className='HistoryDeleteLock' />
+                                            <strong>{deleteConfirmationToken}</strong>
+                                            <small>{item.job_id}</small>
+                                        </div>
+                                        <p>{t(
+                                            '删除后无法恢复。此操作只删除这条版本历史记录，不会回滚或修改当前向量数据。',
+                                            'This cannot be undone. It removes only this version history record and does not roll back or modify current vector data.',
+                                        )}</p>
+                                        <label htmlFor='history-delete-confirmation'>
+                                            {t('如需确认，请在下方输入', 'To confirm, type')}{' '}
+                                            <code>{deleteConfirmationToken}</code>
+                                        </label>
+                                        <input
+                                            id='history-delete-confirmation'
+                                            type='text'
+                                            value={deleteJobConfirmationText}
+                                            autoFocus
+                                            autoComplete='off'
+                                            spellCheck={false}
+                                            aria-label={t('输入版本标识以确认删除', 'Type the version identifier to confirm deletion')}
+                                            onChange={event => setDeleteJobConfirmationText(event.target.value)}
+                                        />
+                                        {jobDeleteError && <span className='InlineError' role='alert'>{jobDeleteError}</span>}
+                                    </div>
+                                    <footer>
+                                        <button
+                                            type='button'
+                                            className='SecondaryButton'
+                                            disabled={deletingJobId === item.job_id}
+                                            onClick={() => {
+                                                setDeleteJobConfirmId(null);
+                                                setDeleteJobConfirmationText('');
+                                                setJobDeleteError(null);
+                                            }}
+                                        >{t('取消', 'Cancel')}</button>
+                                        <button
+                                            type='button'
+                                            className='DangerButton solid'
+                                            disabled={!deleteConfirmationMatches || deletingJobId === item.job_id}
+                                            onClick={() => deleteHistoryJob(item.job_id)}
+                                        >{deletingJobId === item.job_id
+                                                ? t('删除中…', 'Deleting…')
+                                                : t('删除', 'Delete')}</button>
+                                    </footer>
+                                </section>
+                            </div>,
+                            document.body,
+                        )}
                         {item.error && <div className='HistoryError'>{item.error}</div>}
+                        {expanded && <div className='HistoryImagesPanel' id={panelId}>
+                            {imageState?.error && <div className='HistoryImagesState error'>
+                                <span>{imageState.error}</span>
+                                <button
+                                    type='button'
+                                    className='SecondaryButton'
+                                    onClick={() => loadJobImages(item.job_id)}
+                                >{t('重试', 'Retry')}</button>
+                            </div>}
+                            {!imageState?.error && imageState?.images.length === 0 && imageState?.loading && (
+                                <div className='HistoryImagesState'>{t('正在加载缩略图…', 'Loading thumbnails…')}</div>
+                            )}
+                            {!imageState?.error && imageState && !imageState.loading && imageState.images.length === 0 && (
+                                <div className='HistoryImagesState'>{t('这条记录没有可浏览的图片。', 'No browsable images are available for this run.')}</div>
+                            )}
+                            {imageState && imageState.images.length > 0 && <div className='HistoryImageGrid'>
+                                {imageState.images.map(image => {
+                                    const encodedJobId = encodeURIComponent(item.job_id);
+                                    return <button
+                                        type='button'
+                                        className='HistoryThumbnail'
+                                        key={image.index}
+                                        aria-label={t(`放大 ${image.filename}`, `Enlarge ${image.filename}`)}
+                                        onClick={() => setImagePreview({
+                                            jobId: item.job_id,
+                                            index: image.index,
+                                            filename: image.filename,
+                                        })}
+                                    >
+                                        <img
+                                            src={`${baseUrl}/jobs/${encodedJobId}/images/${image.index}/thumbnail`}
+                                            alt={image.filename}
+                                            loading='lazy'
+                                        />
+                                        <span title={image.filename}>{image.filename}</span>
+                                    </button>;
+                                })}
+                            </div>}
+                            {imageState && imageState.images.length < imageState.total && (
+                                <button
+                                    type='button'
+                                    className='SecondaryButton HistoryLoadMore'
+                                    disabled={imageState.loading}
+                                    onClick={() => loadJobImages(item.job_id, imageState.images.length)}
+                                >{imageState.loading
+                                        ? t('加载中…', 'Loading…')
+                                        : t(`加载更多（${imageState.images.length}/${imageState.total}）`,
+                                            `Load more (${imageState.images.length}/${imageState.total})`)}</button>
+                            )}
+                        </div>}
                     </article>;
                 })}
             </div>
         </div>;
     };
 
+    const renderImagePreview = () => {
+        if (!imagePreview) return null;
+        const previewImages = jobImages[imagePreview.jobId]?.images || [];
+        const previewPosition = previewImages.findIndex(image => image.index === imagePreview.index);
+        const hasPrevious = previewPosition > 0;
+        const hasNext = previewPosition >= 0 && previewPosition < previewImages.length - 1;
+        const originalUrl = `${baseUrl}/jobs/${encodeURIComponent(imagePreview.jobId)}/images/${imagePreview.index}/original`;
+        return createPortal(
+            <div
+                className='HistoryImagePreviewBackdrop'
+                role='presentation'
+                onMouseDown={() => setImagePreview(null)}
+            >
+                <div
+                    className='HistoryImagePreviewDialog'
+                    role='dialog'
+                    aria-modal='true'
+                    aria-label={t('入库图片预览', 'Ingest image preview')}
+                    onMouseDown={event => event.stopPropagation()}
+                >
+                    <button
+                        type='button'
+                        className='HistoryImagePreviewClose'
+                        aria-label={t('关闭图片预览', 'Close image preview')}
+                        onClick={() => setImagePreview(null)}
+                    >×</button>
+                    <button
+                        type='button'
+                        className='HistoryImagePreviewNav previous'
+                        aria-label={t('上一张', 'Previous image')}
+                        disabled={!hasPrevious}
+                        onClick={() => moveImagePreview(-1)}
+                    ><span aria-hidden='true' /></button>
+                    <button
+                        type='button'
+                        className='HistoryImagePreviewNav next'
+                        aria-label={t('下一张', 'Next image')}
+                        disabled={!hasNext}
+                        onClick={() => moveImagePreview(1)}
+                    ><span aria-hidden='true' /></button>
+                    <img src={originalUrl} alt={imagePreview.filename}/>
+                    <div className='HistoryImagePreviewCaption'>
+                        <span title={imagePreview.filename}>{imagePreview.filename}</span>
+                        <small>{previewPosition + 1}/{previewImages.length}</small>
+                    </div>
+                </div>
+            </div>,
+            document.body,
+        );
+    };
+
     const renderDeleteConfirmation = () => {
         if (!deleteConfirm) return null;
         return <div className='DeleteConfirm' role='alert'>
             <div>
-                <strong>{t('永久删除这个版本？', 'Permanently delete this version?')}</strong>
-                <span>{t('该版本的向量与插件保存的上传副本会被删除；同一目标的其他版本和源数据不受影响。',
-                    'Vectors and plugin-managed upload copies will be removed; Data Management source data is unchanged.')}</span>
+                <strong>{t('永久删除当前向量索引？', 'Permanently delete the current vector index?')}</strong>
+                <span>{t('该索引的向量与插件保存的上传副本会被删除；同一目标的其他索引和源数据不受影响。',
+                    'Vectors and plugin-managed upload copies for this index will be removed; other indexes and Resource Center source data are unchanged.')}</span>
                 {deleteError && <span className='InlineError'>{deleteError}</span>}
             </div>
             <div className='InlineActions'>
@@ -975,22 +1416,24 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             return <div className='WorkspaceEmpty'>
                 <span className='EmptyGlyph' aria-hidden='true'>◇</span>
                 <strong>{t('选择或新建一个目标', 'Select or create a target')}</strong>
-                <span>{t('场景管理业务上下文，目标管理检索对象，版本锁定特征模型配方。',
-                    'Scenes hold business context, targets hold retrieval subjects, and versions lock feature recipes.')}</span>
+                <span>{t('场景管理业务上下文，目标管理检索对象；每次成功入库形成一个新的数据版本。',
+                    'Scenes hold business context, targets hold retrieval subjects, and every successful ingest creates a new data version.')}</span>
             </div>;
         }
         return <section className='CollectionWorkspace'>
             <header className='CollectionHeader'>
                 <div className='CollectionTitle'>
-                    <div>
+                    <div className='CollectionIdentity'>
                         <span className='Eyebrow'>
                             {selected.scene_name || t('默认场景', 'Default scene')} / {t('目标', 'Target')}
                         </span>
-                        <h3>{selected.target_name || selected.display_name}</h3>
+                        <div className='CollectionNameRow'>
+                            <h3>{selected.target_name || selected.display_name}</h3>
+                            <span className={`ModeBadge ${selected.granularity}`}>
+                                {granularityLabel(selected.granularity)} · {dataVersionLabel(selected)}
+                            </span>
+                        </div>
                     </div>
-                    <span className={`ModeBadge ${selected.granularity}`}>
-                        {granularityLabel(selected.granularity)} · v{selected.version}
-                    </span>
                 </div>
                 <div className='InlineActions'>
                     {renderVersionAction(selected)}
@@ -999,7 +1442,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                         className='DangerButton'
                         disabled={selectedJobActive}
                         onClick={() => { setDeleteConfirm(true); setDeleteError(null); }}
-                    >{t('删除版本', 'Delete version')}</button>
+                    >{t('删除当前索引', 'Delete current index')}</button>
                 </div>
             </header>
             <div className='MetadataGrid'>
@@ -1009,7 +1452,11 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                 <div><span>{t('向量维度', 'Dimensions')}</span><strong>{selected.dim}</strong></div>
                 <div><span>{t('特征模型', 'Embedder')}</span><strong title={selected.embedder}>{selected.embedder}</strong></div>
                 <div><span>{t('特征配置', 'Feature Profile')}</span><strong title={selected.profile_id}>{selected.profile_id}</strong></div>
-                <div><span>{t('物理版本', 'Physical version')}</span><strong>v{selected.version} · {selected.active ? t('当前', 'active') : t('历史', 'inactive')}</strong></div>
+                <div><span>{t('数据版本', 'Data version')}</span><strong>
+                    {(selected.data_version || 0) > 0
+                        ? `${dataVersionLabel(selected)} · ${selected.data_version} ${t('次成功入库', 'successful ingests')}`
+                        : t('尚未入库', 'Never ingested')}
+                </strong></div>
                 <div><span>{t('向量索引', 'Vector index')}</span><strong>{selected.index_type}</strong></div>
                 <div><span>{t('最近入库', 'Last ingest')}</span><strong>{formatDate(selected.last_ingest_at)}</strong></div>
                 <div><span>{t('向量范数', 'Vector norm')}</span><strong>{formatVectorNorm(selected)}</strong></div>
@@ -1023,7 +1470,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             </div>
             {renderProfileWarning(selected)}
             {renderDeleteConfirmation()}
-            <div className='WorkspaceTabs' role='tablist' aria-label={t('版本操作', 'Version actions')}>
+            <div className='WorkspaceTabs' role='tablist' aria-label={t('数据操作', 'Data actions')}>
                 <button
                     type='button'
                     role='tab'
@@ -1086,8 +1533,8 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             <div className='VectorDbIntro'>
                 <div>
                     <span className='Eyebrow'>{t('拓展服务', 'Extension service')}</span>
-                    <p>{t('按场景、目标和版本管理 DINO 向量，导入业务数据，并追踪每一次入库任务与质量结果。检索功能统一放在「视觉检索」。',
-                        'Manage DINO vectors by scene, target and version, ingest business data, and track every ingest run and quality result. Retrieval is unified under Visual Retrieval.')}</p>
+                    <p>{t('按场景、目标和数据版本管理 DINO 向量，并追踪每一次入库任务与质量结果。检索功能统一放在「视觉检索」。',
+                        'Manage DINO vectors by scene, target, and data version, and track every ingest run and quality result. Retrieval is unified under Visual Retrieval.')}</p>
                 </div>
                 <div className='ServiceChips' aria-label={t('服务概况', 'Service overview')}>
                     <span className={`ServiceChip ${storeReady ? 'ready' : 'pending'}`}>
@@ -1104,7 +1551,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             <div className='OverviewStats'>
                 <div><span>{t('场景', 'Scenes')}</span><strong>{hierarchy.length}</strong></div>
                 <div><span>{t('目标', 'Targets')}</span><strong>{totalTargets}</strong></div>
-                <div><span>{t('版本', 'Versions')}</span><strong>{collections.length}</strong></div>
+                <div><span>{t('数据版本', 'Data versions')}</span><strong>{totalDataVersions}</strong></div>
                 <div><span>{t('向量总数', 'Total vectors')}</span><strong>{totalVectors.toLocaleString()}</strong></div>
             </div>
             <div className='VectorWorkspace'>
@@ -1115,13 +1562,16 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         </div>
     );
 
-    return <GenericYesNoPopup
-        title={t('向量数据库', 'Vector Database')}
-        renderContent={renderContent}
-        skipAcceptButton
-        rejectLabel={t('关闭', 'Close')}
-        onReject={() => PopupActions.close()}
-    />;
+    return <>
+        <GenericYesNoPopup
+            title={t('向量数据库', 'Vector Database')}
+            renderContent={renderContent}
+            skipAcceptButton
+            rejectLabel={t('关闭', 'Close')}
+            onReject={() => PopupActions.close()}
+        />
+        {renderImagePreview()}
+    </>;
 };
 
 const mapStateToProps = (state: AppState) => ({

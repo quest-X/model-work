@@ -18,7 +18,6 @@ import {
     ModelInspectorAPI,
     SlotCapability,
 } from './ModelInspectorAPI';
-import {navigateInspectorImage} from './ModelInspectorNavigation';
 import './ModelInspectorPopup.scss';
 
 export const MODEL_INSPECTOR_ESCAPE_EVENT = 'opensight:model-inspector-escape';
@@ -36,7 +35,6 @@ const MAP_KINDS: Array<{value: Exclude<HeatmapKind, 'channel' | 'gradcam'>; zh: 
 ];
 
 const PALETTES: HeatmapPalette[] = ['turbo', 'magma', 'viridis', 'inferno', 'jet', 'gray'];
-const WHEEL_NAVIGATION_THROTTLE_MS = 60;
 
 const stateLabel = (state: SlotCapability['state'], zh: boolean): string => {
     const values: Record<SlotCapability['state'], [string, string]> = {
@@ -130,7 +128,7 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const requestRef = useRef<AbortController | null>(null);
     const sessionIdRef = useRef<string | null>(null);
-    const wheelNavigationTimerRef = useRef<number | null>(null);
+    const automaticCaptureKeyRef = useRef<string | null>(null);
 
     const discardSession = useCallback((updateState: boolean = true) => {
         const sessionId = sessionIdRef.current;
@@ -185,26 +183,9 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
     }, [activeImage?.id, discardSession]);
 
     useEffect(() => () => {
-        if (wheelNavigationTimerRef.current !== null) {
-            window.clearTimeout(wheelNavigationTimerRef.current);
-        }
         requestRef.current?.abort();
         discardSession(false);
     }, [discardSession]);
-
-    const handleImageWheel = useCallback((event: React.WheelEvent<HTMLElement>) => {
-        if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-        if (Math.abs(event.deltaY) < Math.abs(event.deltaX) || event.deltaY === 0) return;
-        event.preventDefault();
-
-        if (wheelNavigationTimerRef.current !== null) return;
-        if (!navigateInspectorImage(event.deltaY > 0 ? 1 : -1)) return;
-
-        requestRef.current?.abort();
-        wheelNavigationTimerRef.current = window.setTimeout(() => {
-            wheelNavigationTimerRef.current = null;
-        }, WHEEL_NAVIGATION_THROTTLE_MS);
-    }, []);
 
     const capability = useMemo(
         () => status?.slots.find(item => item.slot === slot) || null,
@@ -351,6 +332,30 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
         }
     }, [activeImage, capability?.state, discardSession, selectedIds, slot, status?.limits, t]);
 
+    useEffect(() => {
+        if (
+            detail !== 'stages'
+            || catalogLoading
+            || catalog.length === 0
+            || !activeImage
+            || capability?.state !== 'ready'
+        ) return;
+        const automaticCaptureKey = `${activeImage.id}:${slot}:${capability.model}`;
+        if (automaticCaptureKeyRef.current === automaticCaptureKey) return;
+        automaticCaptureKeyRef.current = automaticCaptureKey;
+        if (selectedIds.size > 0) void createSession();
+    }, [
+        activeImage,
+        capability?.model,
+        capability?.state,
+        catalog.length,
+        catalogLoading,
+        createSession,
+        detail,
+        selectedIds.size,
+        slot,
+    ]);
+
     const activeLayer = useMemo(
         () => session?.layers.find(layer => layer.id === activeLayerId) || null,
         [activeLayerId, session],
@@ -370,26 +375,27 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
     }, [activeLayerId]);
 
     const ribbonRef = useRef<HTMLDivElement>(null);
-    const [ribbonScroll, setRibbonScroll] = useState({atStart: true, atEnd: true});
-
-    const updateRibbonScroll = useCallback(() => {
-        const el = ribbonRef.current;
-        if (!el) return;
-        setRibbonScroll({
-            atStart: el.scrollLeft <= 2,
-            atEnd: el.scrollLeft + el.clientWidth >= el.scrollWidth - 2,
-        });
-    }, []);
+    const activeLayerIndex = readyLayers.findIndex(layer => layer.id === activeLayerId);
 
     useEffect(() => {
-        updateRibbonScroll();
-    }, [readyLayers.length, updateRibbonScroll]);
+        if (activeLayerIndex < 0) return;
+        const activeButton = ribbonRef.current?.children.item(activeLayerIndex) as HTMLElement | null;
+        activeButton?.scrollIntoView?.({behavior: 'smooth', block: 'nearest', inline: 'center'});
+    }, [activeLayerIndex]);
 
-    const scrollRibbon = (direction: 1 | -1): void => {
-        const el = ribbonRef.current;
-        if (!el) return;
-        el.scrollBy({left: direction * el.clientWidth * 0.8, behavior: 'smooth'});
+    const navigateActiveLayer = (direction: 1 | -1): void => {
+        const nextLayer = readyLayers[activeLayerIndex + direction];
+        if (nextLayer) setActiveLayerId(nextLayer.id);
     };
+
+    const handleRibbonWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+        const el = ribbonRef.current;
+        if (!el || event.ctrlKey || event.metaKey || event.altKey) return;
+        const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+        if (delta === 0 || el.scrollWidth <= el.clientWidth) return;
+        event.preventDefault();
+        el.scrollLeft += delta;
+    }, []);
 
     const uniquePredictions = useMemo(() => {
         const seen = new Set<number>();
@@ -531,7 +537,7 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
                     <span className='mi-brand-mark' aria-hidden='true'><i/><i/><i/></span>
                     <div>
                         <h2>{t('模型透视', 'Model Inspector')} <em>LAB</em></h2>
-                        <p>{t('沿 openSight 当前推理链观察特征如何形成', 'Follow feature formation along the active openSight inference path')}</p>
+                        <p>{t('沿 opensight 当前推理链观察特征如何形成', 'Follow feature formation along the active opensight inference path')}</p>
                     </div>
                 </div>
                 <div className='mi-header-meta'>
@@ -624,33 +630,44 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
                             </div>
                             {!session || !activeLayer ? <div
                                 className='mi-empty-canvas'
-                                data-testid='inspector-image-wheel-area'
-                                onWheel={handleImageWheel}
                             >
                                 <div className='mi-empty-orbit'><span/><span/><span/></div>
                                 <h3>{busy
                                     ? t('正在生成语义阶段透视', 'Generating semantic stage views')
                                     : activeImage
                                         ? t('当前图片尚未生成阶段透视', 'This image has not been inspected yet')
-                                        : t('请先在 openSight 中打开一张图片', 'Open an image in openSight first')}</h3>
-                                <p>{t('滚轮仅切换图片；点击左侧按钮后才会生成当前图片的透视。', 'The wheel only changes images; use the button on the left to inspect the current image.')}</p>
+                                        : t('请先在 opensight 中打开一张图片', 'Open an image in opensight first')}</h3>
+                                <p>{t('点击左侧按钮生成当前图片的透视。', 'Use the button on the left to inspect the current image.')}</p>
                             </div> : <>
-                                <div
-                                    className={`mi-viewports ${compareEnabled && compareLayer ? 'compare' : ''}`}
-                                    data-testid='inspector-image-wheel-area'
-                                    onWheel={handleImageWheel}
-                                >
-                                    {renderViewport(activeLayer, 'A')}
-                                    {compareEnabled && compareLayer && renderViewport(compareLayer, 'B', true)}
+                                <div className='mi-canvas-stage'>
+                                    <div
+                                        className={`mi-viewports ${compareEnabled && compareLayer ? 'compare' : ''}`}
+                                    >
+                                        {renderViewport(activeLayer, 'A')}
+                                        {compareEnabled && compareLayer && renderViewport(compareLayer, 'B', true)}
+                                    </div>
+                                    <button
+                                        type='button'
+                                        className='mi-canvas-nav prev'
+                                        disabled={activeLayerIndex <= 0}
+                                        onClick={() => navigateActiveLayer(-1)}
+                                        aria-label={t('上一层透视', 'Previous layer view')}
+                                    >‹</button>
+                                    <button
+                                        type='button'
+                                        className='mi-canvas-nav next'
+                                        disabled={activeLayerIndex < 0 || activeLayerIndex >= readyLayers.length - 1}
+                                        onClick={() => navigateActiveLayer(1)}
+                                        aria-label={t('下一层透视', 'Next layer view')}
+                                    >›</button>
                                 </div>
                                 <div className='mi-stage-ribbon-wrap'>
-                                    <button
-                                        className='mi-ribbon-nav prev'
-                                        disabled={ribbonScroll.atStart}
-                                        onClick={() => scrollRibbon(-1)}
-                                        aria-label={t('向左滚动', 'Scroll left')}
-                                    >‹</button>
-                                    <div className='mi-stage-ribbon' ref={ribbonRef} onScroll={updateRibbonScroll}>
+                                    <div
+                                        className='mi-stage-ribbon'
+                                        ref={ribbonRef}
+                                        onWheel={handleRibbonWheel}
+                                        data-testid='inspector-stage-ribbon'
+                                    >
                                         {readyLayers.map((layer, index) => <button
                                             key={layer.id}
                                             className={activeLayerId === layer.id ? 'active' : ''}
@@ -661,12 +678,6 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
                                             <small>{layer.path.split('.').slice(-2).join('.')}</small>
                                         </button>)}
                                     </div>
-                                    <button
-                                        className='mi-ribbon-nav next'
-                                        disabled={ribbonScroll.atEnd}
-                                        onClick={() => scrollRibbon(1)}
-                                        aria-label={t('向右滚动', 'Scroll right')}
-                                    >›</button>
                                 </div>
                             </>}
                         </main>

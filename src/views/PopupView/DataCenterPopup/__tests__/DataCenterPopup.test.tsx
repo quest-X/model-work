@@ -1,5 +1,5 @@
 import React from 'react';
-import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {Language} from '../../../../data/LanguageConfig';
 import {PopupWindowType} from '../../../../data/enums/PopupWindowType';
 import {QueueDataSyncStatus, QueueItemStatus, QueueItemType} from '../../../../store/queue/types';
@@ -106,15 +106,80 @@ const dataset = {
     ],
 };
 
+const modelAssets = [
+    {
+        name: 'yolo26x',
+        type: 'detection',
+        format: 'pt',
+        size_bytes: 128 * 1024 * 1024,
+        modified_at: '2026-07-20T00:00:00Z',
+        source: 'cache',
+    },
+    {
+        id: 'server:gangye-v2',
+        name: 'gangye-seg-v2',
+        type: 'custom',
+        format: 'pt',
+        size_bytes: 256 * 1024 * 1024,
+        modified_at: '2026-07-24T00:00:00Z',
+        source: 'server',
+        project: 'GBYW',
+        category: '正式及预训练模型',
+        path: '/home/baosight/data/lch/sdgt-projects/gbyw/models/gangye-seg-v2.pt',
+        callable: true,
+    },
+    {
+        id: 'server:archive-engine',
+        name: 'gangye-seg-v2.engine',
+        type: 'segmentation',
+        format: 'engine',
+        size_bytes: 300 * 1024 * 1024,
+        modified_at: '2026-07-23T00:00:00Z',
+        source: 'server',
+        project: 'GBYW',
+        category: '训练及矩阵实验输出',
+        path: '/home/baosight/data/lch/sdgt-projects/gbyw/data/training/gangye-seg-v2.engine',
+        callable: false,
+    },
+];
+
 describe('DataCenterPopup', () => {
     const updateActivePopupTypeAction = jest.fn();
     const updateQueueItemAction = jest.fn();
 
     beforeEach(() => {
         jest.clearAllMocks();
-        global.fetch = jest.fn((input: RequestInfo) => {
+        global.fetch = jest.fn((input: RequestInfo, init?: RequestInit) => {
             const url = String(input);
             if (url.endsWith('/datasets')) return Promise.resolve(jsonResponse({datasets: [dataset]}));
+            if (url.endsWith('/available-models')) {
+                return Promise.resolve(jsonResponse({
+                    models: modelAssets,
+                    catalog: {
+                        asset_count: 2,
+                        callable_count: 1,
+                        project_counts: {GBYW: 2},
+                    },
+                }));
+            }
+            if (url.endsWith('/health')) {
+                return Promise.resolve(jsonResponse({
+                    model: 'yolo26x.pt',
+                    segmentation_model: '',
+                    loaded_models: ['yolo26x.pt'],
+                    model_tasks: {'yolo26x.pt': 'detect'},
+                }));
+            }
+            if (url.endsWith('/switch-model') && init?.method === 'POST') {
+                return Promise.resolve(jsonResponse({status: 'ok', active: 'gangye-seg-v2.pt'}));
+            }
+            if (url.endsWith('/model-assets/sync') && init?.method === 'POST') {
+                return Promise.resolve(jsonResponse({
+                    status: 'synced',
+                    model: 'yolo26x.pt',
+                    source: 'managed',
+                }));
+            }
             if (url.endsWith('/datasets/dataset-1/stats')) {
                 return Promise.resolve(jsonResponse({
                     image_count: 465,
@@ -142,25 +207,33 @@ describe('DataCenterPopup', () => {
         renderPopup();
         await screen.findByRole('tab', {name: '持久化数据 1'});
 
+        expect(screen.getByRole('heading', {name: '资源中心'})).toBeInTheDocument();
+        expect(screen.getByRole('tablist', {name: '资源类型'})).toBeInTheDocument();
+        expect(screen.getByRole('tab', {name: '数据'})).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByRole('tablist', {name: '数据存储层级'})).toHaveAttribute('aria-orientation', 'vertical');
-        expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'data-tier-temporary');
+        expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'resource-module-data');
+        expect(screen.getByRole('region', {name: '临时数据 1'}))
+            .toHaveAttribute('aria-labelledby', 'resource-tier-data-temporary');
 
         expect(screen.getByText('前端临时数据', {selector: '.TierExplanation strong'})).toBeInTheDocument();
         expect(screen.getByText('default-project', {selector: '.DataCardTitleRow strong'})).toBeInTheDocument();
         expect(screen.queryByText('当前项目')).not.toBeInTheDocument();
         expect(screen.queryByText('导入标注')).not.toBeInTheDocument();
         expect(screen.getByText('仅本地')).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '使用'})).toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: '查看 / 标注'})).not.toBeInTheDocument();
         expect(screen.queryByText('服务器数据快照')).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('tab', {name: /持久化数据/}));
         expect(await screen.findByText('后端持久化数据')).toBeInTheDocument();
-        expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'data-tier-persistent');
+        expect(screen.getByRole('region', {name: '持久化数据 1'}))
+            .toHaveAttribute('aria-labelledby', 'resource-tier-data-persistent');
         expect(await screen.findByText('default-project', {selector: '.DatasetName'})).toBeInTheDocument();
         expect(screen.getByText('已就绪')).toBeInTheDocument();
         expect(screen.getByText(/项目 default-project/)).toBeInTheDocument();
     });
 
-    it('supports keyboard navigation in the vertical data source sidebar', async () => {
+    it('supports keyboard navigation across resource modules and storage tiers', async () => {
         renderPopup();
         const temporaryTab = await screen.findByRole('tab', {name: '临时数据 1'});
         const persistentTab = await screen.findByRole('tab', {name: '持久化数据 1'});
@@ -170,7 +243,91 @@ describe('DataCenterPopup', () => {
 
         expect(persistentTab).toHaveAttribute('aria-selected', 'true');
         expect(persistentTab).toHaveFocus();
-        expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'data-tier-persistent');
+        expect(screen.getByRole('region', {name: '持久化数据 1'}))
+            .toHaveAttribute('aria-labelledby', 'resource-tier-data-persistent');
+
+        const dataTab = screen.getByRole('tab', {name: '数据'});
+        const modelsTab = screen.getByRole('tab', {name: '模型'});
+        dataTab.focus();
+        fireEvent.keyDown(dataTab, {key: 'ArrowRight'});
+        expect(modelsTab).toHaveFocus();
+        expect(modelsTab).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'resource-module-models');
+        expect(screen.getByRole('tablist', {name: '模型存储层级'})).toBeInTheDocument();
+        expect(await screen.findByRole('tab', {name: '临时模型 1'})).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('manages callable model-file versions in the resource center', async () => {
+        renderPopup();
+        fireEvent.click(await screen.findByRole('tab', {name: '模型'}));
+
+        expect(await screen.findByRole('tab', {name: '临时模型 1'})).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByText('临时模型（运行内存）')).toBeInTheDocument();
+        expect(screen.getByText('yolo26x.pt')).toBeInTheDocument();
+        expect(screen.getByText('检测槽正在使用')).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '同步至服务器'})).toBeInTheDocument();
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', {name: '同步至服务器'}));
+        });
+        await waitFor(() => expect((global.fetch as jest.Mock).mock.calls.some(([url, init]) =>
+            String(url).endsWith('/model-assets/sync')
+            && init?.method === 'POST'
+            && JSON.parse(String(init.body)).model === 'yolo26x')).toBe(true));
+
+        fireEvent.click(screen.getByRole('tab', {name: '持久化模型 2'}));
+        expect(await screen.findByText('持久化模型资源')).toBeInTheDocument();
+        expect(screen.queryByText('yolo26x.pt')).not.toBeInTheDocument();
+        expect(screen.getByText('gangye-seg-v2.pt')).toBeInTheDocument();
+        expect(screen.getByText('256.0 MiB')).toBeInTheDocument();
+        expect(screen.getAllByText('205 资产目录')).toHaveLength(2);
+        expect(screen.getByText('正式及预训练模型')).toBeInTheDocument();
+        expect(screen.getByTitle(/sdgt-projects\/gbyw\/models\/gangye-seg-v2.pt/)).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '仅归档'})).toBeDisabled();
+
+        const sortSelect = screen.getByRole('combobox', {name: '模型排序'});
+        const typeSelect = screen.getByRole('combobox', {name: '模型类型'});
+        expect(sortSelect).toHaveValue('relevance');
+        expect(typeSelect).toHaveValue('all');
+        expect(within(typeSelect).getByRole('option', {name: 'PT'})).toBeInTheDocument();
+        expect(within(typeSelect).getByRole('option', {name: 'ENGINE'})).toBeInTheDocument();
+
+        fireEvent.change(typeSelect, {target: {value: 'ENGINE'}});
+        expect(screen.queryByText('gangye-seg-v2.pt')).not.toBeInTheDocument();
+        expect(screen.getByText('gangye-seg-v2.engine')).toBeInTheDocument();
+        expect(screen.getByText('显示 1 / 2')).toBeInTheDocument();
+
+        fireEvent.change(typeSelect, {target: {value: 'all'}});
+        fireEvent.change(sortSelect, {target: {value: 'name'}});
+        let modelCards = Array.from(document.querySelectorAll('.ModelResourceList:not(.RuntimeModelList) .ModelResourceCard'));
+        expect(modelCards[0]).toHaveTextContent('gangye-seg-v2.engine');
+
+        fireEvent.change(sortSelect, {target: {value: 'recent'}});
+        modelCards = Array.from(document.querySelectorAll('.ModelResourceList:not(.RuntimeModelList) .ModelResourceCard'));
+        expect(modelCards[0]).toHaveTextContent('gangye-seg-v2.pt');
+
+        fireEvent.change(sortSelect, {target: {value: 'size'}});
+        modelCards = Array.from(document.querySelectorAll('.ModelResourceList:not(.RuntimeModelList) .ModelResourceCard'));
+        expect(modelCards[0]).toHaveTextContent('gangye-seg-v2.engine');
+
+        const customCard = screen.getByText('gangye-seg-v2.pt').closest('.ModelResourceCard');
+        expect(customCard).not.toBeNull();
+        await act(async () => {
+            fireEvent.click(within(customCard as HTMLElement).getByRole('button', {name: '使用'}));
+        });
+        await waitFor(() => expect((global.fetch as jest.Mock).mock.calls.some(([url, init]) =>
+            String(url).endsWith('/switch-model')
+            && init?.method === 'POST'
+            && JSON.parse(String(init.body)).model === 'server:gangye-v2')).toBe(true));
+
+        fireEvent.change(screen.getByPlaceholderText('名称、项目、分类或路径'), {
+            target: {value: '训练及矩阵'},
+        });
+        expect(screen.getByText('显示 1 / 2')).toBeInTheDocument();
+
+        expect(screen.queryByRole('button', {name: '扫描 205 模型'})).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: '导入 / 更新版本'})).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: '同步至服务器'})).not.toBeInTheDocument();
     });
 
     it('removes a fully synced batch from temporary data', async () => {
@@ -193,7 +350,7 @@ describe('DataCenterPopup', () => {
         await screen.findByRole('tab', {name: '持久化数据 1'});
         expect(screen.getByRole('tab', {name: '临时数据 0'})).toBeInTheDocument();
         expect(screen.getByText('暂无临时数据')).toBeInTheDocument();
-        expect(screen.queryByRole('button', {name: '更新服务器'})).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: '同步至服务器'})).not.toBeInTheDocument();
     });
 
     it('syncs a temporary batch from its own card', async () => {
@@ -201,7 +358,7 @@ describe('DataCenterPopup', () => {
         await screen.findByRole('tab', {name: '持久化数据 1'});
 
         await act(async () => {
-            fireEvent.click(screen.getByRole('button', {name: '同步到服务器'}));
+            fireEvent.click(screen.getByRole('button', {name: '同步至服务器'}));
         });
 
         expect(DataBatchSyncService.syncQueueItem).toHaveBeenCalledWith(localItem, [], []);
@@ -242,7 +399,7 @@ describe('DataCenterPopup', () => {
         expect(screen.getByRole('list', {name: '数据版本时间轴'})).toBeInTheDocument();
         expect(screen.getByText('原始数据')).toBeInTheDocument();
         expect(screen.getByText('数据清洗 A')).toBeInTheDocument();
-        expect(screen.getByRole('button', {name: '编辑'})).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '使用'})).toBeInTheDocument();
         expect(screen.getByRole('button', {name: '推理'})).toBeInTheDocument();
         expect(screen.getByRole('button', {name: '训练'})).toBeInTheDocument();
         expect(screen.getByRole('button', {name: '导出'})).toBeInTheDocument();
@@ -264,11 +421,12 @@ describe('DataCenterPopup', () => {
         expect(updateActivePopupTypeAction).toHaveBeenCalledWith(PopupWindowType.DATASET_EXPORT);
 
         await act(async () => {
-            fireEvent.click(screen.getByRole('button', {name: '编辑'}));
+            fireEvent.click(screen.getByRole('button', {name: '使用'}));
         });
         await waitFor(() => expect(DatasetEditSelection.set).toHaveBeenCalledWith(expect.objectContaining({
             id: 'dataset-1',
             name: 'default-project',
+            projectName: 'default-project',
         })));
         expect(PendingImportFiles.set).toHaveBeenCalledWith([
             expect.objectContaining({name: 'yolo_full_default-project_v2.zip'}),

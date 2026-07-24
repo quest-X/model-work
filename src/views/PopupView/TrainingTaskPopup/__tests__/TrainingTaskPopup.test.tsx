@@ -48,7 +48,7 @@ describe('TrainingTaskPopup', () => {
         }) as jest.Mock;
     });
 
-    it('preselects the dataset chosen in Data Management', async () => {
+    it('preselects the dataset chosen in Resource Center', async () => {
         render(<TrainingTaskPopup language={Language.CHINESE}/>);
 
         await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('dataset-2'));

@@ -10,6 +10,8 @@ import {TaskTracker} from './TaskTracker';
 type BatchRegion = {
     label_id: string;
     bbox: [number, number, number, number];
+    shape?: 'rect' | 'polygon';
+    vertices?: Array<{x: number; y: number}>;
 };
 
 type BatchMetadata = {
@@ -74,15 +76,27 @@ export class DataBatchSyncService {
                 if (!labelRect.labelId || !labelIds.has(labelRect.labelId) || labelRect.isPrompt) return;
                 const {x, y, width, height} = labelRect.rect;
                 if (width > 0 && height > 0) {
-                    regions.push({label_id: labelRect.labelId, bbox: [x, y, width, height]});
+                    regions.push({
+                        label_id: labelRect.labelId,
+                        bbox: [x, y, width, height],
+                        shape: 'rect',
+                    });
                     usedLabelIds.add(labelRect.labelId);
                 }
             });
             image?.labelPolygons.forEach(labelPolygon => {
                 if (!labelPolygon.labelId || !labelIds.has(labelPolygon.labelId)) return;
-                const bbox = polygonBoundingBox(labelPolygon.vertices);
-                if (bbox) {
-                    regions.push({label_id: labelPolygon.labelId, bbox});
+                const vertices = labelPolygon.vertices
+                    .filter(vertex => Number.isFinite(vertex.x) && Number.isFinite(vertex.y))
+                    .map(vertex => ({x: vertex.x, y: vertex.y}));
+                const bbox = polygonBoundingBox(vertices);
+                if (bbox && vertices.length >= 3) {
+                    regions.push({
+                        label_id: labelPolygon.labelId,
+                        bbox,
+                        shape: 'polygon',
+                        vertices,
+                    });
                     usedLabelIds.add(labelPolygon.labelId);
                 }
             });

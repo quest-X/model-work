@@ -13,7 +13,7 @@ const jsonResponse = (body: unknown): Response => ({
 } as unknown as Response);
 
 describe('DataBatchSyncService', () => {
-    it('serializes rectangles and polygon bounding boxes by file index', () => {
+    it('serializes rectangles and preserves polygon geometry by file index', () => {
         const file = new File(['image'], '炉口.png', {type: 'image/png', lastModified: 1});
         const labels: LabelName[] = [{id: 'hot', name: 'hot'}];
         const image = {
@@ -34,8 +34,13 @@ describe('DataBatchSyncService', () => {
         expect(metadata.images).toEqual([{
             index: 0,
             regions: [
-                {label_id: 'hot', bbox: [10, 20, 30, 40]},
-                {label_id: 'hot', bbox: [5, 7, 20, 23]},
+                {label_id: 'hot', bbox: [10, 20, 30, 40], shape: 'rect'},
+                {
+                    label_id: 'hot',
+                    bbox: [5, 7, 20, 23],
+                    shape: 'polygon',
+                    vertices: [{x: 5, y: 7}, {x: 25, y: 9}, {x: 20, y: 30}],
+                },
             ],
         }]);
     });
@@ -131,7 +136,7 @@ describe('DataBatchSyncService', () => {
             classes: [{id: 'hot', name: 'hot'}],
             images: [{
                 index: 0,
-                regions: [{label_id: 'hot', bbox: [5, 6, 20, 10]}],
+                regions: [{label_id: 'hot', bbox: [5, 6, 20, 10], shape: 'rect'}],
             }],
         });
     });

@@ -35,7 +35,15 @@ describe('VideoDatasetRestoreService', () => {
                 classes: [{id: 'hot', name: 'hot'}],
                 images: [{
                     index: 0,
-                    regions: [{label_id: 'hot', bbox: [10, 20, 30, 40]}],
+                    regions: [
+                        {label_id: 'hot', bbox: [10, 20, 30, 40]},
+                        {
+                            label_id: 'hot',
+                            bbox: [50, 60, 40, 50],
+                            shape: 'polygon',
+                            vertices: [{x: 50, y: 60}, {x: 90, y: 65}, {x: 75, y: 110}],
+                        },
+                    ],
                 }],
             },
         }));
@@ -60,6 +68,14 @@ describe('VideoDatasetRestoreService', () => {
             labelId: 'hot',
             rect: {x: 10, y: 20, width: 30, height: 40},
         }));
+        expect(cachedFrames[0].labelPolygons).toEqual([
+            expect.objectContaining({
+                labelId: 'hot',
+                vertices: [{x: 50, y: 60}, {x: 90, y: 65}, {x: 75, y: 110}],
+            }),
+        ]);
+        expect(cachedFrames[0].labelRects).toHaveLength(1);
+        expect(cachedFrames[0].labelNameIds).toEqual(['hot']);
         expect(store.getState().labels.labels).toEqual([
             expect.objectContaining({id: 'hot', name: 'hot'}),
         ]);

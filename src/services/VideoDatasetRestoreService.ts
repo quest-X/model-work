@@ -20,6 +20,8 @@ import {getEngineBaseUrl} from '../utils/DefaultBackendUrl';
 type WorkspaceRegion = {
     label_id: string;
     bbox: [number, number, number, number];
+    shape?: 'rect' | 'polygon';
+    vertices?: Array<{x: number; y: number}>;
 };
 
 type WorkspaceMetadata = {
@@ -71,15 +73,20 @@ const buildFrames = (
         );
         const regions = regionsByIndex.get(index) || [];
         image.labelRects = regions
-            .filter(region => validLabelIds.has(region.label_id))
+            .filter(region => region.shape !== 'polygon' && validLabelIds.has(region.label_id))
             .map(region => LabelUtil.createLabelRect(region.label_id, {
                 x: region.bbox[0],
                 y: region.bbox[1],
                 width: region.bbox[2],
                 height: region.bbox[3],
             }));
+        image.labelPolygons = regions
+            .filter(region => region.shape === 'polygon'
+                && validLabelIds.has(region.label_id)
+                && (region.vertices?.length || 0) >= 3)
+            .map(region => LabelUtil.createLabelPolygon(region.label_id, region.vertices || []));
         image.labelNameIds = Array.from(new Set(
-            image.labelRects
+            [...image.labelRects, ...image.labelPolygons]
                 .map(label => label.labelId)
                 .filter((labelId): labelId is string => Boolean(labelId)),
         ));

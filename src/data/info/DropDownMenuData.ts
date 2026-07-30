@@ -37,20 +37,20 @@ export const getDropDownMenuData = (language: Language): DropDownMenuNode[] => {
                     }
                 },
                 {
-                    name: texts.actions.uploadFiles.name,
-                    description: texts.actions.uploadFiles.description,
-                    imageSrc: 'ico/camera.png',
-                    imageAlt: 'upload',
-                    disabled: false,
-                    onClick: () => store.dispatch(updateActivePopupType(PopupWindowType.IMPORT_IMAGES))
-                },
-                {
                     name: texts.actions.editLabels.name,
                     description: texts.actions.editLabels.description,
                     imageSrc: 'ico/tags.png',
                     imageAlt: 'labels',
                     disabled: false,
                     onClick: () => store.dispatch(updateActivePopupType(PopupWindowType.UPDATE_LABEL))
+                },
+                {
+                    name: texts.actions.uploadFiles.name,
+                    description: texts.actions.uploadFiles.description,
+                    imageSrc: 'ico/camera.png',
+                    imageAlt: 'upload',
+                    disabled: false,
+                    onClick: () => store.dispatch(updateActivePopupType(PopupWindowType.IMPORT_IMAGES))
                 },
                 {
                     name: texts.actions.importAnnotations.name,

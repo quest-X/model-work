@@ -6,6 +6,7 @@ import {PopupActions} from '../../../logic/actions/PopupActions';
 import {AppState} from '../../../store';
 import {Language} from '../../../data/LanguageConfig';
 import {getEngineBaseUrl, getExtensionEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
+import {consumeSimilaritySearchPreset} from '../../../ai/SimilaritySearchPresetStore';
 import './L2GRetrievalPopup.scss';
 
 type RetrievalEngine = 'dino' | 'l2g';
@@ -46,9 +47,12 @@ interface DinoStatus {
 interface DinoCollection {
     name: string;
     display_name: string;
+    scene_id: string;
+    target_id: string;
     target_name?: string;
     scene_name?: string;
     version: number;
+    data_version?: number;
     granularity: Granularity;
     count: number;
     embedder: string;
@@ -70,6 +74,14 @@ interface L2GResult {
     thumbnail: string | null;
 }
 
+interface SearchSnapshot<T> {
+    results: T[];
+    elapsed: number | null;
+    attempted: boolean;
+    error: string | null;
+    searching: boolean;
+}
+
 interface DatasetSummary {
     id: string;
     name: string;
@@ -83,6 +95,30 @@ interface IProps {
     language: Language;
 }
 
+const findDataset = (datasets: DatasetSummary[], datasetId: string): DatasetSummary | null =>
+    datasets.find(item => item.id === datasetId) ?? null;
+
+const datasetProjectName = (dataset: DatasetSummary | null): string =>
+    dataset?.project_name ?? '';
+
+const selectedDatasetNameOrEmpty = (dataset: DatasetSummary | null): string =>
+    dataset?.name ?? '';
+
+const emptySearchSnapshot = <T,>(): SearchSnapshot<T> => ({
+    results: [],
+    elapsed: null,
+    attempted: false,
+    error: null,
+    searching: false,
+});
+
+const resolvePresetDefaults = (preset: ReturnType<typeof consumeSimilaritySearchPreset>) => ({
+    engine: preset?.mode ?? 'dino' as RetrievalEngine,
+    collectionName: preset?.collectionName ?? '',
+    datasetId: preset?.datasetId ?? '',
+    queryFile: preset?.queryFile ?? null,
+});
+
 const readResponse = async <T,>(response: Response): Promise<T> => {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -93,6 +129,9 @@ const readResponse = async <T,>(response: Response): Promise<T> => {
 };
 
 export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
+    const [similarityPreset] = useState(() => consumeSimilaritySearchPreset());
+    const presetDefaults = resolvePresetDefaults(similarityPreset);
+    const pendingPresetSearchRef = useRef(!!similarityPreset);
     const zh = language === Language.CHINESE;
     const t = useCallback(
         (zhText: string, enText: string) => (zh ? zhText : enText),
@@ -103,13 +142,13 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
     const dinoBaseUrl = `${extensionBaseUrl}/vector_db`;
     const l2gBaseUrl = `${extensionBaseUrl}/l2g_retrieval`;
 
-    const [engine, setEngine] = useState<RetrievalEngine>('dino');
+    const [engine, setEngine] = useState<RetrievalEngine>(presetDefaults.engine);
     const [dinoStatus, setDinoStatus] = useState<DinoStatus | null>(null);
     const [dinoDown, setDinoDown] = useState(false);
     const [dinoCollections, setDinoCollections] = useState<DinoCollection[]>([]);
     const [collectionsLoading, setCollectionsLoading] = useState(true);
     const [collectionsError, setCollectionsError] = useState<string | null>(null);
-    const [selectedCollectionName, setSelectedCollectionName] = useState('');
+    const [selectedCollectionName, setSelectedCollectionName] = useState(presetDefaults.collectionName);
     const [warmingDino, setWarmingDino] = useState(false);
 
     const [l2gStatus, setL2GStatus] = useState<L2GStatus | null>(null);
@@ -118,25 +157,90 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
     const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
     const [datasetsLoading, setDatasetsLoading] = useState(true);
     const [datasetsError, setDatasetsError] = useState<string | null>(null);
-    const [selectedDatasetId, setSelectedDatasetId] = useState('');
+    const [selectedDatasetId, setSelectedDatasetId] = useState(presetDefaults.datasetId);
 
-    const [queryFile, setQueryFile] = useState<File | null>(null);
+    const [queryFile, setQueryFile] = useState<File | null>(presetDefaults.queryFile);
     const [queryPreview, setQueryPreview] = useState<string | null>(null);
     const queryPreviewRef = useRef<string | null>(null);
     const [topK, setTopK] = useState(12);
     const [classFilter, setClassFilter] = useState('');
     const [queryBbox, setQueryBbox] = useState('');
-    const [searching, setSearching] = useState(false);
-    const searchingRef = useRef(false);
-    const [elapsed, setElapsed] = useState<number | null>(null);
-    const [dinoResults, setDinoResults] = useState<DinoResult[]>([]);
-    const [l2gResults, setL2GResults] = useState<L2GResult[]>([]);
-    const [searchAttempted, setSearchAttempted] = useState(false);
-    const [searchError, setSearchError] = useState<string | null>(null);
+    const [dinoSearch, setDinoSearch] = useState<SearchSnapshot<DinoResult>>(emptySearchSnapshot);
+    const [l2gSearch, setL2GSearch] = useState<SearchSnapshot<L2GResult>>(emptySearchSnapshot);
+    const searchingRef = useRef<Record<RetrievalEngine, boolean>>({dino: false, l2g: false});
+    const currentSearch = engine === 'dino' ? dinoSearch : l2gSearch;
+    const {
+        results: currentResults,
+        elapsed,
+        attempted: searchAttempted,
+        error: searchError,
+        searching,
+    } = currentSearch;
+    const anySearching = dinoSearch.searching || l2gSearch.searching;
 
     const selectedCollection = dinoCollections.find(item => item.name === selectedCollectionName) || null;
+    const selectedSceneName = selectedCollection?.scene_name || '';
+    const selectedTargetName = selectedCollection
+        ? selectedCollection.target_name || selectedCollection.display_name
+        : '';
+    const sceneNames = Array.from(new Set(dinoCollections.map(item => item.scene_name || '')));
+    const targetNames = Array.from(new Set(
+        dinoCollections
+            .filter(item => (item.scene_name || '') === selectedSceneName)
+            .map(item => item.target_name || item.display_name),
+    ));
+    const versionCollections = dinoCollections.filter(item =>
+        (item.scene_name || '') === selectedSceneName
+        && (item.target_name || item.display_name) === selectedTargetName,
+    );
+    const selectedDataset = findDataset(datasets, selectedDatasetId);
+    const selectedProjectName = datasetProjectName(selectedDataset);
+    const selectedDatasetName = selectedDatasetNameOrEmpty(selectedDataset);
+    const projectNames = Array.from(new Set(datasets.map(item => item.project_name || '')));
+    const datasetNames = Array.from(new Set(
+        datasets
+            .filter(item => (item.project_name || '') === selectedProjectName)
+            .map(item => item.name),
+    ));
+    const revisionDatasets = datasets.filter(item =>
+        (item.project_name || '') === selectedProjectName
+        && item.name === selectedDatasetName,
+    );
     const dinoReady = dinoStatus?.vector_store.state === 'ready' && dinoStatus?.embedder.state === 'ready';
     const l2gReady = l2gStatus?.pipeline?.state === 'ready';
+
+    const selectPreferredCollection = (collections: DinoCollection[]) =>
+        collections.find(item => item.compatible && item.count > 0) || collections[0] || null;
+
+    const selectScene = (sceneName: string) => {
+        const nextCollection = selectPreferredCollection(
+            dinoCollections.filter(item => (item.scene_name || '') === sceneName),
+        );
+        setSelectedCollectionName(nextCollection?.name || '');
+    };
+
+    const selectTarget = (targetName: string) => {
+        const nextCollection = selectPreferredCollection(
+            dinoCollections.filter(item =>
+                (item.scene_name || '') === selectedSceneName
+                && (item.target_name || item.display_name) === targetName,
+            ),
+        );
+        setSelectedCollectionName(nextCollection?.name || '');
+    };
+
+    const selectDatasetProject = (projectName: string) => {
+        const nextDataset = datasets.find(item => (item.project_name || '') === projectName);
+        setSelectedDatasetId(nextDataset?.id || '');
+    };
+
+    const selectDatasetTarget = (datasetName: string) => {
+        const nextDataset = datasets.find(item =>
+            (item.project_name || '') === selectedProjectName
+            && item.name === datasetName,
+        );
+        setSelectedDatasetId(nextDataset?.id || '');
+    };
 
     const fetchDinoStatus = useCallback(async () => {
         try {
@@ -167,6 +271,15 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
             const collections = Array.isArray(body.collections) ? body.collections : [];
             setDinoCollections(collections);
             setSelectedCollectionName(current => {
+                if (similarityPreset?.mode === 'dino') {
+                    const targetLatest = collections
+                        .filter(item =>
+                            item.scene_id === similarityPreset.sceneId
+                            && item.target_id === similarityPreset.targetId
+                        )
+                        .sort((left, right) => right.version - left.version)[0];
+                    if (targetLatest) return targetLatest.name;
+                }
                 if (current && collections.some(item => item.name === current)) return current;
                 const preferred = collections.find(item => item.compatible && item.count > 0);
                 return preferred?.name || collections[0]?.name || '';
@@ -176,7 +289,7 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
         } finally {
             setCollectionsLoading(false);
         }
-    }, [dinoBaseUrl, t]);
+    }, [dinoBaseUrl, similarityPreset, t]);
 
     const fetchDatasets = useCallback(async () => {
         setDatasetsLoading(true);
@@ -189,6 +302,9 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
                 : [];
             setDatasets(nextDatasets);
             setSelectedDatasetId(current => {
+                if (similarityPreset?.mode === 'l2g' && similarityPreset.datasetId) {
+                    return similarityPreset.datasetId;
+                }
                 if (current && nextDatasets.some(dataset => dataset.id === current)) return current;
                 return nextDatasets[0]?.id || '';
             });
@@ -197,7 +313,14 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
         } finally {
             setDatasetsLoading(false);
         }
-    }, [coreBaseUrl, t]);
+    }, [coreBaseUrl, similarityPreset, t]);
+
+    useEffect(() => {
+        if (!similarityPreset?.queryFile || queryPreviewRef.current) return;
+        const preview = URL.createObjectURL(similarityPreset.queryFile);
+        queryPreviewRef.current = preview;
+        setQueryPreview(preview);
+    }, [similarityPreset]);
 
     useEffect(() => {
         fetchDinoStatus();
@@ -247,29 +370,25 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
         queryPreviewRef.current = preview;
         setQueryFile(file);
         setQueryPreview(preview);
-        setDinoResults([]);
-        setL2GResults([]);
-        setElapsed(null);
-        setSearchAttempted(false);
-        setSearchError(null);
+        setDinoSearch(emptySearchSnapshot());
+        setL2GSearch(emptySearchSnapshot());
     }, []);
 
     const queryDropzone = useDropzone({
         onDrop,
         accept: {'image/*': ['.jpg', '.jpeg', '.png', '.bmp', '.webp']},
         multiple: false,
-        disabled: searching,
+        disabled: anySearching,
     });
 
     const changeEngine = (nextEngine: RetrievalEngine) => {
         setEngine(nextEngine);
-        setElapsed(null);
-        setSearchAttempted(false);
-        setSearchError(null);
     };
 
-    const searchDino = async () => {
-        if (!queryFile || !selectedCollection) return;
+    const searchDino = async (): Promise<{results: DinoResult[]; elapsed: number}> => {
+        if (!queryFile || !selectedCollection) {
+            throw new Error(t('请选择查询图与向量版本。', 'Choose a query image and vector version.'));
+        }
         const form = new FormData();
         form.append('file', queryFile);
         form.append('collection', selectedCollection.name);
@@ -283,39 +402,81 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
         const startedAt = performance.now();
         const response = await fetch(`${dinoBaseUrl}/search`, {method: 'POST', body: form});
         const body = await readResponse<{results?: DinoResult[]}>(response);
-        setDinoResults(Array.isArray(body.results) ? body.results : []);
-        setElapsed(Number(((performance.now() - startedAt) / 1000).toFixed(3)));
+        return {
+            results: Array.isArray(body.results) ? body.results : [],
+            elapsed: Number(((performance.now() - startedAt) / 1000).toFixed(3)),
+        };
     };
 
-    const searchL2G = async () => {
-        if (!queryFile || !selectedDatasetId) return;
+    const searchL2G = async (): Promise<{results: L2GResult[]; elapsed: number | null}> => {
+        if (!queryFile || !selectedDatasetId) {
+            throw new Error(t('请选择查询图与数据集。', 'Choose a query image and dataset.'));
+        }
         const form = new FormData();
         form.append('query', queryFile);
         form.append('dataset_id', selectedDatasetId);
         form.append('top_k', String(topK));
         const response = await fetch(`${l2gBaseUrl}/search`, {method: 'POST', body: form});
         const body = await readResponse<{results?: L2GResult[]; elapsed_s?: number}>(response);
-        setL2GResults(Array.isArray(body.results) ? body.results : []);
-        setElapsed(body.elapsed_s ?? null);
+        return {
+            results: Array.isArray(body.results) ? body.results : [],
+            elapsed: body.elapsed_s ?? null,
+        };
     };
 
     const runSearch = async () => {
-        if (searchingRef.current) return;
-        searchingRef.current = true;
-        setSearching(true);
-        setSearchAttempted(true);
-        setSearchError(null);
-        setElapsed(null);
-        if (engine === 'dino') setDinoResults([]);
-        else setL2GResults([]);
+        const searchEngine = engine;
+        if (searchingRef.current[searchEngine]) return;
+        searchingRef.current[searchEngine] = true;
+        if (searchEngine === 'dino') {
+            setDinoSearch(previous => ({
+                ...previous,
+                attempted: true,
+                error: null,
+                searching: true,
+            }));
+        } else {
+            setL2GSearch(previous => ({
+                ...previous,
+                attempted: true,
+                error: null,
+                searching: true,
+            }));
+        }
         try {
-            if (engine === 'dino') await searchDino();
-            else await searchL2G();
+            if (searchEngine === 'dino') {
+                const result = await searchDino();
+                setDinoSearch(previous => ({
+                    ...previous,
+                    ...result,
+                    attempted: true,
+                    error: null,
+                }));
+            } else {
+                const result = await searchL2G();
+                setL2GSearch(previous => ({
+                    ...previous,
+                    ...result,
+                    attempted: true,
+                    error: null,
+                }));
+            }
         } catch (cause) {
-            setSearchError(cause instanceof Error ? cause.message : t('视觉检索失败，请检查引擎状态与输入。', 'Visual search failed. Check the engine status and input.'));
+            const error = cause instanceof Error
+                ? cause.message
+                : t('视觉检索失败，请检查引擎状态与输入。', 'Visual search failed. Check the engine status and input.');
+            if (searchEngine === 'dino') {
+                setDinoSearch(previous => ({...previous, attempted: true, error}));
+            } else {
+                setL2GSearch(previous => ({...previous, attempted: true, error}));
+            }
         } finally {
-            searchingRef.current = false;
-            setSearching(false);
+            searchingRef.current[searchEngine] = false;
+            if (searchEngine === 'dino') {
+                setDinoSearch(previous => ({...previous, searching: false}));
+            } else {
+                setL2GSearch(previous => ({...previous, searching: false}));
+            }
         }
     };
 
@@ -364,22 +525,54 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
 
     const renderDinoFields = () => (
         <>
-            <label>
-                {t('向量版本', 'Vector version')}
-                <select
-                    value={selectedCollectionName}
-                    disabled={collectionsLoading || !!collectionsError}
-                    onChange={event => setSelectedCollectionName(event.target.value)}
-                >
-                    {dinoCollections.length === 0 && <option value=''>{collectionsLoading ? t('正在读取…', 'Loading…') : t('暂无可用版本', 'No versions available')}</option>}
-                    {dinoCollections.map(item => (
-                        <option key={item.name} value={item.name} disabled={!item.compatible || item.count === 0}>
-                            {item.scene_name || t('默认场景', 'Default scene')} / {item.target_name || item.display_name} / v{item.version} · {item.granularity === 'bbox' ? t('目标框', 'bbox') : t('整图', 'image')} · {item.count}
-                            {!item.compatible ? ` · ${t('不兼容', 'incompatible')}` : ''}
-                        </option>
-                    ))}
-                </select>
-            </label>
+            <div className='HierarchySelectors'>
+                <label>
+                    {t('场景', 'Scene')}
+                    <select
+                        value={selectedSceneName}
+                        disabled={collectionsLoading || !!collectionsError || dinoCollections.length === 0}
+                        onChange={event => selectScene(event.target.value)}
+                    >
+                        {dinoCollections.length === 0 && <option value=''>
+                            {collectionsLoading ? t('正在读取…', 'Loading…') : t('暂无可用场景', 'No scenes available')}
+                        </option>}
+                        {sceneNames.map(sceneName => (
+                            <option key={sceneName || '__default_scene__'} value={sceneName}>
+                                {sceneName || t('默认场景', 'Default scene')}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                <label>
+                    {t('目标', 'Target')}
+                    <select
+                        value={selectedTargetName}
+                        disabled={collectionsLoading || !!collectionsError || targetNames.length === 0}
+                        onChange={event => selectTarget(event.target.value)}
+                    >
+                        {targetNames.length === 0 && <option value=''>{t('暂无可用目标', 'No targets available')}</option>}
+                        {targetNames.map(targetName => (
+                            <option key={targetName} value={targetName}>{targetName}</option>
+                        ))}
+                    </select>
+                </label>
+                <label>
+                    {t('版本', 'Version')}
+                    <select
+                        value={selectedCollectionName}
+                        disabled={collectionsLoading || !!collectionsError || versionCollections.length === 0}
+                        onChange={event => setSelectedCollectionName(event.target.value)}
+                    >
+                        {versionCollections.length === 0 && <option value=''>{t('暂无可用版本', 'No versions available')}</option>}
+                        {versionCollections.map(item => (
+                            <option key={item.name} value={item.name} disabled={!item.compatible || item.count === 0}>
+                                v{item.version} · {item.granularity === 'bbox' ? t('目标框', 'bbox') : t('整图', 'image')} · {item.count}
+                                {!item.compatible ? ` · ${t('不兼容', 'incompatible')}` : ''}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+            </div>
             {selectedCollection && <div className='ProfileBinding'>
                 <span>{t('特征配置', 'Feature Profile')}</span>
                 <strong title={selectedCollection.profile_id}>{selectedCollection.profile_id}</strong>
@@ -404,21 +597,53 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
 
     const renderL2GFields = () => (
         <>
-            <label>
-                {t('数据中心数据集', 'Data-center dataset')}
-                <select
-                    value={selectedDatasetId}
-                    disabled={datasetsLoading || !!datasetsError}
-                    onChange={event => setSelectedDatasetId(event.target.value)}
-                >
-                    {datasets.length === 0 && <option value=''>
-                        {datasetsLoading ? t('正在读取…', 'Loading…') : t('暂无可用数据集', 'No datasets available')}
-                    </option>}
-                    {datasets.map(dataset => <option key={dataset.id} value={dataset.id}>
-                        {dataset.project_name ? `${dataset.project_name} / ` : ''}{dataset.name} · v{dataset.revision || 1} · {dataset.image_count} {t('张', 'images')}
-                    </option>)}
-                </select>
-            </label>
+            <div className='HierarchySelectors'>
+                <label>
+                    {t('场景', 'Scene')}
+                    <select
+                        value={selectedProjectName}
+                        disabled={datasetsLoading || !!datasetsError || datasets.length === 0}
+                        onChange={event => selectDatasetProject(event.target.value)}
+                    >
+                        {datasets.length === 0 && <option value=''>
+                            {datasetsLoading ? t('正在读取…', 'Loading…') : t('暂无可用场景', 'No scenes available')}
+                        </option>}
+                        {projectNames.map(projectName => (
+                            <option key={projectName || '__default_project__'} value={projectName}>
+                                {projectName || t('默认场景', 'Default scene')}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                <label>
+                    {t('目标', 'Target')}
+                    <select
+                        value={selectedDatasetName}
+                        disabled={datasetsLoading || !!datasetsError || datasetNames.length === 0}
+                        onChange={event => selectDatasetTarget(event.target.value)}
+                    >
+                        {datasetNames.length === 0 && <option value=''>{t('暂无可用目标', 'No targets available')}</option>}
+                        {datasetNames.map(datasetName => (
+                            <option key={datasetName} value={datasetName}>{datasetName}</option>
+                        ))}
+                    </select>
+                </label>
+                <label>
+                    {t('版本', 'Version')}
+                    <select
+                        value={selectedDatasetId}
+                        disabled={datasetsLoading || !!datasetsError || revisionDatasets.length === 0}
+                        onChange={event => setSelectedDatasetId(event.target.value)}
+                    >
+                        {revisionDatasets.length === 0 && <option value=''>{t('暂无可用版本', 'No versions available')}</option>}
+                        {revisionDatasets.map(dataset => (
+                            <option key={dataset.id} value={dataset.id}>
+                                v{dataset.revision || 1} · {dataset.image_count} {t('张', 'images')}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+            </div>
             {datasetsError && <div className='FieldError'>
                 <span>{datasetsError}</span>
                 <button type='button' onClick={fetchDatasets}>{t('重试', 'Retry')}</button>
@@ -426,10 +651,15 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
         </>
     );
 
-    const currentResults = engine === 'dino' ? dinoResults : l2gResults;
     const canSearch = engine === 'dino'
         ? !!queryFile && !!selectedCollection && selectedCollection.compatible && selectedCollection.count > 0 && dinoReady
         : !!queryFile && !!selectedDatasetId && l2gReady;
+
+    useEffect(() => {
+        if (!pendingPresetSearchRef.current || !canSearch || searchingRef.current[engine]) return;
+        pendingPresetSearchRef.current = false;
+        void runSearch();
+    }, [canSearch, engine]);
 
     const renderResults = () => {
         if (!searchAttempted || searchError) return null;
@@ -461,8 +691,8 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
         {engine === 'dino'
             ? t('选择向量数据库中的场景、目标和版本进行毫秒级相似检索。查询会绑定该版本的特征配置，不会跨模型混检。',
                 'Run millisecond similarity search against a scene, target and version from Vector Database. Queries bind to that version profile and never mix model spaces.')
-            : t('精细模式复用数据中心的唯一原图，由 L2G 局部特征与全局重排处理困难样本，无需填写服务器路径。',
-                'Precision mode reuses canonical data-center images and applies L2G local-to-global reranking without server paths.')}
+            : t('高精度模式复用数据中心的唯一原图，由 L2G 局部特征与全局重排处理困难样本，无需填写服务器路径。',
+                'High-precision mode reuses canonical data-center images and applies L2G local-to-global reranking without server paths.')}
     </div>;
 
     const renderSearchForm = () => <div className='SearchForm'>
@@ -500,12 +730,20 @@ export const L2GRetrievalPopup: React.FC<IProps> = ({language}) => {
                     <i className={dinoReady ? 'ready' : 'pending'}/>
                 </button>
                 <button type='button' role='tab' aria-selected={engine === 'l2g'} className={engine === 'l2g' ? 'active' : ''} onClick={() => changeEngine('l2g')}>
-                    <strong>{t('精细模式', 'Precision Mode')}</strong>
+                    <strong>{t('高精度模式', 'High-precision Mode')}</strong>
                     <span>{t('L2G 局部到全局重排', 'L2G local-to-global reranking')}</span>
                     <i className={l2gReady ? 'ready' : 'pending'}/>
                 </button>
             </div>
             {engine === 'dino' ? renderDinoBanner() : renderL2GBanner()}
+            {similarityPreset && <div className='Hint'>
+                {t('推理栏检索方案：', 'Inference-bar retrieval plan: ')}
+                <strong>{similarityPreset.sceneName} / {similarityPreset.targetName}</strong>
+                {' · '}
+                {engine === 'dino' ? t('快速', 'Fast') : t('精细', 'Precision')}
+                {' · '}
+                {t(`最新数据版本 v${similarityPreset.dataVersion}`, `Latest data version v${similarityPreset.dataVersion}`)}
+            </div>}
             {renderEngineHint()}
             {renderSearchForm()}
             {searchError && <div className='Banner error' role='alert'>{searchError}</div>}

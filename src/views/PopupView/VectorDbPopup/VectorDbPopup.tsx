@@ -161,6 +161,7 @@ interface IProps {
 
 const TERMINAL_JOB_STATES = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
 const HISTORY_IMAGE_PAGE_SIZE = 12;
+const NEW_SCENE_OPTION = '__new_scene__';
 
 const JOB_STATE_LABELS: Record<string, [string, string]> = {
     completed: ['版本更新', 'Version updated'],
@@ -234,7 +235,8 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
     const [collectionsError, setCollectionsError] = useState<string | null>(null);
     const [selectedName, setSelectedName] = useState<string | null>(null);
     const [showCreate, setShowCreate] = useState(false);
-    const [newSceneName, setNewSceneName] = useState('默认场景');
+    const [newSceneName, setNewSceneName] = useState('');
+    const [newSceneIsCustom, setNewSceneIsCustom] = useState(true);
     const [newTargetName, setNewTargetName] = useState('');
     const [createGranularity, setCreateGranularity] = useState<Granularity>('bbox');
     const [creating, setCreating] = useState(false);
@@ -880,16 +882,30 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         <div className='CreateCollectionCard'>
             <label className='FieldStack'>
                 <span>{t('场景名称', 'Scene name')}</span>
-                <input
+                <select
                     autoFocus
-                    list='vector-db-scenes'
+                    value={newSceneIsCustom ? NEW_SCENE_OPTION : newSceneName}
+                    onChange={event => {
+                        if (event.target.value === NEW_SCENE_OPTION) {
+                            setNewSceneIsCustom(true);
+                            setNewSceneName('');
+                            return;
+                        }
+                        setNewSceneIsCustom(false);
+                        setNewSceneName(event.target.value);
+                    }}
+                >
+                    {hierarchy.map(scene => (
+                        <option key={scene.sceneId} value={scene.sceneName}>{scene.sceneName}</option>
+                    ))}
+                    <option value={NEW_SCENE_OPTION}>{t('＋ 新建场景…', '＋ New scene…')}</option>
+                </select>
+                {newSceneIsCustom && <input
+                    autoFocus
                     value={newSceneName}
                     placeholder={t('例如：钢板产线', 'e.g. steel line')}
                     onChange={event => setNewSceneName(event.target.value)}
-                />
-                <datalist id='vector-db-scenes'>
-                    {hierarchy.map(scene => <option key={scene.sceneId} value={scene.sceneName}/>) }
-                </datalist>
+                />}
             </label>
             <label className='FieldStack'>
                 <span>{t('目标名称', 'Target name')}</span>
@@ -951,7 +967,15 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                 type='button'
                 className='NewCollectionButton'
                 disabled={!storeReady || storeBad || backendDown}
-                onClick={() => { setShowCreate(value => !value); setCreateError(null); }}
+                onClick={() => {
+                    const willShow = !showCreate;
+                    setShowCreate(willShow);
+                    setCreateError(null);
+                    if (!willShow) return;
+                    const preferredSceneName = selected?.scene_name || hierarchy[0]?.sceneName || '';
+                    setNewSceneName(preferredSceneName);
+                    setNewSceneIsCustom(!preferredSceneName);
+                }}
             >
                 <span aria-hidden='true'>＋</span>{t('新建目标', 'New target')}
             </button>
@@ -1425,7 +1449,9 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                 <div className='CollectionTitle'>
                     <div className='CollectionIdentity'>
                         <span className='Eyebrow'>
-                            {selected.scene_name || t('默认场景', 'Default scene')} / {t('目标', 'Target')}
+                            {selected.scene_name
+                                ? `${selected.scene_name} ${t('场景', 'Scene')}`
+                                : t('默认场景', 'Default scene')}
                         </span>
                         <div className='CollectionNameRow'>
                             <h3>{selected.target_name || selected.display_name}</h3>
@@ -1442,7 +1468,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                         className='DangerButton'
                         disabled={selectedJobActive}
                         onClick={() => { setDeleteConfirm(true); setDeleteError(null); }}
-                    >{t('删除当前索引', 'Delete current index')}</button>
+                    >{t('删除数据库', 'Delete database')}</button>
                 </div>
             </header>
             <div className='MetadataGrid'>

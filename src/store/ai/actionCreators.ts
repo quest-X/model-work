@@ -65,6 +65,15 @@ export function updateSegmentationResults(segmentationResults: SegmentationResul
     }
 }
 
+export function removeSegmentationResultsByClassNames(classNames: string[]): AIActionTypes {
+    return {
+        type: Action.REMOVE_SEGMENTATION_RESULTS_BY_CLASS_NAMES,
+        payload: {
+            classNames
+        }
+    }
+}
+
 export function toggleImageSegmentationLabelsVisibility(imageId: string): AIActionTypes {
     return {
         type: Action.TOGGLE_IMAGE_SEGMENTATION_LABELS_VISIBILITY,

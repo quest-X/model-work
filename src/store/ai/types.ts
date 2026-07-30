@@ -127,6 +127,13 @@ interface UpdateSegmentationResults {
     }
 }
 
+interface RemoveSegmentationResultsByClassNames {
+    type: typeof Action.REMOVE_SEGMENTATION_RESULTS_BY_CLASS_NAMES;
+    payload: {
+        classNames: string[];
+    }
+}
+
 export type AIActionTypes = UpdateSuggestedLabelList
     | UpdateRejectedSuggestedLabelList
     | UpdateDisabledAIFlag
@@ -136,3 +143,4 @@ export type AIActionTypes = UpdateSuggestedLabelList
     | ToggleImageSegmentationLabelsVisibility
     | AddInferenceHistory
     | UpdateSegmentationResults
+    | RemoveSegmentationResultsByClassNames

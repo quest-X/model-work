@@ -124,5 +124,34 @@ describe('LabelActions', () => {
             expect(remainingResults).toHaveLength(1);
             expect(remainingResults[0].class_name).toBe('bike');
         });
+
+        it('should remove matching results from every image cache', () => {
+            const deletedLabel = LabelUtil.createLabelName('Person');
+            const retainedLabel = LabelUtil.createLabelName('bike');
+            store.dispatch(updateLabelNames([deletedLabel, retainedLabel]));
+
+            const personResult: SegmentationResult = {
+                class_id: 1,
+                class_name: 'person',
+                confidence: 0.9,
+                bbox: { x1: 10, y1: 10, x2: 50, y2: 50, width: 40, height: 40 },
+                mask: null
+            };
+            const bikeResult: SegmentationResult = {
+                class_id: 2,
+                class_name: 'bike',
+                confidence: 0.8,
+                bbox: { x1: 60, y1: 60, x2: 100, y2: 100, width: 40, height: 40 },
+                mask: null
+            };
+            store.dispatch(updateSegmentationResults([personResult, bikeResult], 'image-1'));
+            store.dispatch(updateSegmentationResults([personResult], 'image-2'));
+
+            LabelActions.removeLabelNames([deletedLabel.id]);
+
+            expect(store.getState().ai.imageSegmentationResults.get('image-1')).toEqual([bikeResult]);
+            expect(store.getState().ai.imageSegmentationResults.get('image-2')).toEqual([]);
+            expect(store.getState().ai.segmentationResults).toEqual([]);
+        });
     });
 });

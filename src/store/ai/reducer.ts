@@ -162,6 +162,33 @@ export function aiReducer(
                 imageSegmentationResults: newImageSegmentationResults
             }
         }
+        case Action.REMOVE_SEGMENTATION_RESULTS_BY_CLASS_NAMES: {
+            const removedClassNames = new Set(
+                action.payload.classNames
+                    .map(className => className.trim().toLowerCase())
+                    .filter(Boolean)
+            );
+            if (removedClassNames.size === 0) {
+                return state;
+            }
+
+            const shouldKeepResult = (result: AIState['segmentationResults'][number]) => {
+                const className = (result.info?.name || result.class_name || '').trim().toLowerCase();
+                return !removedClassNames.has(className);
+            };
+            const newSegmentationResults = state.segmentationResults.filter(shouldKeepResult);
+            const newImageSegmentationResults = new Map<string, AIState['segmentationResults']>();
+
+            state.imageSegmentationResults.forEach((results, imageId) => {
+                newImageSegmentationResults.set(imageId, results.filter(shouldKeepResult));
+            });
+
+            return {
+                ...state,
+                segmentationResults: newSegmentationResults,
+                imageSegmentationResults: newImageSegmentationResults
+            }
+        }
         case Action.ADD_INFERENCE_HISTORY: {
             const { imageId, timestamp, detectedCount, success, type } = action.payload;
             const newImageAIStates = new Map(state.imageAIStates);

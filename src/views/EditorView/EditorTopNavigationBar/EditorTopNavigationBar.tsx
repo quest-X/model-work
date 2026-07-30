@@ -28,8 +28,9 @@ import { AIDetectionActions } from '../../../logic/actions/AIDetectionActions';
 import { AISegmentationActions } from '../../../logic/actions/AISegmentationActions';
 import { DetectionAPIDetector } from '../../../ai/DetectionAPIDetector';
 import { SegmentationAPIDetector } from '../../../ai/SegmentationAPIDetector';
-import { getEngineBaseUrl } from '../../../utils/DefaultBackendUrl';
+import { getEngineBaseUrl, getExtensionEngineBaseUrl } from '../../../utils/DefaultBackendUrl';
 import { ActiveModel } from '../../../ai/ActiveModel';
+import { queueSimilaritySearchPreset, SimilaritySearchMode } from '../../../ai/SimilaritySearchPresetStore';
 import { ScriptStore } from '../../../ai/ScriptStore';
 import { PipelineStore } from '../../../ai/PipelineStore';
 import { SmartAnnotationActions } from '../../../logic/actions/SmartAnnotationActions';
@@ -45,6 +46,41 @@ import { inferModelTaskFromName } from '../../../utils/ModelTaskUtil';
 import {ModelInspectorTrigger} from './ModelInspectorTrigger';
 const BUTTON_SIZE: ISize = { width: 30, height: 30 };
 const BUTTON_PADDING: number = 10;
+
+interface SimilarityVectorCollection {
+    name: string;
+    scene_id: string;
+    scene_name: string;
+    target_id: string;
+    target_name: string;
+    version: number;
+    data_version?: number;
+    granularity: 'image' | 'bbox';
+    count: number;
+    compatible: boolean;
+    compatibility_reason?: string | null;
+}
+
+interface SimilarityIngestJob {
+    collection: string;
+    state: string;
+    dataset_id: string;
+    data_version?: number;
+    finished_at?: string | null;
+    updated_at?: string | null;
+}
+
+interface SimilaritySearchConfig {
+    mode: SimilaritySearchMode;
+    sceneId: string;
+    sceneName: string;
+    targetId: string;
+    targetName: string;
+    collectionName: string;
+    collectionVersion: number;
+    dataVersion: number;
+    datasetId?: string;
+}
 
 const StyledTooltip = styled(({ className, ...props }: TooltipProps) => (
     <Tooltip {...props} classes={{ popper: className }} />
@@ -292,6 +328,21 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
     // ── 推理下拉菜单 ──
     const [showInferenceMenu, setShowInferenceMenu] = useState(false);
     const inferenceMenuRef = useRef<HTMLDivElement>(null);
+    const [selectedModelNames, setSelectedModelNames] = useState<string[]>([]);
+    const [useModelMultiSelect, setUseModelMultiSelect] = useState(false);
+    const [similaritySearchSelected, setSimilaritySearchSelected] = useState(false);
+    const [showSimilarityConfig, setShowSimilarityConfig] = useState(false);
+    const [similarityCollections, setSimilarityCollections] = useState<SimilarityVectorCollection[]>([]);
+    const [similarityJobs, setSimilarityJobs] = useState<SimilarityIngestJob[]>([]);
+    const [similarityOptionsLoading, setSimilarityOptionsLoading] = useState(false);
+    const [similarityOptionsError, setSimilarityOptionsError] = useState<string | null>(null);
+    const [similaritySceneId, setSimilaritySceneId] = useState('');
+    const [similarityTargetId, setSimilarityTargetId] = useState('');
+    const [similarityCollectionName, setSimilarityCollectionName] = useState('');
+    const [similarityMode, setSimilarityMode] = useState<SimilaritySearchMode>('dino');
+    const [similaritySearchConfig, setSimilaritySearchConfig] = useState<SimilaritySearchConfig | null>(null);
+    const multiInferenceCancelledRef = useRef(false);
+    const pendingModelSwitchesRef = useRef<Map<string, Promise<boolean>>>(new Map());
     // 用于区分智能标注按钮的单击 vs 双击（延迟单击 200ms）
     const smartClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // 自定义脚本激活标记 —— 监听 ScriptStore 变更事件刷新
@@ -434,19 +485,33 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
 
     // 切换模型：调用后端 /switch-model，立即乐观更新；切换成功后强制刷新一次状态
     const fetchModelsRef = useRef<() => void>();
-    const switchModel = useCallback((modelName: string) => {
-        if (modelName === activeModelName) return;
+    const switchModel = useCallback((modelName: string): Promise<boolean> => {
+        const pendingSwitch = pendingModelSwitchesRef.current.get(modelName);
+        if (pendingSwitch) return pendingSwitch;
+        if (modelName === detSlotName || modelName === segSlotName) {
+            setActiveModelName(modelName);
+            return Promise.resolve(true);
+        }
+
         setActiveModelName(modelName); // 乐观更新，轮询不会覆盖
         const url = `${getEngineBaseUrl()}/switch-model`;
-        fetch(url, {
+        const request = fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: modelName }),
-        }).then(r => r.json()).then(data => {
+        }).then(r => {
+            if (!r.ok) throw new Error(`Switch model failed: HTTP ${r.status}`);
+            return r.json();
+        }).then(data => {
             if (data.active) setActiveModelName(data.active);
             fetchModelsRef.current?.();
-        }).catch(() => {});
-    }, [activeModelName]);
+            return true;
+        }).catch(() => false).finally(() => {
+            pendingModelSwitchesRef.current.delete(modelName);
+        });
+        pendingModelSwitchesRef.current.set(modelName, request);
+        return request;
+    }, [detSlotName, segSlotName]);
 
     // 轮询后端获取已加载模型列表 + 模型类型
     // 注意：health 返回的 "model" 始终是 detection slot，不反映用户的最后选择。
@@ -546,6 +611,41 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [showInferenceMenu]);
 
+    const loadSimilaritySearchOptions = useCallback(async () => {
+        setSimilarityOptionsLoading(true);
+        setSimilarityOptionsError(null);
+        const vectorBaseUrl = `${getExtensionEngineBaseUrl()}/vector_db`;
+        try {
+            const [collectionsResponse, jobsResponse] = await Promise.all([
+                fetch(`${vectorBaseUrl}/collections`),
+                fetch(`${vectorBaseUrl}/jobs`),
+            ]);
+            if (!collectionsResponse.ok || !jobsResponse.ok) {
+                throw new Error(`HTTP ${collectionsResponse.status}/${jobsResponse.status}`);
+            }
+            const collectionsBody = await collectionsResponse.json();
+            const jobsBody = await jobsResponse.json();
+            setSimilarityCollections(
+                Array.isArray(collectionsBody.collections) ? collectionsBody.collections : []
+            );
+            setSimilarityJobs(Array.isArray(jobsBody.jobs) ? jobsBody.jobs : []);
+        } catch (cause) {
+            setSimilarityOptionsError(
+                language === 'zh'
+                    ? `检索方案加载失败：${cause instanceof Error ? cause.message : String(cause)}`
+                    : `Failed to load retrieval options: ${cause instanceof Error ? cause.message : String(cause)}`
+            );
+        } finally {
+            setSimilarityOptionsLoading(false);
+        }
+    }, [language]);
+
+    useEffect(() => {
+        if (showSimilarityConfig) {
+            void loadSimilaritySearchOptions();
+        }
+    }, [showSimilarityConfig, loadSimilaritySearchOptions]);
+
     // 模型下拉选项（useMemo 避免重复计算）
     const modelDropdownEntries = useMemo(() => {
         const zh = language === 'zh';
@@ -561,7 +661,14 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                 const slotMatchesCat = cat.startsWith('custom') ? slotIsCustom : !slotIsCustom;
                 if (slotMatchesCat) return slotName;
             }
-            if (cat.startsWith('custom')) return null;
+            if (cat.startsWith('custom')) {
+                const expectsSegmentation = cat.endsWith('seg');
+                return loadedModels.find(name => {
+                    if (!isCustomName(name)) return false;
+                    const task = modelTasks[name] || inferModelTaskFromName(name);
+                    return expectsSegmentation ? task === 'segment' : task !== 'segment';
+                }) || null;
+            }
             const found = cat === 'builtin-seg'
                 ? availableModels.find(m => m.type === 'segmentation')
                 : availableModels.find(m => m.type === 'detection');
@@ -571,22 +678,196 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
             { cat: 'custom-det',  label: zh ? '自定义' : 'Custom' },
             { cat: 'custom-seg',  label: zh ? '自定义' : 'Custom' },
             { cat: 'builtin-det', label: zh ? '检测模型' : 'Detection' },
-            { cat: 'builtin-seg', label: zh ? '分割模型' : 'Segmentation' },
+            { cat: 'builtin-seg', label: zh ? '分割模型' : 'Segmentation Model' },
         ];
         const seen = new Set<string>();
-        const entries: Array<{ name: string; label: string }> = [];
+        const entries: Array<{
+            name: string;
+            label: string;
+            group: 'custom' | 'models';
+            task: 'detect' | 'segment';
+        }> = [];
         for (const { cat, label } of catOrder) {
             const name = pickFor(cat);
-            if (name && !seen.has(name)) { seen.add(name); entries.push({ name, label }); }
+            if (name && !seen.has(name)) {
+                seen.add(name);
+                entries.push({
+                    name,
+                    label,
+                    group: cat.startsWith('custom') ? 'custom' : 'models',
+                    task: cat.endsWith('seg') ? 'segment' : 'detect',
+                });
+            }
         }
         return entries;
-    }, [language, availableModels, detSlotName, segSlotName]);
+    }, [language, availableModels, detSlotName, segSlotName, loadedModels, modelTasks]);
+
+    // 模型列表刷新后移除已经不存在的勾选项。
+    useEffect(() => {
+        setSelectedModelNames(current =>
+            current.filter(name => modelDropdownEntries.some(entry => entry.name === name))
+        );
+    }, [modelDropdownEntries]);
+
+    const activeModelEntry = modelDropdownEntries.find(e => e.name === activeModelName);
+    const effectiveSelectedModelNames = useModelMultiSelect
+        ? selectedModelNames
+        : activeModelEntry ? [activeModelEntry.name] : [];
+    const selectedModelEntries = modelDropdownEntries.filter(
+        entry => effectiveSelectedModelNames.includes(entry.name)
+    );
 
     // 当前选中项的显示文本
-    const activeModelEntry = modelDropdownEntries.find(e => e.name === activeModelName);
     const activeModelLabel = activeModelEntry
         ? `${activeModelEntry.label} (${activeModelEntry.name})`
         : loadedModels.length === 0 ? (language === 'zh' ? '未加载模型' : 'No model') : activeModelName;
+    const selectedOptionCount = selectedModelEntries.length + (similaritySearchSelected ? 1 : 0);
+    const modelButtonLabel = useModelMultiSelect
+        ? selectedOptionCount === 0
+            ? (language === 'zh' ? '请选择模型' : 'Select models')
+            : selectedOptionCount === 1 && selectedModelEntries.length === 1
+                ? `${selectedModelEntries[0].label} (${selectedModelEntries[0].name})`
+                : selectedOptionCount === 1
+                    ? (language === 'zh' ? '检索相似' : 'Similarity Search')
+                : (language === 'zh'
+                    ? `已选 ${selectedOptionCount} 项`
+                    : `${selectedOptionCount} options selected`)
+        : activeModelLabel;
+
+    const similarityScenes = useMemo(() => {
+        const scenes = new Map<string, string>();
+        similarityCollections.forEach(collection => {
+            scenes.set(collection.scene_id, collection.scene_name);
+        });
+        return [...scenes.entries()].map(([id, name]) => ({ id, name }));
+    }, [similarityCollections]);
+
+    const similarityTargets = useMemo(() => {
+        const targets = new Map<string, string>();
+        similarityCollections
+            .filter(collection => collection.scene_id === similaritySceneId)
+            .forEach(collection => targets.set(collection.target_id, collection.target_name));
+        return [...targets.entries()].map(([id, name]) => ({ id, name }));
+    }, [similarityCollections, similaritySceneId]);
+
+    const similarityVersionCollections = useMemo(
+        () => similarityCollections
+            .filter(collection =>
+                collection.scene_id === similaritySceneId
+                && collection.target_id === similarityTargetId
+            )
+            .sort((left, right) => right.version - left.version),
+        [similarityCollections, similaritySceneId, similarityTargetId]
+    );
+
+    const latestSimilarityCollection = similarityVersionCollections[0] || null;
+    const selectedSimilarityCollection = similarityVersionCollections.find(
+        collection => collection.name === similarityCollectionName
+    ) || latestSimilarityCollection;
+
+    const selectedSimilarityDatasetJob = useMemo(() => {
+        if (!selectedSimilarityCollection) return null;
+        return similarityJobs
+            .filter(job =>
+                job.collection === selectedSimilarityCollection.name
+                && job.state === 'completed'
+                && !!job.dataset_id
+            )
+            .sort((left, right) => {
+                const dataVersionDifference = (right.data_version || 0) - (left.data_version || 0);
+                if (dataVersionDifference !== 0) return dataVersionDifference;
+                const rightTime = Date.parse(right.finished_at || right.updated_at || '') || 0;
+                const leftTime = Date.parse(left.finished_at || left.updated_at || '') || 0;
+                return rightTime - leftTime;
+            })[0] || null;
+    }, [selectedSimilarityCollection, similarityJobs]);
+
+    useEffect(() => {
+        if (similarityScenes.length === 0) return;
+        if (!similarityScenes.some(scene => scene.id === similaritySceneId)) {
+            setSimilaritySceneId(similarityScenes[0].id);
+        }
+    }, [similarityScenes, similaritySceneId]);
+
+    useEffect(() => {
+        if (similarityTargets.length === 0) {
+            setSimilarityTargetId('');
+            return;
+        }
+        if (!similarityTargets.some(target => target.id === similarityTargetId)) {
+            setSimilarityTargetId(similarityTargets[0].id);
+        }
+    }, [similarityTargets, similarityTargetId]);
+
+    useEffect(() => {
+        if (similarityVersionCollections.length === 0) {
+            setSimilarityCollectionName('');
+            return;
+        }
+        if (!similarityVersionCollections.some(collection => collection.name === similarityCollectionName)) {
+            setSimilarityCollectionName(similarityVersionCollections[0].name);
+        }
+    }, [similarityCollectionName, similarityVersionCollections]);
+
+    const openSimilarityConfig = useCallback(() => {
+        if (similaritySearchConfig) {
+            setSimilaritySceneId(similaritySearchConfig.sceneId);
+            setSimilarityTargetId(similaritySearchConfig.targetId);
+            setSimilarityCollectionName(similaritySearchConfig.collectionName);
+            setSimilarityMode(similaritySearchConfig.mode);
+        }
+        setShowSimilarityConfig(true);
+    }, [similaritySearchConfig]);
+
+    const saveSimilarityConfig = useCallback(() => {
+        if (!selectedSimilarityCollection) return;
+        if (similarityMode === 'dino' && (
+            !selectedSimilarityCollection.compatible || selectedSimilarityCollection.count === 0
+        )) return;
+        if (similarityMode === 'l2g' && !selectedSimilarityDatasetJob?.dataset_id) return;
+
+        const config: SimilaritySearchConfig = {
+            mode: similarityMode,
+            sceneId: selectedSimilarityCollection.scene_id,
+            sceneName: selectedSimilarityCollection.scene_name,
+            targetId: selectedSimilarityCollection.target_id,
+            targetName: selectedSimilarityCollection.target_name,
+            collectionName: selectedSimilarityCollection.name,
+            collectionVersion: selectedSimilarityCollection.version,
+            dataVersion: selectedSimilarityCollection.data_version
+                || selectedSimilarityDatasetJob?.data_version
+                || 0,
+            datasetId: selectedSimilarityDatasetJob?.dataset_id || undefined,
+        };
+        if (!useModelMultiSelect) {
+            setSelectedModelNames(activeModelEntry ? [activeModelEntry.name] : []);
+        }
+        setUseModelMultiSelect(true);
+        setSimilaritySearchConfig(config);
+        setSimilaritySearchSelected(true);
+        setShowSimilarityConfig(false);
+    }, [
+        activeModelEntry,
+        selectedSimilarityCollection,
+        selectedSimilarityDatasetJob,
+        similarityMode,
+        useModelMultiSelect,
+    ]);
+    const similarityConfigCanSave = !!selectedSimilarityCollection
+        && (
+            similarityMode === 'dino'
+                ? selectedSimilarityCollection.compatible && selectedSimilarityCollection.count > 0
+                : !!selectedSimilarityDatasetJob?.dataset_id
+        );
+    const similarityConfigSummary = similaritySearchConfig
+        ? `${similaritySearchConfig.sceneName}-${similaritySearchConfig.targetName}-v${
+            similaritySearchConfig.collectionVersion
+        }-${
+            similaritySearchConfig.mode === 'dino'
+                ? (language === 'zh' ? '快速模式' : 'Fast Mode')
+                : (language === 'zh' ? '高精度模式' : 'High-precision Mode')
+        }`
+        : '';
 
     // 判断当前活跃模型是否为分割类型:
     // 1. 优先使用后端 model_tasks（精确，通过 model.task 属性获取）
@@ -611,7 +892,17 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
         store.dispatch({ type: 'SET_SELECTED_MODEL_TASK', payload: resolvedTask });
     }, [activeModelName, modelTasks]);
 
-    const runInference = useCallback((_mode?: string) => {
+    const launchConfiguredSimilaritySearch = useCallback((queryFile: File): boolean => {
+        if (!similaritySearchConfig) return false;
+        queueSimilaritySearchPreset({
+            ...similaritySearchConfig,
+            queryFile,
+        });
+        updateActivePopupTypeAction(PopupWindowType.L2G_RETRIEVAL);
+        return true;
+    }, [similaritySearchConfig, updateActivePopupTypeAction]);
+
+    const runInference = useCallback(async (_mode?: string) => {
         setShowInferenceMenu(false);
         if (isFullImageInferenceInProgress) {
             console.log('[Infer] skip: inference already in progress');
@@ -623,11 +914,13 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
             console.log('[Infer] skip: no active image data');
             return;
         }
+        multiInferenceCancelledRef.current = false;
         console.log('[Infer] entry', {
             isSegModel,
             smartAnnotationActive,
             trackingMode,
             activeModelName,
+            selectedModels: selectedModelEntries.map(entry => entry.name),
             hasImage: !!activeImageData,
             imageId: activeImageData.id,
         });
@@ -697,38 +990,89 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
         }
 
         // ── 正常推理模式 ──
-        // 时间轴选区优先：有选区时，从 imagesData 中切出对应帧范围
-        const range = getTimelineRange();
-        if (range) {
-            const targets = imagesData.slice(range.startFrame, range.endFrame + 1);
-            if (targets.length === 0) return;
-            updateFullImageInferenceStatus(true);
-            if (isSegModel) {
-                AISegmentationActions.segmentBatch(targets, true);
-            } else {
-                AIDetectionActions.detectBatch(targets);
+        // 多选模式按菜单顺序串行执行（检测 → 推理），避免两个批任务争抢全局进度状态。
+        const inferencePlan = useModelMultiSelect
+            ? selectedModelEntries
+            : [{
+                name: activeModelName,
+                task: isSegModel ? 'segment' as const : 'detect' as const,
+            }];
+        if (inferencePlan.length === 0) {
+            if (similaritySearchSelected) {
+                if (!launchConfiguredSimilaritySearch(activeImageData.fileData as File)) {
+                    setShowInferenceMenu(true);
+                    openSimilarityConfig();
+                }
             }
             return;
         }
 
+        const range = getTimelineRange();
         const selectedImages = imagesData.filter((img: ImageData) => img.isSelected);
-        const isBatchMode = selectedImages.length > 1;
-        const targets = isBatchMode ? selectedImages : [activeImageData];
+        const isTimelineBatch = range !== null;
+        const isSelectionBatch = selectedImages.length > 1;
+        const isBatchMode = isTimelineBatch || isSelectionBatch;
+        const targets = range
+            ? imagesData.slice(range.startFrame, range.endFrame + 1)
+            : isSelectionBatch ? selectedImages : [activeImageData];
+        if (targets.length === 0) return;
+        const detectionModelCount = inferencePlan.filter(entry => entry.task === 'detect').length;
+        const segmentationModelCount = inferencePlan.filter(entry => entry.task === 'segment').length;
 
-        updateFullImageInferenceStatus(true);
+        for (const entry of inferencePlan) {
+            if (multiInferenceCancelledRef.current) break;
 
-        // 根据当前活跃模型类型自动路由到检测或分割
-        // 批量模式跳过已推理过的图像;单图模式允许重复推理(显式传 isBatch 区分)
-        if (isSegModel) {
-            AISegmentationActions.segmentBatch(targets, isBatchMode);
-        } else {
-            if (isBatchMode) {
-                AIDetectionActions.detectBatch(targets);
+            updateFullImageInferenceStatus(true);
+            const modelReady = await switchModel(entry.name);
+            if (!modelReady) {
+                updateFullImageInferenceStatus(false);
+                continue;
+            }
+            if (multiInferenceCancelledRef.current) {
+                updateFullImageInferenceStatus(false);
+                break;
+            }
+
+            if (entry.task === 'segment') {
+                await AISegmentationActions.segmentBatch(
+                    targets,
+                    isBatchMode && segmentationModelCount === 1
+                );
             } else {
-                AIDetectionActions.detectObjects(activeImageData);
+                // 单模型单帧沿用原来的轻量回调路径；多模型单帧改走可等待的
+                // detectBatch(false)，确保检测完成后再开始下一项推理。
+                if (inferencePlan.length === 1 && !isBatchMode && !similaritySearchSelected) {
+                    AIDetectionActions.detectObjects(activeImageData);
+                } else {
+                    await AIDetectionActions.detectBatch(
+                        targets,
+                        isBatchMode && detectionModelCount === 1
+                    );
+                }
             }
         }
-    }, [imagesData, isFullImageInferenceInProgress, updateFullImageInferenceStatus, isSegModel, trackingMode, language, activeModelName]);
+        if (similaritySearchSelected && !multiInferenceCancelledRef.current) {
+            if (!launchConfiguredSimilaritySearch(activeImageData.fileData as File)) {
+                setShowInferenceMenu(true);
+                openSimilarityConfig();
+            }
+        }
+    }, [
+        imagesData,
+        isFullImageInferenceInProgress,
+        updateFullImageInferenceStatus,
+        isSegModel,
+        smartAnnotationActive,
+        trackingMode,
+        language,
+        activeModelName,
+        selectedModelEntries,
+        similaritySearchSelected,
+        launchConfiguredSimilaritySearch,
+        openSimilarityConfig,
+        switchModel,
+        useModelMultiSelect,
+    ]);
 
     const withAI = (
         (activeLabelType === LabelType.RECT || activeLabelType === LabelType.ALL) && AISelector.isRoboflowAPIModelLoaded()
@@ -924,11 +1268,11 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                 />
                 <div ref={inferenceMenuRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                     <button
-                        disabled={isFullImageInferenceInProgress || loadedModels.length === 0}
+                        disabled={isFullImageInferenceInProgress}
                         onClick={() => setShowInferenceMenu(v => !v)}
                         style={{
                             background: '#333',
-                            color: imagesData.length === 0 || loadedModels.length === 0 ? '#666' : '#ccc',
+                            color: imagesData.length === 0 ? '#666' : '#ccc',
                             border: '1px solid #555',
                             borderRadius: 4,
                             fontSize: 11,
@@ -937,7 +1281,10 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                             padding: '0 20px 0 6px',
                             cursor: 'default',
                             outline: 'none',
-                            maxWidth: 220,
+                            width: 186,
+                            minWidth: 186,
+                            maxWidth: 186,
+                            flexShrink: 0,
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -946,22 +1293,12 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                             boxSizing: 'border-box',
                         }}
                     >
-                        {activeModelEntry
-                            ? <>
-                                {activeModelEntry.label}
-                                {hasPreScript && <span title={language === 'zh' ? '已激活自定义前处理脚本' : 'Custom preprocess script active'} style={{ color: '#5cc98a', fontWeight: 700 }}>*</span>}
-                                {hasPostScript && <span title={language === 'zh' ? '已激活自定义后处理脚本' : 'Custom postprocess script active'} style={{ color: '#5cc98a', fontWeight: 700 }}>*</span>}
-                                {` (${activeModelEntry.name})`}
-                            </>
-                            : <>
-                                {activeModelLabel}
-                                {hasPreScript && <span title={language === 'zh' ? '已激活自定义前处理脚本' : 'Custom preprocess script active'} style={{ color: '#5cc98a', fontWeight: 700 }}>*</span>}
-                                {hasPostScript && <span title={language === 'zh' ? '已激活自定义后处理脚本' : 'Custom postprocess script active'} style={{ color: '#5cc98a', fontWeight: 700 }}>*</span>}
-                            </>
-                        }
+                        {modelButtonLabel}
+                        {hasPreScript && <span title={language === 'zh' ? '已激活自定义前处理脚本' : 'Custom preprocess script active'} style={{ color: '#5cc98a', fontWeight: 700 }}>*</span>}
+                        {hasPostScript && <span title={language === 'zh' ? '已激活自定义后处理脚本' : 'Custom postprocess script active'} style={{ color: '#5cc98a', fontWeight: 700 }}>*</span>}
                         <span style={{ position: 'absolute', right: 5, top: '50%', transform: 'translateY(-50%)', fontSize: 9, pointerEvents: 'none' }}>▼</span>
                     </button>
-                    {showInferenceMenu && modelDropdownEntries.length > 0 && (
+                    {showInferenceMenu && (
                         <div style={{
                             position: 'absolute',
                             top: 'calc(100% + 2px)',
@@ -974,40 +1311,415 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                             boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
                             overflow: 'hidden',
                         }}>
-                            {modelDropdownEntries.map(e => (
-                                <div
-                                    key={e.name}
-                                    onClick={() => { switchModel(e.name); setShowInferenceMenu(false); }}
-                                    style={{
-                                        padding: '5px 10px',
-                                        fontSize: 11,
-                                        cursor: 'default',
-                                        color: e.name === activeModelName ? '#fff' : '#ccc',
-                                        background: e.name === activeModelName ? '#c62828' : 'transparent',
-                                        whiteSpace: 'nowrap',
-                                    }}
-                                    onMouseEnter={ev => { if (e.name !== activeModelName) (ev.currentTarget as HTMLDivElement).style.background = '#3a3a3a'; }}
-                                    onMouseLeave={ev => { if (e.name !== activeModelName) (ev.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
-                                >
-                                    {e.label} ({e.name}){e.name === activeModelName ? ' ✓' : ''}
+                            {showSimilarityConfig ? (
+                                <div style={{ width: 330, color: '#ccc', fontSize: 11 }}>
+                                    <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 8,
+                                        height: 32,
+                                        padding: '0 10px',
+                                        borderBottom: '1px solid #555',
+                                        color: '#fff',
+                                        fontWeight: 600,
+                                    }}>
+                                        <button
+                                            type='button'
+                                            onClick={() => setShowSimilarityConfig(false)}
+                                            title={language === 'zh' ? '返回' : 'Back'}
+                                            style={{
+                                                padding: 0,
+                                                border: 0,
+                                                background: 'transparent',
+                                                color: '#ccc',
+                                                cursor: 'pointer',
+                                                fontSize: 16,
+                                                lineHeight: 1,
+                                            }}
+                                        >
+                                            ←
+                                        </button>
+                                        {language === 'zh' ? '配置检索相似' : 'Configure Similarity Search'}
+                                    </div>
+                                    <div style={{ padding: 10 }}>
+                                        {similarityOptionsLoading ? (
+                                            <div style={{ padding: '12px 0', color: '#aaa', textAlign: 'center' }}>
+                                                {language === 'zh' ? '正在读取检索方案…' : 'Loading retrieval options…'}
+                                            </div>
+                                        ) : similarityOptionsError ? (
+                                            <div style={{ padding: '8px 0', color: '#ff8a80' }}>
+                                                <div>{similarityOptionsError}</div>
+                                                <button
+                                                    type='button'
+                                                    onClick={() => void loadSimilaritySearchOptions()}
+                                                    style={{
+                                                        marginTop: 7,
+                                                        border: '1px solid #666',
+                                                        borderRadius: 3,
+                                                        background: '#3a3a3a',
+                                                        color: '#ddd',
+                                                        cursor: 'pointer',
+                                                        fontSize: 11,
+                                                    }}
+                                                >
+                                                    {language === 'zh' ? '重试' : 'Retry'}
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <label style={{ display: 'block', marginBottom: 9 }}>
+                                                    <span style={{ display: 'block', marginBottom: 4 }}>
+                                                        {language === 'zh' ? '场景' : 'Scene'}
+                                                    </span>
+                                                    <select
+                                                        value={similaritySceneId}
+                                                        onChange={event => setSimilaritySceneId(event.target.value)}
+                                                        style={{
+                                                            width: '100%',
+                                                            height: 26,
+                                                            padding: '0 6px',
+                                                            border: '1px solid #555',
+                                                            borderRadius: 3,
+                                                            background: '#202020',
+                                                            color: '#ddd',
+                                                            fontSize: 11,
+                                                        }}
+                                                    >
+                                                        {similarityScenes.length === 0 && (
+                                                            <option value=''>{language === 'zh' ? '暂无场景' : 'No scenes'}</option>
+                                                        )}
+                                                        {similarityScenes.map(scene => (
+                                                            <option key={scene.id} value={scene.id}>{scene.name}</option>
+                                                        ))}
+                                                    </select>
+                                                </label>
+                                                <label style={{ display: 'block', marginBottom: 9 }}>
+                                                    <span style={{ display: 'block', marginBottom: 4 }}>
+                                                        {language === 'zh' ? '目标' : 'Target'}
+                                                    </span>
+                                                    <select
+                                                        value={similarityTargetId}
+                                                        onChange={event => setSimilarityTargetId(event.target.value)}
+                                                        disabled={similarityTargets.length === 0}
+                                                        style={{
+                                                            width: '100%',
+                                                            height: 26,
+                                                            padding: '0 6px',
+                                                            border: '1px solid #555',
+                                                            borderRadius: 3,
+                                                            background: '#202020',
+                                                            color: '#ddd',
+                                                            fontSize: 11,
+                                                        }}
+                                                    >
+                                                        {similarityTargets.length === 0 && (
+                                                            <option value=''>{language === 'zh' ? '暂无目标' : 'No targets'}</option>
+                                                        )}
+                                                        {similarityTargets.map(target => (
+                                                            <option key={target.id} value={target.id}>{target.name}</option>
+                                                        ))}
+                                                    </select>
+                                                </label>
+                                                <label style={{
+                                                    display: 'block',
+                                                    marginBottom: 10,
+                                                }}>
+                                                    <span style={{ display: 'block', marginBottom: 4 }}>
+                                                        {language === 'zh' ? '版本' : 'Version'}
+                                                    </span>
+                                                    {selectedSimilarityCollection ? (
+                                                        <>
+                                                            <select
+                                                                value={selectedSimilarityCollection.name}
+                                                                onChange={event => setSimilarityCollectionName(event.target.value)}
+                                                                style={{
+                                                                    width: '100%',
+                                                                    height: 26,
+                                                                    padding: '0 6px',
+                                                                    border: '1px solid #555',
+                                                                    borderRadius: 3,
+                                                                    background: '#202020',
+                                                                    color: '#ddd',
+                                                                    fontSize: 11,
+                                                                }}
+                                                            >
+                                                                {similarityVersionCollections.map(collection => (
+                                                                    <option
+                                                                        key={collection.name}
+                                                                        value={collection.name}
+                                                                        disabled={!collection.compatible || collection.count === 0}
+                                                                    >
+                                                                        v{collection.version} {collection.granularity === 'bbox'
+                                                                            ? (language === 'zh' ? '(目标框)' : '(Bounding boxes)')
+                                                                            : (language === 'zh' ? '(整张图片)' : '(Whole image)')}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            <div style={{
+                                                                marginTop: 4,
+                                                                color: selectedSimilarityCollection.name === latestSimilarityCollection?.name
+                                                                    ? '#7fcf9a'
+                                                                    : '#aaa',
+                                                            }}>
+                                                                {selectedSimilarityCollection.name === latestSimilarityCollection?.name
+                                                                    ? (language === 'zh'
+                                                                        ? `已自动选择最新版本，共 ${selectedSimilarityCollection.count} 条向量`
+                                                                        : `Latest version selected automatically, ${selectedSimilarityCollection.count} vectors total`)
+                                                                    : (language === 'zh'
+                                                                        ? `共 ${selectedSimilarityCollection.count} 条向量`
+                                                                        : `${selectedSimilarityCollection.count} vectors total`)}
+                                                            </div>
+                                                        </>
+                                                    ) : (
+                                                        <span style={{ color: '#ff8a80' }}>
+                                                            {language === 'zh' ? '该目标暂无向量版本' : 'No vector version for this target'}
+                                                        </span>
+                                                    )}
+                                                </label>
+                                                <div style={{ marginBottom: 10 }}>
+                                                    <div style={{ marginBottom: 5 }}>
+                                                        {language === 'zh' ? '检索方案' : 'Retrieval mode'}
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: 6 }}>
+                                                        {([
+                                                            ['dino', language === 'zh' ? '快速' : 'Fast'],
+                                                            ['l2g', language === 'zh' ? '高精度' : 'High-precision'],
+                                                        ] as Array<[SimilaritySearchMode, string]>).map(([mode, label]) => (
+                                                            <button
+                                                                key={mode}
+                                                                type='button'
+                                                                onClick={() => setSimilarityMode(mode)}
+                                                                style={{
+                                                                    flex: 1,
+                                                                    height: 28,
+                                                                    border: `1px solid ${similarityMode === mode ? '#d32f2f' : '#555'}`,
+                                                                    borderRadius: 3,
+                                                                    background: similarityMode === mode ? '#c62828' : '#333',
+                                                                    color: similarityMode === mode ? '#fff' : '#ccc',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: 11,
+                                                                }}
+                                                            >
+                                                                {label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                {selectedSimilarityCollection && similarityMode === 'dino' && (
+                                                    !selectedSimilarityCollection.compatible || selectedSimilarityCollection.count === 0
+                                                ) && (
+                                                    <div style={{ marginBottom: 9, color: '#ff8a80' }}>
+                                                        {selectedSimilarityCollection.compatibility_reason
+                                                            || (language === 'zh' ? '所选版本暂无可检索向量' : 'The selected version has no searchable vectors')}
+                                                    </div>
+                                                )}
+                                                {selectedSimilarityCollection && similarityMode === 'l2g' && (
+                                                    <div style={{
+                                                        marginBottom: 9,
+                                                        color: selectedSimilarityDatasetJob?.dataset_id ? '#7fcf9a' : '#ff8a80',
+                                                    }}>
+                                                        {selectedSimilarityDatasetJob?.dataset_id
+                                                            ? (language === 'zh' ? '高精度检索数据已就绪' : 'High-precision search dataset is ready')
+                                                            : (language === 'zh' ? '所选版本暂无高精度检索数据' : 'No high-precision search data for the selected version')}
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                    <div style={{
+                                        display: 'flex',
+                                        justifyContent: 'flex-end',
+                                        gap: 6,
+                                        padding: '8px 10px',
+                                        borderTop: '1px solid #555',
+                                    }}>
+                                        <button
+                                            type='button'
+                                            onClick={() => setShowSimilarityConfig(false)}
+                                            style={{
+                                                height: 26,
+                                                padding: '0 12px',
+                                                border: '1px solid #555',
+                                                borderRadius: 3,
+                                                background: '#333',
+                                                color: '#ccc',
+                                                cursor: 'pointer',
+                                                fontSize: 11,
+                                            }}
+                                        >
+                                            {language === 'zh' ? '取消' : 'Cancel'}
+                                        </button>
+                                        <button
+                                            type='button'
+                                            disabled={similarityOptionsLoading || !!similarityOptionsError || !similarityConfigCanSave}
+                                            onClick={saveSimilarityConfig}
+                                            style={{
+                                                height: 26,
+                                                padding: '0 12px',
+                                                border: '1px solid #b71c1c',
+                                                borderRadius: 3,
+                                                background: similarityOptionsLoading || !!similarityOptionsError || !similarityConfigCanSave ? '#4a2b2b' : '#c62828',
+                                                color: similarityOptionsLoading || !!similarityOptionsError || !similarityConfigCanSave ? '#8f7777' : '#fff',
+                                                cursor: similarityOptionsLoading || !!similarityOptionsError || !similarityConfigCanSave ? 'not-allowed' : 'pointer',
+                                                fontSize: 11,
+                                            }}
+                                        >
+                                            {language === 'zh' ? '保存并勾选' : 'Save and select'}
+                                        </button>
+                                    </div>
                                 </div>
-                            ))}
+                            ) : (
+                                <>
+                                    {modelDropdownEntries.map((e, index) => {
+                                        const previousEntry = modelDropdownEntries[index - 1];
+                                        const startsModelGroup = index > 0 && e.group === 'models' && previousEntry.group === 'custom';
+                                        const isChecked = effectiveSelectedModelNames.includes(e.name);
+                                        return (
+                                        <React.Fragment key={e.name}>
+                                            {startsModelGroup && <div style={{ height: 1, background: '#555' }} />}
+                                            <div
+                                                onClick={() => {
+                                                    const baseSelection = useModelMultiSelect
+                                                        ? selectedModelNames
+                                                        : activeModelEntry ? [activeModelEntry.name] : [];
+                                                    setUseModelMultiSelect(true);
+                                                    if (isChecked) {
+                                                        setSelectedModelNames(baseSelection.filter(name => name !== e.name));
+                                                    } else {
+                                                        setSelectedModelNames([...baseSelection, e.name]);
+                                                        void switchModel(e.name);
+                                                    }
+                                                }}
+                                                style={{
+                                                    padding: '5px 10px',
+                                                    fontSize: 11,
+                                                    cursor: 'default',
+                                                    color: e.name === activeModelName ? '#fff' : '#ccc',
+                                                    background: e.name === activeModelName ? '#c62828' : 'transparent',
+                                                    whiteSpace: 'nowrap',
+                                                }}
+                                                onMouseEnter={ev => { if (e.name !== activeModelName) (ev.currentTarget as HTMLDivElement).style.background = '#3a3a3a'; }}
+                                                onMouseLeave={ev => { if (e.name !== activeModelName) (ev.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+                                            >
+                                                <input
+                                                    type='checkbox'
+                                                    checked={isChecked}
+                                                    readOnly
+                                                    style={{
+                                                        width: 12,
+                                                        height: 12,
+                                                        margin: '0 6px 0 0',
+                                                        verticalAlign: '-2px',
+                                                        accentColor: '#c62828',
+                                                        pointerEvents: 'none',
+                                                    }}
+                                                />
+                                                {e.label} ({e.name})
+                                            </div>
+                                        </React.Fragment>
+                                        );
+                                    })}
+                                    <div style={{ height: 1, background: '#555' }} />
+                                    <div
+                                        title={similarityConfigSummary || (language === 'zh' ? '配置后启用检索相似' : 'Configure before enabling similarity search')}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            padding: '5px 10px',
+                                            fontSize: 11,
+                                            cursor: 'default',
+                                            color: '#ccc',
+                                            background: 'transparent',
+                                            whiteSpace: 'nowrap',
+                                        }}
+                                        onMouseEnter={ev => { (ev.currentTarget as HTMLDivElement).style.background = '#3a3a3a'; }}
+                                        onMouseLeave={ev => { (ev.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+                                    >
+                                        <label
+                                            style={{
+                                                display: 'flex',
+                                                flex: 1,
+                                                alignItems: 'center',
+                                                minWidth: 0,
+                                                cursor: similaritySearchConfig ? 'pointer' : 'not-allowed',
+                                            }}
+                                        >
+                                            <input
+                                                type='checkbox'
+                                                checked={similaritySearchSelected}
+                                                disabled={!similaritySearchConfig}
+                                                onChange={() => {
+                                                    if (!similaritySearchConfig) return;
+                                                    if (!useModelMultiSelect) {
+                                                        setSelectedModelNames(activeModelEntry ? [activeModelEntry.name] : []);
+                                                    }
+                                                    setUseModelMultiSelect(true);
+                                                    setSimilaritySearchSelected(current => !current);
+                                                }}
+                                                style={{
+                                                    width: 12,
+                                                    height: 12,
+                                                    margin: '0 6px 0 0',
+                                                    accentColor: '#c62828',
+                                                }}
+                                            />
+                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                {language === 'zh' ? '检索相似' : 'Similarity Search'}
+                                                {similaritySearchConfig && (
+                                                    <>
+                                                        {' ('}{similarityConfigSummary}{')'}
+                                                    </>
+                                                )}
+                                            </span>
+                                        </label>
+                                        <button
+                                            type='button'
+                                            onClick={openSimilarityConfig}
+                                            title={language === 'zh' ? '配置检索方案' : 'Configure retrieval plan'}
+                                            style={{
+                                                marginLeft: 8,
+                                                padding: '2px 4px',
+                                                border: 0,
+                                                background: 'transparent',
+                                                color: '#aaa',
+                                                cursor: 'pointer',
+                                                fontSize: 10,
+                                                lineHeight: 1,
+                                                whiteSpace: 'nowrap',
+                                            }}
+                                        >
+                                            {language === 'zh' ? '配置' : 'Configure'} ⚙
+                                        </button>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     )}
                 </div>
                 <button
-                    disabled={imagesData.length === 0}
-                    onClick={() => isFullImageInferenceInProgress ? updateFullImageInferenceStatus(false) : runInference('detection')}
+                    disabled={imagesData.length === 0 || (useModelMultiSelect && selectedOptionCount === 0)}
+                    onClick={() => {
+                        if (isFullImageInferenceInProgress) {
+                            multiInferenceCancelledRef.current = true;
+                            updateFullImageInferenceStatus(false);
+                        } else {
+                            void runInference('detection');
+                        }
+                    }}
                     style={{
                         background: isFullImageInferenceInProgress ? '#c62828' : '#333',
-                        color: imagesData.length === 0 ? '#666' : isFullImageInferenceInProgress ? '#fff' : '#ccc',
+                        color: imagesData.length === 0 || (useModelMultiSelect && selectedOptionCount === 0)
+                            ? '#666'
+                            : isFullImageInferenceInProgress ? '#fff' : '#ccc',
                         border: '1px solid #555',
                         borderRadius: 4,
                         height: 22,
                         lineHeight: '16px',
                         padding: '0 10px',
                         fontSize: 11,
-                        cursor: imagesData.length === 0 ? 'not-allowed' : 'pointer',
+                        cursor: imagesData.length === 0 || (useModelMultiSelect && selectedOptionCount === 0)
+                            ? 'not-allowed'
+                            : 'pointer',
                         whiteSpace: 'nowrap',
                         boxSizing: 'border-box',
                     }}

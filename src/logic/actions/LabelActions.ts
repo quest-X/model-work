@@ -5,6 +5,7 @@ import {store} from '../../index';
 import {updateImageData, updateImageDataById} from '../../store/labels/actionCreators';
 import {LabelType} from '../../data/enums/LabelType';
 import {LabelUtil} from '../../utils/LabelUtil';
+import {removeSegmentationResultsByClassNames} from '../../store/ai/actionCreators';
 
 export class LabelActions {
     public static deleteActiveLabel() {
@@ -133,58 +134,38 @@ export class LabelActions {
     }
 
     public static removeLabelNames(labelNamesIds: string[]) {
+        const removedLabelIds = new Set(labelNamesIds);
+        const removedLabelNames = LabelsSelector.getLabelNames()
+            .filter((labelName: LabelName) => removedLabelIds.has(labelName.id))
+            .map((labelName: LabelName) => labelName.name);
         const imagesData: ImageData[] = LabelsSelector.getImagesData();
         const newImagesData: ImageData[] = imagesData.map((imageData: ImageData) => {
-            return LabelActions.removeLabelNamesFromImageData(imageData, labelNamesIds);
+            return LabelActions.removeLabelNamesFromImageData(imageData, removedLabelIds);
         });
         store.dispatch(updateImageData(newImagesData));
+        store.dispatch(removeSegmentationResultsByClassNames(removedLabelNames));
     }
 
-    private static removeLabelNamesFromImageData(imageData: ImageData, labelNamesIds: string[]): ImageData {
+    private static removeLabelNamesFromImageData(
+        imageData: ImageData,
+        removedLabelIds: ReadonlySet<string>
+    ): ImageData {
         return {
             ...imageData,
-            labelRects: imageData.labelRects.map((labelRect: LabelRect) => {
-                if (labelNamesIds.includes(labelRect.labelId)) {
-                    return {
-                        ...labelRect,
-                        labelId: null
-                    }
-                } else {
-                    return labelRect
-                }
-            }),
-            labelPoints: imageData.labelPoints.map((labelPoint: LabelPoint) => {
-                if (labelNamesIds.includes(labelPoint.labelId)) {
-                    return {
-                        ...labelPoint,
-                        labelId: null
-                    }
-                } else {
-                    return labelPoint
-                }
-            }),
-            labelPolygons: imageData.labelPolygons.map((labelPolygon: LabelPolygon) => {
-                if (labelNamesIds.includes(labelPolygon.labelId)) {
-                    return {
-                        ...labelPolygon,
-                        labelId: null
-                    }
-                } else {
-                    return labelPolygon
-                }
-            }),
-            labelLines: imageData.labelLines.map((labelLine: LabelLine) => {
-                if (labelNamesIds.includes(labelLine.labelId)) {
-                    return {
-                        ...labelLine,
-                        labelId: null
-                    }
-                } else {
-                    return labelLine
-                }
-            }),
+            labelRects: imageData.labelRects.filter(
+                (labelRect: LabelRect) => !labelRect.labelId || !removedLabelIds.has(labelRect.labelId)
+            ),
+            labelPoints: imageData.labelPoints.filter(
+                (labelPoint: LabelPoint) => !labelPoint.labelId || !removedLabelIds.has(labelPoint.labelId)
+            ),
+            labelPolygons: imageData.labelPolygons.filter(
+                (labelPolygon: LabelPolygon) => !labelPolygon.labelId || !removedLabelIds.has(labelPolygon.labelId)
+            ),
+            labelLines: imageData.labelLines.filter(
+                (labelLine: LabelLine) => !labelLine.labelId || !removedLabelIds.has(labelLine.labelId)
+            ),
             labelNameIds: imageData.labelNameIds.filter((labelNameId: string) => {
-                return !labelNamesIds.includes(labelNameId)
+                return !removedLabelIds.has(labelNameId)
             })
         }
     }

@@ -95,13 +95,15 @@ describe('VisualRetrievalPopup', () => {
 
         expect(screen.getByRole('heading', {name: '视觉检索'})).toBeInTheDocument();
         expect(screen.getByRole('tab', {name: /快速模式/})).toBeInTheDocument();
-        expect(screen.getByRole('tab', {name: /精细模式/})).toBeInTheDocument();
+        expect(screen.getByRole('tab', {name: /高精度模式/})).toBeInTheDocument();
         expect(await screen.findByText('特征配置')).toBeInTheDocument();
         expect(screen.getByText('fp_fcc2c772628f1317')).toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('tab', {name: /精细模式/}));
-        expect(screen.getByText('数据中心数据集')).toBeInTheDocument();
-        expect(await screen.findByRole('option', {name: /gbyw \/ 导入标注/})).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('tab', {name: /高精度模式/}));
+        expect(await screen.findByLabelText('场景')).toHaveValue('gbyw');
+        expect(screen.getByLabelText('目标')).toHaveValue('导入标注');
+        expect(screen.getByLabelText('版本')).toHaveValue('dataset-1');
+        expect(screen.getByRole('option', {name: /v1 · 465 张/})).toBeInTheDocument();
         expect(screen.getByText(/复用数据中心的唯一原图/)).toBeInTheDocument();
     });
 
@@ -127,8 +129,8 @@ describe('VisualRetrievalPopup', () => {
 
     it('binds precision search to a structured data-center dataset', async () => {
         const {container} = render(<L2GRetrievalPopup language={Language.CHINESE}/>);
-        fireEvent.click(screen.getByRole('tab', {name: /精细模式/}));
-        await screen.findByRole('option', {name: /gbyw \/ 导入标注/});
+        fireEvent.click(screen.getByRole('tab', {name: /高精度模式/}));
+        await screen.findByRole('option', {name: /v1 · 465 张/});
 
         const input = container.querySelector('.QueryDropzone input[type="file"]') as HTMLInputElement;
         fireEvent.change(input, {target: {files: [new File(['image'], 'query.png', {type: 'image/png'})]}});
@@ -144,5 +146,38 @@ describe('VisualRetrievalPopup', () => {
         const body = searchCall?.[1]?.body as FormData;
         expect(body.get('dataset_id')).toBe('dataset-1');
         expect(body.get('database_dir')).toBeNull();
+    });
+
+    it('preserves each engine result when switching modes', async () => {
+        const {container} = render(<L2GRetrievalPopup language={Language.CHINESE}/>);
+        await screen.findByText('fp_fcc2c772628f1317');
+
+        const input = container.querySelector('.QueryDropzone input[type="file"]') as HTMLInputElement;
+        fireEvent.change(input, {target: {files: [new File(['image'], 'query.png', {type: 'image/png'})]}});
+
+        const runSearch = async () => {
+            const button = screen.getByRole('button', {name: '开始视觉检索'});
+            await waitFor(() => expect(button).toBeEnabled());
+            await act(async () => {
+                fireEvent.click(button);
+            });
+        };
+
+        await runSearch();
+        expect(await screen.findByText('97.3%')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('tab', {name: /高精度模式/}));
+        await screen.findByRole('option', {name: /v1 · 465 张/});
+        expect(screen.queryByText('97.3%')).not.toBeInTheDocument();
+
+        await runSearch();
+        expect(await screen.findByText('99.1%')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('tab', {name: /快速模式/}));
+        expect(await screen.findByText('97.3%')).toBeInTheDocument();
+        expect(screen.queryByText('99.1%')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('tab', {name: /高精度模式/}));
+        expect(await screen.findByText('99.1%')).toBeInTheDocument();
     });
 });

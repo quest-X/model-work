@@ -365,7 +365,7 @@ export class AIDetectionActions {
      * Image mode:
      *   4-way concurrent inference -> batch write
      */
-    public static async detectBatch(imagesToDetect: ImageData[]): Promise<void> {
+    public static async detectBatch(imagesToDetect: ImageData[], isBatch: boolean = true): Promise<void> {
         if (!DetectionAPIDetector.isEnabled() || imagesToDetect.length === 0) return;
 
         const startTime = Date.now();
@@ -430,7 +430,7 @@ export class AIDetectionActions {
             for (let frameIdx = 0; frameIdx < allImagesData.length; frameIdx++) {
                 const img = allImagesData[frameIdx];
                 if (!selectedIds.has(img.id)) continue;
-                if (img.labelRects.some((r: LabelRect) => r.isCreatedByAI)) continue;
+                if (isBatch && img.labelRects.some((r: LabelRect) => r.isCreatedByAI)) continue;
                 frameQueue.push({ frameIdx, imageData: img });
             }
             successCount = total - frameQueue.length;
@@ -619,9 +619,9 @@ export class AIDetectionActions {
             // v2.6.3 起从"4 路并发 × N 次 /detect"改为"分块 × /batch_detect"。后端
             // batch_detect 走真正的 batched forward pass，5 图实测 22% 提速 + 单次
             // HTTP 往返。BATCH_SIZE 取 8 平衡推理速率和单次 timeout 风险。
-            const imageQueue = imagesToDetect.filter(
-                img => !img.labelRects.some((r: LabelRect) => r.isCreatedByAI)
-            );
+            const imageQueue = isBatch
+                ? imagesToDetect.filter(img => !img.labelRects.some((r: LabelRect) => r.isCreatedByAI))
+                : imagesToDetect;
             successCount = total - imageQueue.length;
 
             store.dispatch(updateActiveLabelViewType(LabelType.RECT));

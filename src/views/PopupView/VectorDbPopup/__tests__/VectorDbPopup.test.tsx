@@ -189,6 +189,9 @@ describe('VectorDbPopup', () => {
 
         fireEvent.click(screen.getByRole('button', {name: /新建目标/}));
         fireEvent.click(screen.getByRole('radio', {name: /整张图片/}));
+        fireEvent.change(screen.getByRole('combobox', {name: '场景名称'}), {
+            target: {value: '__new_scene__'},
+        });
         fireEvent.change(screen.getByPlaceholderText('例如：钢板产线'), {target: {value: '二号产线'}});
         fireEvent.change(screen.getByPlaceholderText('例如：划痕'), {target: {value: '缺陷整图库'}});
         await act(async () => {
@@ -202,6 +205,31 @@ describe('VectorDbPopup', () => {
                 scene_name: '二号产线',
                 target_name: '缺陷整图库',
                 granularity: 'image',
+            });
+        });
+    });
+
+    it('uses a real scene selector and preserves the existing scene id', async () => {
+        render(<VectorDbPopup language={Language.CHINESE}/>);
+        await screen.findAllByText('产线帧库');
+
+        fireEvent.click(screen.getByRole('button', {name: /新建目标/}));
+        const sceneSelect = screen.getByRole('combobox', {name: '场景名称'});
+        expect(sceneSelect).toHaveValue('一号产线');
+        expect(within(sceneSelect).getByRole('option', {name: '一号产线'})).toBeInTheDocument();
+        fireEvent.change(screen.getByPlaceholderText('例如：划痕'), {target: {value: '划痕目标'}});
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', {name: '创建目标'}));
+        });
+
+        await waitFor(() => {
+            const createCall = (global.fetch as jest.Mock).mock.calls.find(([url, init]) =>
+                String(url).endsWith('/targets') && init?.method === 'POST');
+            expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
+                scene_id: 'scene_line_1',
+                scene_name: '一号产线',
+                target_name: '划痕目标',
+                granularity: 'bbox',
             });
         });
     });

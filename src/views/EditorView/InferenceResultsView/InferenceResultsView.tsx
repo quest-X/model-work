@@ -5,15 +5,24 @@ import {AppState} from '../../../store';
 import {Language, LanguageConfig} from '../../../data/LanguageConfig';
 import {SegmentationResult} from '../../../store/ai/types';
 import {ImageData, LabelName, LabelPolygon} from '../../../store/labels/types';
-import {updateSegmentationResults} from '../../../store/ai/actionCreators';
-import {updateActiveLabelId} from '../../../store/labels/actionCreators';
+import {updateSegmentationResults as updateSegmentationResultsAction} from '../../../store/ai/actionCreators';
+import {updateActiveLabelId as updateActiveLabelIdAction} from '../../../store/labels/actionCreators';
 import {LabelActions} from '../../../logic/actions/LabelActions';
 import {EditorActions} from '../../../logic/actions/EditorActions';
 import {EditorModel} from '../../../staticModels/EditorModel';
+import {inferenceThumbnailCache} from '../../../utils/InferenceThumbnailCache';
+
+type DisplayResult = SegmentationResult & {
+    _labelRectId?: string;
+    _labelPolygonId?: string;
+};
+
+const THUMBNAIL_SIZE = 60;
+const THUMBNAIL_CONCURRENCY = 3;
 
 // 把 labelPolygons（分割标注）映射成展示用结构，兜底 segmentationResults Map 为空的情况
 // 返回 shape 与 SegmentationAPIDetector.convertToUnifiedFormat 一致
-function polygonsToDisplay(polys: LabelPolygon[], labelNames: LabelName[]): any[] {
+function polygonsToDisplay(polys: LabelPolygon[], labelNames: LabelName[]): DisplayResult[] {
     return polys.map((p, idx) => {
         const labelName = labelNames.find(ln => ln.id === p.labelId);
         const name = labelName?.name || p.suggestedLabel || 'unknown';
@@ -45,6 +54,162 @@ function polygonsToDisplay(polys: LabelPolygon[], labelNames: LabelName[]): any[
             _labelPolygonId: p.id,
         };
     });
+}
+
+function getThumbnailKey(imageId: string, result: DisplayResult): string {
+    const linkedAnnotationId = result._labelRectId || result._labelPolygonId;
+    const className = (result.info?.name || result.class_name || 'unknown').trim().toLowerCase();
+    const {x1, y1, x2, y2} = result.bbox;
+    const geometryKey = `${x1},${y1},${x2},${y2},${result.mask?.area || 0}`;
+    return `${imageId}:${linkedAnnotationId || `${className}:${geometryKey}`}`;
+}
+
+function getReadyFrameSource(): CanvasImageSource | null {
+    const frameImage = EditorModel.videoFrameImage;
+    if (frameImage && (frameImage.naturalWidth > 0 || frameImage.width > 0)) return frameImage;
+
+    const videoCanvas = document.querySelector('.VideoCanvas') as HTMLCanvasElement | null;
+    if (videoCanvas && videoCanvas.width > 0 && videoCanvas.height > 0) return videoCanvas;
+
+    const video = EditorModel.videoElement || document.querySelector('video');
+    if (video && video.readyState >= 2 && video.videoWidth > 0) return video;
+    return null;
+}
+
+async function resolveThumbnailSource(
+    imageData: ImageData,
+    isCancelled: () => boolean
+): Promise<CanvasImageSource | null> {
+    const fileData = imageData.fileData;
+    if (!fileData) return null;
+
+    const isVideo = fileData.type?.startsWith('video/') ||
+        /\.(mp4|webm|mov|avi|mkv)$/i.test(fileData.name || '');
+    const isOnDemandFrame = fileData instanceof File &&
+        fileData.size === 0 &&
+        !!EditorModel.videoSessionId;
+
+    if (isVideo || isOnDemandFrame) {
+        // Frame extraction and React state commit are asynchronous. Wait for the
+        // native-resolution source instead of permanently memoizing an early miss.
+        const waitForFrameSource = async (attempt: number): Promise<CanvasImageSource | null> => {
+            if (isCancelled() || attempt >= 20) return null;
+            const source = getReadyFrameSource();
+            if (source) return source;
+            await new Promise(resolve => setTimeout(resolve, 150));
+            return waitForFrameSource(attempt + 1);
+        };
+        return waitForFrameSource(0);
+    }
+
+    return new Promise<CanvasImageSource | null>((resolve) => {
+        const image = new Image();
+        image.crossOrigin = 'anonymous';
+        let objectUrl: string | null = null;
+        const finish = (source: CanvasImageSource | null) => {
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+            resolve(isCancelled() ? null : source);
+        };
+        image.onload = () => finish(image);
+        image.onerror = () => finish(null);
+
+        if (typeof fileData === 'string') {
+            image.src = fileData;
+        } else if (fileData instanceof File || fileData instanceof Blob) {
+            objectUrl = URL.createObjectURL(fileData);
+            image.src = objectUrl;
+        } else {
+            finish(null);
+        }
+    });
+}
+
+function cropThumbnail(source: CanvasImageSource, result: DisplayResult): Promise<Blob | null> {
+    return new Promise(resolve => {
+        try {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            if (!context) {
+                resolve(null);
+                return;
+            }
+
+            canvas.width = THUMBNAIL_SIZE;
+            canvas.height = THUMBNAIL_SIZE;
+            const {x1, y1, x2, y2} = result.bbox;
+            const width = x2 - x1;
+            const height = y2 - y1;
+            if (width <= 0 || height <= 0) {
+                resolve(null);
+                return;
+            }
+
+            const maskPolygon: [number, number][] | undefined =
+                Array.isArray(result.mask) ? result.mask
+                : result.mask?.mask_data ? result.mask.mask_data
+                : undefined;
+
+            if (maskPolygon && maskPolygon.length > 2) {
+                context.fillStyle = '#000';
+                context.fillRect(0, 0, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+                context.save();
+                context.beginPath();
+                const scaleX = THUMBNAIL_SIZE / width;
+                const scaleY = THUMBNAIL_SIZE / height;
+                maskPolygon.forEach(([maskX, maskY], index) => {
+                    const canvasX = (maskX - x1) * scaleX;
+                    const canvasY = (maskY - y1) * scaleY;
+                    if (index === 0) context.moveTo(canvasX, canvasY);
+                    else context.lineTo(canvasX, canvasY);
+                });
+                context.closePath();
+                context.clip();
+                context.drawImage(
+                    source,
+                    x1,
+                    y1,
+                    width,
+                    height,
+                    0,
+                    0,
+                    THUMBNAIL_SIZE,
+                    THUMBNAIL_SIZE
+                );
+                context.restore();
+            } else {
+                context.drawImage(
+                    source,
+                    x1,
+                    y1,
+                    width,
+                    height,
+                    0,
+                    0,
+                    THUMBNAIL_SIZE,
+                    THUMBNAIL_SIZE
+                );
+            }
+
+            canvas.toBlob(resolve, 'image/jpeg', 0.84);
+        } catch {
+            resolve(null);
+        }
+    });
+}
+
+function renderThumbnail(
+    thumbnailUrl: string | undefined,
+    hasFileData: boolean,
+    thumbnailFailed: boolean,
+    alt: string
+): React.ReactNode {
+    if (thumbnailUrl) {
+        return <img src={thumbnailUrl} alt={alt} className="ThumbnailImage"/>;
+    }
+    if (hasFileData && !thumbnailFailed) {
+        return <div className="LoadingThumbnail"><span>⏳</span></div>;
+    }
+    return <div className="NoThumbnail"><span>📷</span></div>;
 }
 
 interface IProps {
@@ -211,101 +376,26 @@ const InferenceResultsView: React.FC<IProps> = ({language, suggestedLabelList, s
         return 'rgba(220, 53, 69, 0.2)';
     };
 
-    const generateThumbnail = (result: SegmentationResult): Promise<string> => {
-        if (!activeImageData?.fileData) return Promise.resolve('');
+    const currentLabelIds = React.useMemo(
+        () => new Set(labelNames.map(labelName => labelName.id)),
+        [labelNames]
+    );
+    const currentLabelNames = React.useMemo(
+        () => new Set(labelNames.map(labelName => labelName.name.trim().toLowerCase()).filter(Boolean)),
+        [labelNames]
+    );
+    const matchesCurrentLabel = React.useCallback((labelId: string | null, suggestedLabel?: string) => {
+        if (labelId && currentLabelIds.has(labelId)) return true;
+        const normalizedSuggestedLabel = suggestedLabel?.trim().toLowerCase();
+        return !!normalizedSuggestedLabel && currentLabelNames.has(normalizedSuggestedLabel);
+    }, [currentLabelIds, currentLabelNames]);
 
-        const cropAndResolve = (source: CanvasImageSource, resolve: (url: string) => void) => {
-            try {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                if (!ctx) { resolve(''); return; }
-                const size = 60;
-                canvas.width = size;
-                canvas.height = size;
-                const {x1, y1, x2, y2} = result.bbox;
-                const bw = x2 - x1;
-                const bh = y2 - y1;
-
-                // 如果有 mask 多边形，用 clip 裁剪，mask 外部为黑色
-                const maskPoly: [number, number][] | undefined =
-                    Array.isArray(result.mask) ? result.mask
-                    : result.mask?.mask_data ? result.mask.mask_data
-                    : undefined;
-                if (maskPoly && maskPoly.length > 2) {
-                    // 先填黑色背景
-                    ctx.fillStyle = '#000';
-                    ctx.fillRect(0, 0, size, size);
-                    // 将 mask 多边形从原图坐标映射到 canvas 坐标并做 clip
-                    ctx.save();
-                    ctx.beginPath();
-                    const scaleX = size / bw;
-                    const scaleY = size / bh;
-                    maskPoly.forEach(([mx, my], i) => {
-                        const cx = (mx - x1) * scaleX;
-                        const cy = (my - y1) * scaleY;
-                        if (i === 0) ctx.moveTo(cx, cy);
-                        else ctx.lineTo(cx, cy);
-                    });
-                    ctx.closePath();
-                    ctx.clip();
-                    ctx.drawImage(source, x1, y1, bw, bh, 0, 0, size, size);
-                    ctx.restore();
-                } else {
-                    ctx.drawImage(source, x1, y1, bw, bh, 0, 0, size, size);
-                }
-                resolve(canvas.toDataURL());
-            } catch { resolve(''); }
-        };
-
-        const fileData = activeImageData.fileData;
-        const isVideo = fileData.type?.startsWith('video/') ||
-            /\.(mp4|webm|mov|avi|mkv)$/i.test(fileData.name || '');
-        // on-demand frames: 0-byte placeholder with image/jpeg type
-        const isOnDemandFrame = fileData instanceof File && fileData.size === 0 && !!EditorModel.videoSessionId;
-
-        if (isVideo || isOnDemandFrame) {
-            // 视频帧缩略图：需要原始分辨率的图像源（检测坐标在原始分辨率空间）
-            // 优先级：videoFrameImage（原始分辨率 Image）→ VideoCanvas（FramePlayer canvas，原始分辨率）→ <video>
-            return new Promise<string>((resolve) => {
-                if (EditorModel.videoFrameImage) {
-                    cropAndResolve(EditorModel.videoFrameImage, resolve);
-                } else {
-                    const videoCanvas = document.querySelector('.VideoCanvas') as HTMLCanvasElement;
-                    if (videoCanvas && videoCanvas.width > 0) {
-                        cropAndResolve(videoCanvas, resolve);
-                    } else {
-                        const video = EditorModel.videoElement || document.querySelector('video');
-                        if (video && video.readyState >= 2) {
-                            cropAndResolve(video, resolve);
-                        } else {
-                            resolve('');
-                        }
-                    }
-                }
-            });
-        }
-
-        // 普通图片：用 Image 元素加载
-        return new Promise<string>((resolve) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => cropAndResolve(img, resolve);
-            img.onerror = () => resolve('');
-            if (typeof fileData === 'string') {
-                img.src = fileData;
-            } else if (fileData instanceof File || fileData instanceof Blob) {
-                const objectUrl = URL.createObjectURL(fileData);
-                img.onload = () => { URL.revokeObjectURL(objectUrl); cropAndResolve(img, resolve); };
-                img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(''); };
-                img.src = objectUrl;
-            } else { resolve(''); }
-        });
-    };
-
-    // 检测结果：从 labelRects 读取 AI 创建的矩形
+    // 检测结果：从 labelRects 读取 AI 创建且仍对应现有类别的矩形
     const allDetResults = React.useMemo(() => {
         if (!activeImageData) return [];
-        const aiRects = activeImageData.labelRects.filter(r => r.isCreatedByAI);
+        const aiRects = activeImageData.labelRects.filter(
+            rect => rect.isCreatedByAI && matchesCurrentLabel(rect.labelId, rect.suggestedLabel)
+        );
         return aiRects.map((rect, idx) => {
             const name = labelNames.find(ln => ln.id === rect.labelId)?.name || rect.suggestedLabel || 'unknown';
             return {
@@ -318,15 +408,23 @@ const InferenceResultsView: React.FC<IProps> = ({language, suggestedLabelList, s
                 _labelRectId: rect.id,
             };
         });
-    }, [activeImageData, labelNames]);
+    }, [activeImageData, labelNames, matchesCurrentLabel]);
 
-    // 分割结果：优先 Redux segmentationResults，回退 labelPolygons
+    // 分割结果：优先 Redux 缓存；过滤已删除/已改名类别后再回退 labelPolygons
     const allSegResults = React.useMemo(() => {
-        if (segmentationResults && segmentationResults.length > 0) return segmentationResults;
+        const currentCachedResults = segmentationResults.filter(result => {
+            const className = (result.info?.name || result.class_name || '').trim().toLowerCase();
+            // Detection is already represented by labelRects. Keeping mask-less
+            // cached detections here produced duplicate cards and duplicate crops.
+            return !!result.mask && currentLabelNames.has(className);
+        });
+        if (currentCachedResults.length > 0) return currentCachedResults;
         if (!activeImageData) return [];
-        const aiPolys = activeImageData.labelPolygons.filter(p => p.isCreatedByAI);
+        const aiPolys = activeImageData.labelPolygons.filter(
+            polygon => polygon.isCreatedByAI && matchesCurrentLabel(polygon.labelId, polygon.suggestedLabel)
+        );
         return aiPolys.length > 0 ? polygonsToDisplay(aiPolys, labelNames) : [];
-    }, [segmentationResults, activeImageData, labelNames]);
+    }, [segmentationResults, activeImageData, labelNames, currentLabelNames, matchesCurrentLabel]);
 
     // 合并并按 activeTab 过滤
     const displayResults = React.useMemo(() => {
@@ -340,120 +438,77 @@ const InferenceResultsView: React.FC<IProps> = ({language, suggestedLabelList, s
     const hasSeg = allSegResults.length > 0;
     const showTabs = hasDet && hasSeg;
 
-    const [thumbnails, setThumbnails] = React.useState<{[key: number]: string}>({});
-    const generatedSetRef = React.useRef(new Set<string>()); // 已生成的 key: "imageId_index"
-    const lastImageIdRef = React.useRef<string | null>(null);
-
-    // 切帧时清空
-    if (activeImageData?.id !== lastImageIdRef.current) {
-        lastImageIdRef.current = activeImageData?.id || null;
-        generatedSetRef.current = new Set();
-        // 会在下次渲染时 setThumbnails({}) 通过下面的 effect
-    }
-
-    React.useEffect(() => {
-        setThumbnails({});
-        generatedSetRef.current = new Set();
-        setActiveTab('all');
-    }, [activeImageData?.id]);
-
-    // 为新增结果生成缩略图
-    const resultCount = displayResults.length;
+    const [thumbnails, setThumbnails] = React.useState<Record<string, string>>({});
+    const [failedThumbnailKeys, setFailedThumbnailKeys] = React.useState<Record<string, boolean>>({});
     const imageId = activeImageData?.id;
 
-    const cropFromSource = (source: CanvasImageSource, result: SegmentationResult): string => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return '';
-        const size = 60;
-        canvas.width = size;
-        canvas.height = size;
-        const {x1, y1, x2, y2} = result.bbox;
-        const bw = x2 - x1;
-        const bh = y2 - y1;
-        if (bw <= 0 || bh <= 0) return '';
-
-        const maskPoly: [number, number][] | undefined =
-            Array.isArray(result.mask) ? result.mask
-            : result.mask?.mask_data ? result.mask.mask_data
-            : undefined;
-
-        if (maskPoly && maskPoly.length > 2) {
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, size, size);
-            ctx.save();
-            ctx.beginPath();
-            const scaleX = size / bw;
-            const scaleY = size / bh;
-            maskPoly.forEach(([mx, my], i) => {
-                const cx = (mx - x1) * scaleX;
-                const cy = (my - y1) * scaleY;
-                if (i === 0) ctx.moveTo(cx, cy);
-                else ctx.lineTo(cx, cy);
-            });
-            ctx.closePath();
-            ctx.clip();
-            ctx.drawImage(source, x1, y1, bw, bh, 0, 0, size, size);
-            ctx.restore();
-        } else {
-            ctx.drawImage(source, x1, y1, bw, bh, 0, 0, size, size);
-        }
-        const url = canvas.toDataURL();
-        // toDataURL returns "data:," for a 0×0 canvas — treat as failure
-        return url && url !== 'data:,' ? url : '';
-    };
+    React.useEffect(() => {
+        setActiveTab('all');
+    }, [imageId]);
 
     React.useEffect(() => {
-        if (resultCount === 0 || !imageId) return;
+        if (!imageId || !activeImageData || displayResults.length === 0) {
+            setThumbnails({});
+            setFailedThumbnailKeys({});
+            return;
+        }
 
-        const currentResults = displayResults;
-        currentResults.forEach(async (result, index) => {
-            const key = `${imageId}_${index}`;
-            if (generatedSetRef.current.has(key)) return;
-            generatedSetRef.current.add(key);
-
-            const trySource = (): CanvasImageSource | null => {
-                const vfi = EditorModel.videoFrameImage;
-                if (vfi && (vfi.naturalWidth > 0 || vfi.width > 0)) return vfi;
-                const vc = document.querySelector('.VideoCanvas') as HTMLCanvasElement;
-                if (vc && vc.width > 0) return vc;
-                return null;
+        let cancelled = false;
+        const thumbnailJobs = displayResults.map(result => {
+            const displayResult = result as DisplayResult;
+            return {
+                result: displayResult,
+                key: getThumbnailKey(imageId, displayResult),
             };
-
-            // 尝试同步裁剪（零延迟）
-            let source = trySource();
-            if (source) {
-                try {
-                    const url = cropFromSource(source, result);
-                    if (url && imageId === lastImageIdRef.current) {
-                        setThumbnails(prev => ({...prev, [index]: url}));
-                        return;
-                    }
-                } catch { /* silent */ }
-            }
-
-            // videoFrameImage 还没就绪（on-demand 异步加载中）：稍后重试一次
-            if (!source) {
-                await new Promise(r => setTimeout(r, 400));
-                source = trySource();
-                if (source) {
-                    try {
-                        const url = cropFromSource(source, result);
-                        if (url && imageId === lastImageIdRef.current) {
-                            setThumbnails(prev => ({...prev, [index]: url}));
-                            return;
-                        }
-                    } catch { /* silent */ }
-                }
-            }
-
-            // 最终回退：普通图片模式
-            const url = await generateThumbnail(result);
-            if (url && imageId === lastImageIdRef.current) {
-                setThumbnails(prev => ({...prev, [index]: url}));
-            }
         });
-    }, [resultCount, imageId]);
+        const cachedThumbnails: Record<string, string> = {};
+        const uncachedJobs = thumbnailJobs.filter(job => {
+            const cachedUrl = inferenceThumbnailCache.get(job.key);
+            if (!cachedUrl) return true;
+            cachedThumbnails[job.key] = cachedUrl;
+            return false;
+        });
+        setThumbnails(cachedThumbnails);
+        setFailedThumbnailKeys({});
+
+        if (uncachedJobs.length === 0) {
+            return;
+        }
+
+        const generateMissingThumbnails = async () => {
+            const source = await resolveThumbnailSource(activeImageData, () => cancelled);
+            if (cancelled) return;
+            if (!source) {
+                const failures = Object.fromEntries(uncachedJobs.map(job => [job.key, true]));
+                setFailedThumbnailKeys(failures);
+                return;
+            }
+
+            let cursor = 0;
+            const worker = async (): Promise<void> => {
+                if (cancelled || cursor >= uncachedJobs.length) return;
+                const job = uncachedJobs[cursor++];
+                const url = await inferenceThumbnailCache.getOrCreate(
+                    job.key,
+                    () => cropThumbnail(source, job.result)
+                );
+                if (cancelled) return;
+                if (url) {
+                    setThumbnails(previous => ({...previous, [job.key]: url}));
+                } else {
+                    setFailedThumbnailKeys(previous => ({...previous, [job.key]: true}));
+                }
+                return worker();
+            };
+            const workerCount = Math.min(THUMBNAIL_CONCURRENCY, uncachedJobs.length);
+            await Promise.all(Array.from({length: workerCount}, () => worker()));
+        };
+
+        void generateMissingThumbnails();
+        return () => {
+            cancelled = true;
+        };
+    }, [activeImageData, displayResults, imageId]);
 
     return (
         <div className="InferenceResultsView">
@@ -476,8 +531,13 @@ const InferenceResultsView: React.FC<IProps> = ({language, suggestedLabelList, s
             <div className="Content">
                 {displayResults.length > 0 ? (
                     <div className="SegmentationResultsList">
-                        {displayResults.map((result, index) => (
-                            <div key={index} className="SegmentationResultItem"
+                        {displayResults.map((result, index) => {
+                            const displayResult = result as DisplayResult;
+                            const thumbnailKey = imageId ? getThumbnailKey(imageId, displayResult) : '';
+                            const thumbnailUrl = thumbnails[thumbnailKey];
+                            const thumbnailFailed = failedThumbnailKeys[thumbnailKey];
+                            return (
+                            <div key={`${thumbnailKey}:${index}`} className="SegmentationResultItem"
                                 onClick={() => handleClickSegmentationResult(result, index)}
                                 onMouseEnter={() => handleMouseEnterSegmentationResult(result, index)}
                                 onMouseLeave={handleMouseLeaveSegmentationResult}
@@ -499,12 +559,11 @@ const InferenceResultsView: React.FC<IProps> = ({language, suggestedLabelList, s
                                 <div className="ResultContent">
                                     <div className="ThumbnailContainer">
                                         <div className="Thumbnail">
-                                            {thumbnails[index] ? (
-                                                <img src={thumbnails[index]} alt={`${result.info?.name || result.class_name} thumbnail`} className="ThumbnailImage"/>
-                                            ) : activeImageData?.fileData ? (
-                                                <div className="LoadingThumbnail"><span>⏳</span></div>
-                                            ) : (
-                                                <div className="NoThumbnail"><span>📷</span></div>
+                                            {renderThumbnail(
+                                                thumbnailUrl,
+                                                !!activeImageData?.fileData,
+                                                thumbnailFailed,
+                                                `${result.info?.name || result.class_name} thumbnail`
                                             )}
                                         </div>
                                     </div>
@@ -532,7 +591,8 @@ const InferenceResultsView: React.FC<IProps> = ({language, suggestedLabelList, s
                                     </div>
                                 </div>
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 ) : suggestedLabelList && suggestedLabelList.length > 0 ? (
                     <div className="ResultsList">
@@ -568,8 +628,8 @@ const mapStateToProps = (state: AppState) => ({
 });
 
 const mapDispatchToProps = {
-    updateSegmentationResults,
-    updateActiveLabelId
+    updateSegmentationResults: updateSegmentationResultsAction,
+    updateActiveLabelId: updateActiveLabelIdAction
 };
 
 export default connect(mapStateToProps, mapDispatchToProps, null, { areStatePropsEqual: shallowEqual })(InferenceResultsView);

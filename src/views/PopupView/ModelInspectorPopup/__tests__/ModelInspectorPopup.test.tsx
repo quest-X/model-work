@@ -4,6 +4,7 @@ import {Language} from '../../../../data/LanguageConfig';
 import {ImageData} from '../../../../store/labels/types';
 import {MODEL_INSPECTOR_ESCAPE_EVENT, ModelInspectorPopup} from '../ModelInspectorPopup';
 import {InspectionSession, InspectorStatus, ModelInspectorAPI} from '../ModelInspectorAPI';
+import {EditorModel} from '../../../../staticModels/EditorModel';
 
 
 jest.mock('../../../../logic/actions/PopupActions', () => ({
@@ -108,6 +109,8 @@ describe('ModelInspectorPopup', () => {
         (ModelInspectorAPI.deleteSession as jest.Mock).mockResolvedValue(undefined);
         Object.defineProperty(URL, 'createObjectURL', {configurable: true, value: jest.fn(() => 'blob:source')});
         Object.defineProperty(URL, 'revokeObjectURL', {configurable: true, value: jest.fn()});
+        EditorModel.videoFrameImage = undefined;
+        EditorModel.playbackImageData = null;
     });
 
     it('automatically captures semantic stages, exposes comparison, and cleans the session on unmount', async () => {
@@ -209,6 +212,47 @@ describe('ModelInspectorPopup', () => {
             expect.objectContaining({imgsz: 640, topK: 8, maxSide: 256}),
             expect.any(AbortSignal),
         );
+    });
+
+    it('captures the full-resolution decoded frame for an on-demand video placeholder', async () => {
+        const placeholderFrame: ImageData = {
+            ...activeImage,
+            id: 'video-frame-6230',
+            fileData: new File([], 'frame_006230.jpg', {type: 'image/jpeg'}),
+        };
+        const decodedFrame = new Image();
+        decodedFrame.src = 'blob:decoded-video-frame';
+        Object.defineProperty(decodedFrame, 'naturalWidth', {configurable: true, value: 1920});
+        Object.defineProperty(decodedFrame, 'naturalHeight', {configurable: true, value: 1080});
+        EditorModel.videoFrameImage = decodedFrame;
+        EditorModel.playbackImageData = placeholderFrame;
+        const drawImage = jest.fn();
+        const getContext = jest.spyOn(HTMLCanvasElement.prototype, 'getContext')
+            .mockReturnValue({drawImage} as unknown as CanvasRenderingContext2D);
+        const toBlob = jest.spyOn(HTMLCanvasElement.prototype, 'toBlob')
+            .mockImplementation(callback => callback(new Blob(['frame'], {type: 'image/png'})));
+
+        render(<ModelInspectorPopup
+            language={Language.CHINESE}
+            activeImage={placeholderFrame}
+            activeModelTask='detect'
+        />);
+
+        await screen.findByTestId('inspector-view-a');
+        expect(drawImage).toHaveBeenCalledWith(decodedFrame, 0, 0, 1920, 1080);
+        expect(ModelInspectorAPI.createSession).toHaveBeenCalledWith(
+            expect.objectContaining({
+                name: 'video-frame-6230.png',
+                type: 'image/png',
+            }),
+            'detection',
+            ['layer-a', 'layer-b'],
+            expect.objectContaining({imgsz: 640, topK: 8, maxSide: 256}),
+            expect.any(AbortSignal),
+        );
+
+        getContext.mockRestore();
+        toBlob.mockRestore();
     });
 
     it('selects all filtered layers and prepares automatic batches', async () => {

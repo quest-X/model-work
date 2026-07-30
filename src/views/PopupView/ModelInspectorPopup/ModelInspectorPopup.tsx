@@ -5,6 +5,7 @@ import {AppState} from '../../../store';
 import {Language} from '../../../data/LanguageConfig';
 import {ImageData} from '../../../store/labels/types';
 import {ImageRepository} from '../../../logic/imageRepository/ImageRepository';
+import {EditorModel} from '../../../staticModels/EditorModel';
 import {PopupActions} from '../../../logic/actions/PopupActions';
 import {
     CatalogDetail,
@@ -82,9 +83,23 @@ const sessionCaptureOptions = (
     };
 };
 
+const decodedImageForFrame = (imageData: ImageData): HTMLImageElement | undefined => {
+    const currentVideoFrame = EditorModel.videoFrameImage;
+    const matchesPlaybackFrame = !EditorModel.playbackImageData
+        || EditorModel.playbackImageData.id === imageData.id;
+    if (
+        imageData.fileData.size === 0
+        && matchesPlaybackFrame
+        && currentVideoFrame?.getAttribute('src')
+    ) {
+        return currentVideoFrame;
+    }
+    return ImageRepository.getById(imageData.id);
+};
+
 const canvasFileFromRepository = async (imageData: ImageData): Promise<File> => {
     if (imageData.fileData && imageData.fileData.size > 0) return imageData.fileData;
-    const image = ImageRepository.getById(imageData.id);
+    const image = decodedImageForFrame(imageData);
     if (!image || !image.src) throw new Error('当前帧尚未解码，请先在编辑器中显示该帧');
     const width = image.naturalWidth || image.width;
     const height = image.naturalHeight || image.height;
@@ -172,7 +187,7 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
             ownedUrl = URL.createObjectURL(activeImage.fileData);
             setPreviewUrl(ownedUrl);
         } else if (activeImage) {
-            setPreviewUrl(ImageRepository.getById(activeImage.id)?.src || null);
+            setPreviewUrl(decodedImageForFrame(activeImage)?.src || null);
         } else {
             setPreviewUrl(null);
         }

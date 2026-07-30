@@ -25,7 +25,7 @@ import {updateActivePopupType} from '../../../store/general/actionCreators';
 import {addVideoData, updateVideoMode} from '../../../store/video/actionCreators';
 import {addQueueItems, setActiveQueueItem, updateQueueItem} from '../../../store/queue/actionCreators';
 import {QueueActions} from '../../../logic/actions/QueueActions';
-import {QueueDataSyncStatus, QueueItem, QueueItemType, QueueItemStatus} from '../../../store/queue/types';
+import {QueueItem, QueueItemType, QueueItemStatus} from '../../../store/queue/types';
 import {PopupWindowType} from '../../../data/enums/PopupWindowType';
 import {ImageDataUtil} from '../../../utils/ImageDataUtil';
 import {sortBy} from 'lodash';
@@ -45,7 +45,7 @@ import {submitNewNotification, updateNotificationById, deleteNotificationById} f
 import {NotificationUtil} from '../../../utils/NotificationUtil';
 import {PendingImportFiles} from '../../../utils/PendingImportFiles';
 import {DataBatchSyncService} from '../../../services/DataBatchSyncService';
-import {getDatasetContentSignature} from '../../../services/DatasetContentSignature';
+import {useDatasetDirtyTracking} from './useDatasetDirtyTracking';
 // import {inferenceEventEmitter, InferenceResultsEvent} from '../../../logic/actions/AISegmentationActions';
 
 interface IProps {
@@ -105,8 +105,13 @@ const EditorContainer: React.FC<IProps> = (
     const [taskPanelPinned, setTaskPanelPinned] = useState(false);
     const taskButtonRef = useRef<HTMLDivElement>(null);
     const taskClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const previousDatasetSignatureRef = useRef<string>(getDatasetContentSignature(imagesData));
-    const previousActiveQueueItemIdRef = useRef<string | null>(activeQueueItemId);
+
+    useDatasetDirtyTracking({
+        activeQueueItemId,
+        imagesData,
+        queueItems,
+        updateQueueItem: updateQueueItemAction,
+    });
 
     const handleTaskButtonClick = useCallback(() => {
         if (taskClickTimer.current !== null) {
@@ -135,18 +140,6 @@ const EditorContainer: React.FC<IProps> = (
         window.addEventListener('opensight:open-task-center', openTaskCenter);
         return () => window.removeEventListener('opensight:open-task-center', openTaskCenter);
     }, []);
-
-    useEffect(() => {
-        const activeItem = queueItems.find(item => item.id === activeQueueItemId);
-        const sameBatch = previousActiveQueueItemIdRef.current === activeQueueItemId;
-        const currentSignature = getDatasetContentSignature(imagesData);
-        const annotationsChanged = previousDatasetSignatureRef.current !== currentSignature;
-        if (sameBatch && annotationsChanged && activeItem?.dataSyncStatus === QueueDataSyncStatus.SYNCED) {
-            updateQueueItemAction(activeItem.id, {dataSyncStatus: QueueDataSyncStatus.DIRTY});
-        }
-        previousDatasetSignatureRef.current = currentSignature;
-        previousActiveQueueItemIdRef.current = activeQueueItemId;
-    }, [activeQueueItemId, imagesData, queueItems, updateQueueItemAction]);
 
     // 手动保存
     const [lastSavedTime, setLastSavedTime] = useState<Date | null>(null);

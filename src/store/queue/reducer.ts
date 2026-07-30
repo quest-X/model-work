@@ -1,5 +1,15 @@
-import { QueueActionTypes, QueueState, QueueItemStatus } from './types';
+import {
+    QueueActionTypes,
+    QueueDataSyncStatus,
+    QueueState,
+} from './types';
 import { Action } from '../Actions';
+import {VisualSearchBBoxAcceptance} from '../labels/types';
+
+type AcceptVisualSearchBBoxAction = {
+    type: Action.ACCEPT_VISUAL_SEARCH_BBOX;
+    payload: VisualSearchBBoxAcceptance;
+};
 
 const initialState: QueueState = {
     items: [],
@@ -8,7 +18,7 @@ const initialState: QueueState = {
 
 export function queueReducer(
     state = initialState,
-    action: QueueActionTypes
+    action: QueueActionTypes | AcceptVisualSearchBBoxAction
 ): QueueState {
     switch (action.type) {
         case Action.ADD_QUEUE_ITEM: {
@@ -53,8 +63,16 @@ export function queueReducer(
         case Action.CLEAR_QUEUE: {
             return initialState;
         }
+        case Action.ACCEPT_VISUAL_SEARCH_BBOX: {
+            return {
+                ...state,
+                items: state.items.map(item =>
+                    item.id === action.payload.queueItemId
+                        ? {...item, dataSyncStatus: QueueDataSyncStatus.DIRTY}
+                        : item),
+            };
+        }
         default:
             return state;
     }
 }
-

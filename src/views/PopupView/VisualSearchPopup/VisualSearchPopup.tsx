@@ -21,6 +21,7 @@ import {
 } from '../../../services/VisualSearchJobService';
 import {
     VisualSearchJobState,
+    VisualSearchResultItem,
     VisualSearchRevision,
 } from '../../../store/visualSearch/types';
 import {visualSearchSetActiveJob} from '../../../store/visualSearch/actionCreators';
@@ -39,6 +40,11 @@ import {
     VisualSearchQueryPreview,
     VisualSearchResults,
 } from './VisualSearchPreview';
+import {
+    VisualSearchAcceptanceService,
+    visualSearchAcceptanceService,
+    visualSearchAcceptedRectId,
+} from '../../../services/VisualSearchAcceptanceService';
 import './VisualSearchPopup.scss';
 
 export interface ResolvedVisualSearchSource {
@@ -64,6 +70,7 @@ type VisualSearchJobRunner = Pick<
     VisualSearchJobService,
     'start' | 'cancelByClientJobId'
 >;
+type VisualSearchAcceptanceRunner = Pick<VisualSearchAcceptanceService, 'accept'>;
 
 interface StateProps {
     language: Language;
@@ -75,6 +82,7 @@ interface StateProps {
     activeVideo: VideoData | null;
     jobs: VisualSearchJobState[];
     activeJobId: string | null;
+    acceptedRectIds: string[];
 }
 
 interface DispatchProps {
@@ -86,6 +94,7 @@ interface OwnProps {
     sourceResolver?: SourceResolver;
     snapshotCapture?: SnapshotCapture;
     jobRunner?: VisualSearchJobRunner;
+    acceptanceRunner?: VisualSearchAcceptanceRunner;
     onClose?: () => void;
 }
 
@@ -335,11 +344,13 @@ export const VisualSearchPopup: React.FC<Props> = ({
     activeVideo,
     jobs,
     activeJobId,
+    acceptedRectIds = [],
     selectJob,
     collectionLoader = loadVisualSearchCollections,
     sourceResolver = resolveVisualSearchSource,
     snapshotCapture = QuerySnapshotService.capture,
     jobRunner = visualSearchJobService,
+    acceptanceRunner = visualSearchAcceptanceService,
     onClose = PopupActions.close,
 }) => {
     const chinese = language === Language.CHINESE;
@@ -383,6 +394,9 @@ export const VisualSearchPopup: React.FC<Props> = ({
     const [capturePhase, setCapturePhase] = useState<QuerySnapshotPhase | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
+    const [acceptingResultId, setAcceptingResultId] = useState<string | null>(null);
+    const [acceptanceError, setAcceptanceError] = useState<string | null>(null);
+    const [acceptedThisSession, setAcceptedThisSession] = useState<string[]>([]);
 
     useEffect(() => {
         if (!queryImage) {
@@ -462,6 +476,18 @@ export const VisualSearchPopup: React.FC<Props> = ({
         collection => collection.name === selectedCollectionName,
     ) ?? null;
     const activeJob = jobs.find(job => job.clientJobId === activeJobId) ?? jobs[0] ?? null;
+    const acceptedResultIds = useMemo(() => {
+        const acceptedIds = new Set(acceptedThisSession);
+        if (!activeJob?.backendJobId) return acceptedIds;
+        activeJob.result?.items.forEach(item => {
+            if (acceptedRectIds.includes(
+                visualSearchAcceptedRectId(activeJob.backendJobId as string, item.resultId),
+            )) {
+                acceptedIds.add(item.resultId);
+            }
+        });
+        return acceptedIds;
+    }, [acceptedRectIds, acceptedThisSession, activeJob]);
     const maskUnavailable = query.kind === 'mask';
     const canSubmit = Boolean(
         queryImage &&
@@ -505,6 +531,63 @@ export const VisualSearchPopup: React.FC<Props> = ({
             ));
         } finally {
             setSubmitting(false);
+        }
+    };
+
+    const acceptanceBlockReason = (
+        job: VisualSearchJobState,
+        item: VisualSearchResultItem,
+    ): string | null => {
+        if (job.snapshot.geometry.kind !== 'bbox' || job.result?.queryKind !== 'bbox') {
+            return t('仅 bbox → bbox 结果可接受', 'Only bbox → bbox results can be accepted');
+        }
+        if (isVideoMode) {
+            return t('视频结果接受尚未启用', 'Acceptance is disabled for video frames');
+        }
+        const targetDatasetId = job.snapshot.target.datasetId;
+        const targetRevision = job.snapshot.target.datasetRevision;
+        if (!targetDatasetId || targetRevision === undefined || targetRevision === null) {
+            return t(
+                '目标版本缺少权威 dataset revision',
+                'The target has no authoritative dataset revision',
+            );
+        }
+        if (!activeQueueItem ||
+            activeQueueItem.datasetId !== targetDatasetId ||
+            String(activeQueueItem.datasetRevision) !== String(targetRevision)) {
+            return t(
+                '请先在文件队列打开目标数据集的精确版本',
+                'Open the exact target dataset revision in the file queue first',
+            );
+        }
+        if (item.datasetId !== targetDatasetId ||
+            String(item.datasetRevision) !== String(targetRevision)) {
+            return t(
+                '结果 dataset revision 与冻结目标不一致',
+                'The result dataset revision differs from the frozen target',
+            );
+        }
+        if (!item.assetId || !item.contentSha256) {
+            return t('结果缺少 SHA-256 资产身份', 'The result lacks SHA-256 asset identity');
+        }
+        return null;
+    };
+
+    const acceptResult = async (item: VisualSearchResultItem) => {
+        if (!activeJob || acceptingResultId) return;
+        setAcceptingResultId(item.resultId);
+        setAcceptanceError(null);
+        try {
+            await acceptanceRunner.accept(activeJob.clientJobId, item.resultId);
+            setAcceptedThisSession(current =>
+                current.includes(item.resultId) ? current : [...current, item.resultId]);
+        } catch (cause) {
+            setAcceptanceError(errorText(
+                cause,
+                t('接受标注框失败', 'Failed to accept the bbox'),
+            ));
+        } finally {
+            setAcceptingResultId(null);
         }
     };
 
@@ -644,6 +727,8 @@ export const VisualSearchPopup: React.FC<Props> = ({
         </button>)}
     </nav>;
 
+    // Rendering keeps every terminal/running state explicit for operator review.
+    // eslint-disable-next-line complexity
     const renderActiveJob = () => <section className='vs-job-detail'>
         {!activeJob && <div className='vs-empty-job'>
             <strong>{t('结果会在这里持续更新', 'Results will keep updating here')}</strong>
@@ -681,12 +766,27 @@ export const VisualSearchPopup: React.FC<Props> = ({
                     )
                     : activeJob.error.message}</span>
             </div>}
-            <VisualSearchResults job={activeJob} chinese={chinese}/>
+            <VisualSearchResults
+                job={activeJob}
+                chinese={chinese}
+                onAccept={item => void acceptResult(item)}
+                acceptanceReason={item => acceptanceBlockReason(activeJob, item)}
+                acceptingResultId={acceptingResultId}
+                acceptedResultIds={acceptedResultIds}
+            />
+            {acceptanceError && <div className='vs-notice error' role='alert'>
+                {acceptanceError}
+            </div>}
             {activeJob.status === 'succeeded' && <div className='vs-preview-only'>
-                {t(
-                    '当前仅提供结果预览；接受入标尚未连接。',
-                    'Results are preview-only; accepting annotations is not connected yet.',
-                )}
+                {activeJob.snapshot.geometry.kind === 'bbox'
+                    ? t(
+                        '仅 bbox → bbox 可原子接受；提交前会校验任务、资产 SHA-256 与 dataset revision，一次接受对应一次撤销。',
+                        'Only bbox → bbox can be accepted atomically. Task identity, asset SHA-256, and dataset revision are checked before one acceptance creates one undo step.',
+                    )
+                    : t(
+                        '整图结果保持预览/定位用途，不会写入标注。',
+                        'Full-image results remain preview/navigation-only and never create annotations.',
+                    )}
             </div>}
         </>}
     </section>;
@@ -746,6 +846,10 @@ const mapStateToProps = (state: AppState): StateProps => {
             .map(id => state.visualSearch.jobsById[id])
             .filter(Boolean),
         activeJobId: state.visualSearch.activeJobId,
+        acceptedRectIds: state.labels.imagesData.flatMap(image =>
+            image.labelRects
+                .map(rect => rect.id)
+                .filter(id => id.startsWith('visual-search:'))),
     };
 };
 

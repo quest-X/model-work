@@ -2,7 +2,8 @@ import {Middleware} from 'redux';
 import {Action} from '../../store/Actions';
 import {UndoStack, RestoreFlag, UndoSnapshot} from './UndoStack';
 import {AppState} from '../../store';
-import {ImageData} from '../../store/labels/types';
+import {ImageData, LabelsActionTypes} from '../../store/labels/types';
+import {QueueItemType} from '../../store/queue/types';
 
 // Actions whose "before" state we want on the undo stack
 const SNAPSHOT_ACTIONS = new Set<string>([
@@ -21,6 +22,96 @@ const LABEL_STATE_ACTIONS = new Set<string>([
     Action.DELETE_SELECTED_IMAGES,
     Action.UPDATE_LABEL_NAMES
 ]);
+
+const sameRevision = (
+    left: string | number | null | undefined,
+    right: string | number | null | undefined,
+): boolean =>
+    left !== null &&
+    left !== undefined &&
+    right !== null &&
+    right !== undefined &&
+    String(left) === String(right);
+
+const sameBBox = (
+    left: readonly number[] | null | undefined,
+    right: readonly number[] | null | undefined,
+): boolean =>
+    Boolean(
+        left &&
+        right &&
+        left.length === 4 &&
+        right.length === 4 &&
+        left.every((value, index) => Math.abs(value - right[index]) <= 1e-6),
+    );
+
+const acceptanceCASFailure = (field: string): never => {
+    throw new Error(`visual_search_acceptance_cas: ${field}`);
+};
+
+type AcceptVisualSearchBBoxAction = Extract<
+    LabelsActionTypes,
+    {type: Action.ACCEPT_VISUAL_SEARCH_BBOX}
+>;
+
+// The acceptance gate intentionally enumerates every identity boundary so a
+// partial check can never turn into a partial write.
+// eslint-disable-next-line complexity
+const assertVisualSearchAcceptanceCAS = (
+    state: AppState,
+    action: AcceptVisualSearchBBoxAction,
+): void => {
+    const acceptance = action.payload;
+    const job = state.visualSearch.jobsById[acceptance.clientJobId];
+    if (!job || job.status !== 'succeeded') acceptanceCASFailure('job_state');
+    if (job.backendJobId !== acceptance.backendJobId) acceptanceCASFailure('task_id');
+    if (job.snapshot.geometry.kind !== 'bbox' || job.result?.queryKind !== 'bbox') {
+        acceptanceCASFailure('query_kind');
+    }
+    if (job.snapshot.target.datasetId !== acceptance.datasetId ||
+        !sameRevision(job.snapshot.target.datasetRevision, acceptance.datasetRevision)) {
+        acceptanceCASFailure('snapshot_dataset_revision');
+    }
+
+    const result = job.result?.items.find(item => item.resultId === acceptance.resultId);
+    if (!result) acceptanceCASFailure('result_id');
+    if (result.assetId !== acceptance.assetId ||
+        result.datasetId !== acceptance.datasetId ||
+        !sameRevision(result.datasetRevision, acceptance.datasetRevision)) {
+        acceptanceCASFailure('result_asset_revision');
+    }
+    const resultBBox = result.geometry?.bbox ?? result.bbox;
+    const acceptedBBox = [
+        acceptance.labelRect.rect.x,
+        acceptance.labelRect.rect.y,
+        acceptance.labelRect.rect.x + acceptance.labelRect.rect.width,
+        acceptance.labelRect.rect.y + acceptance.labelRect.rect.height,
+    ];
+    if (result.geometry?.kind !== 'bbox' || !sameBBox(resultBBox, acceptedBBox)) {
+        acceptanceCASFailure('result_geometry');
+    }
+
+    if (state.video.isVideoMode) acceptanceCASFailure('video_mode');
+    if (state.queue.activeQueueItemId !== acceptance.queueItemId) {
+        acceptanceCASFailure('active_queue');
+    }
+    const queueItem = state.queue.items.find(item => item.id === acceptance.queueItemId);
+    if (!queueItem || queueItem.type === QueueItemType.VIDEO) {
+        acceptanceCASFailure('queue_item');
+    }
+    if (queueItem.datasetId !== acceptance.datasetId ||
+        !sameRevision(queueItem.datasetRevision, acceptance.datasetRevision)) {
+        acceptanceCASFailure('queue_dataset_revision');
+    }
+
+    const image = state.labels.imagesData.find(item => item.id === acceptance.imageId);
+    if (!image || image.fileData !== acceptance.expectedFile) {
+        acceptanceCASFailure('image_identity');
+    }
+    if (image.labelRects.some(rect => rect.id === acceptance.labelRect.id)) {
+        acceptanceCASFailure('already_accepted');
+    }
+};
 
 const clone: <T>(value: T) => T = typeof (globalThis as any).structuredClone === 'function'
     ? (v) => (globalThis as any).structuredClone(v)
@@ -59,7 +150,17 @@ function takeSnapshot(state: AppState): UndoSnapshot {
     };
 }
 
-export const undoMiddleware: Middleware<{}, AppState> = store => next => (action: any) => {
+export const undoMiddleware: Middleware<Record<string, never>, AppState> =
+store => next => (action: any) => {
+    if (action?.type === Action.ACCEPT_VISUAL_SEARCH_BBOX) {
+        const before = store.getState();
+        assertVisualSearchAcceptanceCAS(before, action as AcceptVisualSearchBBoxAction);
+        if (!RestoreFlag.get()) UndoStack.push(takeSnapshot(before));
+        const result = next(action);
+        lastSnapshot = takeSnapshot(store.getState());
+        lastSnapshotTime = performance.now();
+        return result;
+    }
     if (!RestoreFlag.get() && action && SNAPSHOT_ACTIONS.has(action.type) && lastSnapshot) {
         UndoStack.push(lastSnapshot);
     }

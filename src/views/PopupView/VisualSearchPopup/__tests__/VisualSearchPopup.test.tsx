@@ -13,6 +13,7 @@ import {
     VisualSearchSnapshotMetadata,
 } from '../../../../store/visualSearch/types';
 import {VideoData} from '../../../../store/video/types';
+import {QueueItemStatus, QueueItemType} from '../../../../store/queue/types';
 import {VisualSearchCollection} from '../VisualSearchCatalog';
 import {
     ResolvedVisualSearchSource,
@@ -30,6 +31,13 @@ jest.mock('../../../../services/VisualSearchJobService', () => ({
         start: jest.fn(),
         cancelByClientJobId: jest.fn(),
     },
+}));
+
+jest.mock('../../../../services/VisualSearchAcceptanceService', () => ({
+    VisualSearchAcceptanceService: jest.fn(),
+    visualSearchAcceptanceService: {accept: jest.fn()},
+    visualSearchAcceptedRectId: (taskId: string, resultId: string) =>
+        `visual-search:${taskId}:${resultId}`,
 }));
 
 jest.mock('../../../../services/FrameExtractorService', () => ({
@@ -160,6 +168,7 @@ const baseProps = () => ({
     activeVideo: null,
     jobs: [] as VisualSearchJobState[],
     activeJobId: null,
+    acceptedRectIds: [],
     selectJob: jest.fn(),
     collectionLoader: jest.fn().mockResolvedValue([collection('image')]),
     sourceResolver: jest.fn().mockResolvedValue(source()),
@@ -385,8 +394,91 @@ describe('VisualSearchPopup', () => {
         );
         expect(screen.queryByTestId('visual-search-result-crop')).not.toBeInTheDocument();
         expect(screen.getByText(
-            'Results are preview-only; accepting annotations is not connected yet.',
+            /Only bbox → bbox can be accepted atomically/,
         )).toBeInTheDocument();
         expect(screen.queryByText('Accept')).not.toBeInTheDocument();
+    });
+
+    it('offers bbox acceptance only for an exact active dataset revision', async () => {
+        const props = baseProps();
+        props.activeQueueItem = {
+            id: 'queue-1',
+            name: 'target',
+            type: QueueItemType.IMAGE,
+            file: new File(['target'], 'result.jpg', {type: 'image/jpeg'}),
+            status: QueueItemStatus.COMPLETED,
+            uploadedAt: 100,
+            datasetId: 'dataset-1',
+            datasetRevision: 7,
+        };
+        props.acceptanceRunner = {accept: jest.fn().mockResolvedValue({
+            imageId: 'target-image',
+            labelRectId: 'visual-search:task-1:result-1',
+        })};
+        const snapshot = metadata('bbox');
+        snapshot.target = {
+            ...snapshot.target,
+            datasetId: 'dataset-1',
+            datasetRevision: 7,
+        };
+        props.jobs = [{
+            clientJobId: 'completed-job',
+            backendJobId: 'task-1',
+            snapshot,
+            status: 'succeeded',
+            phase: 'succeeded',
+            createdAt: 100,
+            updatedAt: 120,
+            finishedAt: 120,
+            recoveryCount: 0,
+            cancelRequested: false,
+            idempotentReplay: false,
+            selectedResultIds: [],
+            result: {
+                collection: 'scene/bbox/v1',
+                queryKind: 'bbox',
+                queryGeometry: {kind: 'bbox', bbox: [2, 3, 20, 30]},
+                profileId: 'profile-bbox',
+                modelRevision: 'server-pinned-revision',
+                collectionRevision: 'server-pinned-collection',
+                executedStages: ['dino'],
+                stageStatus: {dino: 'succeeded'},
+                total: 1,
+                elapsedMs: 9,
+                items: [{
+                    resultId: 'result-1',
+                    assetId: `sha256:${'a'.repeat(64)}`,
+                    datasetId: 'dataset-1',
+                    datasetRevision: 7,
+                    rank: 1,
+                    path: '/dataset/result.jpg',
+                    fileName: 'result.jpg',
+                    width: 100,
+                    height: 80,
+                    className: 'goose',
+                    confidence: 0.8,
+                    score: 0.91,
+                    dinoScore: 0.91,
+                    bbox: [2, 3, 20, 30],
+                    thumbnail: null,
+                    contentSha256: 'a'.repeat(64),
+                    regionId: 'region-1',
+                    granularity: 'bbox',
+                    regionSource: 'dataset',
+                    geometry: {kind: 'bbox', bbox: [2, 3, 20, 30]},
+                }],
+            },
+        }];
+        props.activeJobId = 'completed-job';
+        render(<VisualSearchPopup {...props}/>);
+        await screen.findByText('100 × 80');
+
+        fireEvent.click(screen.getByRole('button', {name: 'Accept bbox'}));
+
+        await waitFor(() => expect(props.acceptanceRunner.accept).toHaveBeenCalledWith(
+            'completed-job',
+            'result-1',
+        ));
+        expect(await screen.findByRole('button', {name: 'Accepted'})).toBeDisabled();
     });
 });

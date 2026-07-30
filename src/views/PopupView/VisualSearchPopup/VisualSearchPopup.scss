@@ -617,6 +617,24 @@
     font-style: normal;
     line-height: 1.35;
   }
+
+  .vs-accept-result {
+    height: 24px;
+    margin-top: 3px;
+    border: 1px solid rgba(103, 182, 255, 0.4);
+    border-radius: 4px;
+    color: #b9e8ff;
+    background: rgba(103, 182, 255, 0.09);
+    font-size: 8px;
+    cursor: pointer;
+
+    &:disabled {
+      border-color: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.35);
+      background: rgba(255, 255, 255, 0.03);
+      cursor: not-allowed;
+    }
+  }
 }
 
 .vs-empty-results,

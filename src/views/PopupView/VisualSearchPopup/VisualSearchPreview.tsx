@@ -105,6 +105,10 @@ const scoreLabel = (score: number): string =>
 interface ResultsProps {
     job: VisualSearchJobState;
     chinese: boolean;
+    onAccept?: (item: VisualSearchResultItem) => void;
+    acceptanceReason?: (item: VisualSearchResultItem) => string | null;
+    acceptingResultId?: string | null;
+    acceptedResultIds?: ReadonlySet<string>;
 }
 
 interface ResultCardProps extends ResultsProps {
@@ -145,6 +149,11 @@ interface ResultCopyProps {
     kindLabel: string;
     missingAcceptIdentity: boolean;
     chinese: boolean;
+    canAccept: boolean;
+    acceptanceReason: string | null;
+    accepting: boolean;
+    accepted: boolean;
+    onAccept?: () => void;
 }
 
 const VisualSearchResultCopy: React.FC<ResultCopyProps> = ({
@@ -153,6 +162,11 @@ const VisualSearchResultCopy: React.FC<ResultCopyProps> = ({
     kindLabel,
     missingAcceptIdentity,
     chinese,
+    canAccept,
+    acceptanceReason,
+    accepting,
+    accepted,
+    onAccept,
 }) => <div className='vs-result-copy'>
     <strong title={item.fileName || item.path}>{item.fileName || item.path}</strong>
     <span>{kindLabel}</span>
@@ -163,12 +177,34 @@ const VisualSearchResultCopy: React.FC<ResultCopyProps> = ({
             ? '旧索引缺少资产身份或尺寸，仅允许预览'
             : 'Legacy index lacks asset identity or dimensions; preview only'}
     </em>}
+    {canAccept && <button
+        type='button'
+        className='vs-accept-result'
+        disabled={Boolean(acceptanceReason) || accepting || accepted}
+        title={acceptanceReason ?? undefined}
+        onClick={onAccept}
+    >
+        {accepted
+            ? (chinese ? '已接受' : 'Accepted')
+            : accepting
+                ? (chinese ? '校验并写入…' : 'Verifying…')
+                : (chinese ? '接受为标注框' : 'Accept bbox')}
+    </button>}
 </div>;
 
-const VisualSearchResultCard: React.FC<ResultCardProps> = ({job, item, chinese}) => {
+const VisualSearchResultCard: React.FC<ResultCardProps> = ({
+    job,
+    item,
+    chinese,
+    onAccept,
+    acceptanceReason,
+    acceptingResultId,
+    acceptedResultIds,
+}) => {
     const missingAcceptIdentity = !item.assetId || item.width === null || item.height === null;
     const bbox = item.geometry?.bbox ?? item.bbox;
     const bboxResult = job.snapshot.geometry.kind === 'bbox';
+    const canAccept = bboxResult && !missingAcceptIdentity && Boolean(bbox);
     const kindLabel = bboxResult
         ? (chinese ? '框选结果 · 裁剪预览' : 'BBox result · crop preview')
         : (chinese ? '整图结果' : 'Full-image result');
@@ -185,11 +221,23 @@ const VisualSearchResultCard: React.FC<ResultCardProps> = ({job, item, chinese})
             kindLabel={kindLabel}
             missingAcceptIdentity={missingAcceptIdentity}
             chinese={chinese}
+            canAccept={canAccept}
+            acceptanceReason={canAccept ? acceptanceReason?.(item) ?? null : null}
+            accepting={acceptingResultId === item.resultId}
+            accepted={acceptedResultIds?.has(item.resultId) ?? false}
+            onAccept={onAccept ? () => onAccept(item) : undefined}
         />
     </article>;
 };
 
-export const VisualSearchResults: React.FC<ResultsProps> = ({job, chinese}) => {
+export const VisualSearchResults: React.FC<ResultsProps> = ({
+    job,
+    chinese,
+    onAccept,
+    acceptanceReason,
+    acceptingResultId,
+    acceptedResultIds,
+}) => {
     const items = job.result?.items ?? [];
     if (job.status !== 'succeeded') return null;
     if (items.length === 0) {
@@ -203,6 +251,10 @@ export const VisualSearchResults: React.FC<ResultsProps> = ({job, chinese}) => {
             job={job}
             item={item}
             chinese={chinese}
+            onAccept={onAccept}
+            acceptanceReason={acceptanceReason}
+            acceptingResultId={acceptingResultId}
+            acceptedResultIds={acceptedResultIds}
         />)}
     </div>;
 };

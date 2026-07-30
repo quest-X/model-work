@@ -159,6 +159,8 @@ interface IProps {
     language: Language;
 }
 
+type Translate = (zhText: string, enText: string) => string;
+
 const TERMINAL_JOB_STATES = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
 const HISTORY_IMAGE_PAGE_SIZE = 12;
 const NEW_SCENE_OPTION = '__new_scene__';
@@ -180,6 +182,37 @@ const collectionTargetName = (collection: CollectionInfo) =>
 
 const collectionGranularity = (collection: CollectionInfo): Granularity =>
     collection.granularity || (collection.mode === 'images' ? 'image' : 'bbox');
+
+const ingestJobSourceLabel = (item: IngestJob, t: Translate): string => {
+    const fromDataset = Boolean(item.dataset_id)
+        || item.source === 'dataset'
+        || item.source.startsWith('dataset:');
+    if (!fromDataset) return t('本地上传', 'Local upload');
+    return item.dataset_id
+        || item.source.replace(/^dataset:/, '')
+        || t('资源中心', 'Resource Center');
+};
+
+const historyVersionName = (
+    dataVersion: number | undefined,
+    jobId: string,
+    t: Translate,
+): {name: string; identifier: string} => {
+    if (dataVersion) {
+        const version = `v${dataVersion}`;
+        return {name: version, identifier: version};
+    }
+    return {name: t('这条', 'this'), identifier: jobId.slice(0, 12)};
+};
+
+const historyDeleteToken = (
+    selected: CollectionInfo,
+    versionIdentifier: string,
+): string => [
+    selected.scene_name || selected.scene_id || 'default-scene',
+    selected.target_name || selected.target_id || selected.display_name,
+    versionIdentifier,
+].join('/');
 
 const normalizeCollection = (collection: CollectionInfo): CollectionInfo => {
     const targetId = collectionTargetId(collection);
@@ -1111,6 +1144,227 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         </div>;
     };
 
+    const closeDeleteHistoryDialog = () => {
+        setDeleteJobConfirmId(null);
+        setDeleteJobConfirmationText('');
+        setJobDeleteError(null);
+    };
+
+    const renderHistoryDeleteDialog = (
+        item: IngestJob,
+        deleteConfirmationToken: string,
+        deleteDialogTitleId: string,
+        deleteConfirmationMatches: boolean,
+    ) => createPortal(
+        <div
+            className='HistoryDeleteDialogBackdrop'
+            role='presentation'
+            onMouseDown={event => {
+                if (event.target !== event.currentTarget || deletingJobId) return;
+                closeDeleteHistoryDialog();
+            }}
+        >
+            <section
+                className='HistoryDeleteDialog'
+                role='dialog'
+                aria-modal='true'
+                aria-labelledby={deleteDialogTitleId}
+                onMouseDown={event => event.stopPropagation()}
+            >
+                <header>
+                    <strong id={deleteDialogTitleId}>
+                        {t(`删除版本 ${deleteConfirmationToken}`, `Delete version ${deleteConfirmationToken}`)}
+                    </strong>
+                    <button
+                        type='button'
+                        aria-label={t('关闭删除确认', 'Close delete confirmation')}
+                        disabled={deletingJobId === item.job_id}
+                        onClick={closeDeleteHistoryDialog}
+                    >×</button>
+                </header>
+                <div className='HistoryDeleteDialogBody'>
+                    <div className='HistoryDeleteTarget' aria-hidden='true'>
+                        <span className='HistoryDeleteLock' />
+                        <strong>{deleteConfirmationToken}</strong>
+                        <small>{item.job_id}</small>
+                    </div>
+                    <p>{t(
+                        '删除后无法恢复。此操作只删除这条版本历史记录，不会回滚或修改当前向量数据。',
+                        'This cannot be undone. It removes only this version history record and does not roll back or modify current vector data.',
+                    )}</p>
+                    <label htmlFor='history-delete-confirmation'>
+                        {t('如需确认，请在下方输入', 'To confirm, type')}{' '}
+                        <code>{deleteConfirmationToken}</code>
+                    </label>
+                    <input
+                        id='history-delete-confirmation'
+                        type='text'
+                        value={deleteJobConfirmationText}
+                        autoFocus
+                        autoComplete='off'
+                        spellCheck={false}
+                        aria-label={t('输入版本标识以确认删除', 'Type the version identifier to confirm deletion')}
+                        onChange={event => setDeleteJobConfirmationText(event.target.value)}
+                    />
+                    {jobDeleteError && <span className='InlineError' role='alert'>{jobDeleteError}</span>}
+                </div>
+                <footer>
+                    <button
+                        type='button'
+                        className='SecondaryButton'
+                        disabled={deletingJobId === item.job_id}
+                        onClick={closeDeleteHistoryDialog}
+                    >{t('取消', 'Cancel')}</button>
+                    <button
+                        type='button'
+                        className='DangerButton solid'
+                        disabled={!deleteConfirmationMatches || deletingJobId === item.job_id}
+                        onClick={() => deleteHistoryJob(item.job_id)}
+                    >{deletingJobId === item.job_id
+                            ? t('删除中…', 'Deleting…')
+                            : t('删除', 'Delete')}</button>
+                </footer>
+            </section>
+        </div>,
+        document.body,
+    );
+
+    const renderHistoryImagesPanel = (
+        item: IngestJob,
+        panelId: string,
+        imageState: JobImageState | undefined,
+    ) => <div className='HistoryImagesPanel' id={panelId}>
+        {imageState?.error && <div className='HistoryImagesState error'>
+            <span>{imageState.error}</span>
+            <button
+                type='button'
+                className='SecondaryButton'
+                onClick={() => loadJobImages(item.job_id)}
+            >{t('重试', 'Retry')}</button>
+        </div>}
+        {!imageState?.error && imageState?.images.length === 0 && imageState?.loading && (
+            <div className='HistoryImagesState'>{t('正在加载缩略图…', 'Loading thumbnails…')}</div>
+        )}
+        {!imageState?.error && imageState && !imageState.loading && imageState.images.length === 0 && (
+            <div className='HistoryImagesState'>{t('这条记录没有可浏览的图片。', 'No browsable images are available for this run.')}</div>
+        )}
+        {imageState && imageState.images.length > 0 && <div className='HistoryImageGrid'>
+            {imageState.images.map(image => {
+                const encodedJobId = encodeURIComponent(item.job_id);
+                return <button
+                    type='button'
+                    className='HistoryThumbnail'
+                    key={image.index}
+                    aria-label={t(`放大 ${image.filename}`, `Enlarge ${image.filename}`)}
+                    onClick={() => setImagePreview({
+                        jobId: item.job_id,
+                        index: image.index,
+                        filename: image.filename,
+                    })}
+                >
+                    <img
+                        src={`${baseUrl}/jobs/${encodedJobId}/images/${image.index}/thumbnail`}
+                        alt={image.filename}
+                        loading='lazy'
+                    />
+                    <span title={image.filename}>{image.filename}</span>
+                </button>;
+            })}
+        </div>}
+        {imageState && imageState.images.length < imageState.total && (
+            <button
+                type='button'
+                className='SecondaryButton HistoryLoadMore'
+                disabled={imageState.loading}
+                onClick={() => loadJobImages(item.job_id, imageState.images.length)}
+            >{imageState.loading
+                    ? t('加载中…', 'Loading…')
+                    : t(`加载更多（${imageState.images.length}/${imageState.total}）`,
+                        `Load more (${imageState.images.length}/${imageState.total})`)}</button>
+        )}
+    </div>;
+
+    const renderHistoryJob = (
+        item: IngestJob,
+        selectedCollection: CollectionInfo,
+        versionByJobId: Map<string, number>,
+    ) => {
+        const label = JOB_STATE_LABELS[item.state] || JOB_STATE_LABELS.queued;
+        const dataVersion = versionByJobId.get(item.job_id);
+        const source = ingestJobSourceLabel(item, t);
+        const expanded = expandedJobIds.has(item.job_id);
+        const imageState = jobImages[item.job_id];
+        const imageCount = imageState?.total ?? item.total_images;
+        const panelId = `ingest-images-${item.job_id}`;
+        const version = historyVersionName(dataVersion, item.job_id, t);
+        const deleteConfirmationToken = historyDeleteToken(selectedCollection, version.identifier);
+        const deleteDialogTitleId = `delete-history-title-${item.job_id}`;
+        const deleteConfirmationMatches = deleteJobConfirmationText === deleteConfirmationToken;
+        return <article className={`HistoryRow ${item.state}${expanded ? ' expanded' : ''}`} key={item.job_id}>
+            <div className='HistoryRowHeader'>
+                <button
+                    type='button'
+                    className='HistorySummary'
+                    aria-expanded={expanded}
+                    aria-controls={panelId}
+                    aria-label={`${t(label[0], label[1])}，${expanded
+                        ? t('收起入库图片', 'Hide ingest images')
+                        : t(`查看 ${imageCount} 张入库图片`, `View ${imageCount} ingest images`)}`}
+                    onClick={() => toggleJobImages(item.job_id)}
+                >
+                    <span className='HistoryState'>
+                    {dataVersion
+                        ? <span className='HistoryVersion'>v{dataVersion}</span>
+                        : <span className='HistoryDot'/>}
+                    <span>
+                        <strong>{t(label[0], label[1])}</strong>
+                        <small title={item.job_id}>{item.job_id.slice(0, 12)}</small>
+                    </span>
+                    </span>
+                    <span className='HistoryMetric'>
+                        <span>{t('数据来源', 'Source')}</span>
+                    <strong title={source}>{source}</strong>
+                    </span>
+                    <span className='HistoryMetric'>
+                        <span>{t('处理结果', 'Processed')}</span>
+                    <strong>{item.processed_images}/{item.total_images} · {item.inserted_vectors ?? item.inserted_objects} {t('向量', 'vectors')}</strong>
+                    </span>
+                    <span className='HistoryMetric'>
+                        <span>{t('开始时间 / 耗时', 'Started / duration')}</span>
+                    <strong>{formatDate(item.started_at)} · {formatDuration(item)}</strong>
+                    </span>
+                    <span className='HistoryMetric anomalies'>
+                        <span>{t('异常', 'Anomalies')}</span>
+                    <strong>{item.failed_images} {t('失败', 'failed')} · {item.skipped_images} {t('跳过', 'skipped')} · {item.invalid_vectors} {t('无效', 'invalid')}</strong>
+                    </span>
+                    <span className='HistoryExpand' aria-hidden='true'>
+                        <small>{imageCount} {t('张', 'images')}</small>
+                        <i className='HistoryExpandIcon' />
+                    </span>
+                </button>
+                {TERMINAL_JOB_STATES.has(item.state) && <button
+                    type='button'
+                    className='HistoryDeleteButton'
+                    aria-label={t(`删除 ${version.name} 版本记录`, `Delete ${version.name} version record`)}
+                    title={t('删除版本记录', 'Delete version record')}
+                    onClick={() => {
+                        setDeleteJobConfirmId(item.job_id);
+                        setDeleteJobConfirmationText('');
+                        setJobDeleteError(null);
+                    }}
+                >{t('删除', 'Delete')}</button>}
+            </div>
+            {deleteJobConfirmId === item.job_id && renderHistoryDeleteDialog(
+                item,
+                deleteConfirmationToken,
+                deleteDialogTitleId,
+                deleteConfirmationMatches,
+            )}
+            {item.error && <div className='HistoryError'>{item.error}</div>}
+            {expanded && renderHistoryImagesPanel(item, panelId, imageState)}
+        </article>;
+    };
+
     const renderHistory = () => {
         if (!selected) return null;
         const selectedJobs = jobs.filter(item => item.collection === selected.name);
@@ -1148,218 +1402,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                 <div className='HistoryEmpty'>{t('这个目标还没有入库记录。', 'This target has no ingest history yet.')}</div>
             )}
             <div className='HistoryList'>
-                {selectedJobs.map(item => {
-                    const label = JOB_STATE_LABELS[item.state] || JOB_STATE_LABELS.queued;
-                    const dataVersion = versionByJobId.get(item.job_id);
-                    const fromDataset = Boolean(item.dataset_id)
-                        || item.source === 'dataset'
-                        || item.source.startsWith('dataset:');
-                    const source = fromDataset
-                        ? item.dataset_id || item.source.replace(/^dataset:/, '') || t('资源中心', 'Resource Center')
-                        : t('本地上传', 'Local upload');
-                    const expanded = expandedJobIds.has(item.job_id);
-                    const imageState = jobImages[item.job_id];
-                    const imageCount = imageState?.total ?? item.total_images;
-                    const panelId = `ingest-images-${item.job_id}`;
-                    const versionName = dataVersion ? `v${dataVersion}` : t('这条', 'this');
-                    const versionIdentifier = dataVersion ? `v${dataVersion}` : item.job_id.slice(0, 12);
-                    const deleteConfirmationToken = [
-                        selected.scene_name || selected.scene_id || 'default-scene',
-                        selected.target_name || selected.target_id || selected.display_name,
-                        versionIdentifier,
-                    ].join('/');
-                    const deleteDialogTitleId = `delete-history-title-${item.job_id}`;
-                    const deleteConfirmationMatches = deleteJobConfirmationText === deleteConfirmationToken;
-                    return <article className={`HistoryRow ${item.state}${expanded ? ' expanded' : ''}`} key={item.job_id}>
-                        <div className='HistoryRowHeader'>
-                            <button
-                                type='button'
-                                className='HistorySummary'
-                                aria-expanded={expanded}
-                                aria-controls={panelId}
-                                aria-label={`${t(label[0], label[1])}，${expanded
-                                    ? t('收起入库图片', 'Hide ingest images')
-                                    : t(`查看 ${imageCount} 张入库图片`, `View ${imageCount} ingest images`)}`}
-                                onClick={() => toggleJobImages(item.job_id)}
-                            >
-                                <span className='HistoryState'>
-                                {dataVersion
-                                    ? <span className='HistoryVersion'>v{dataVersion}</span>
-                                    : <span className='HistoryDot'/>}
-                                <span>
-                                    <strong>{t(label[0], label[1])}</strong>
-                                    <small title={item.job_id}>{item.job_id.slice(0, 12)}</small>
-                                </span>
-                                </span>
-                                <span className='HistoryMetric'>
-                                    <span>{t('数据来源', 'Source')}</span>
-                                <strong title={source}>{source}</strong>
-                                </span>
-                                <span className='HistoryMetric'>
-                                    <span>{t('处理结果', 'Processed')}</span>
-                                <strong>{item.processed_images}/{item.total_images} · {item.inserted_vectors ?? item.inserted_objects} {t('向量', 'vectors')}</strong>
-                                </span>
-                                <span className='HistoryMetric'>
-                                    <span>{t('开始时间 / 耗时', 'Started / duration')}</span>
-                                <strong>{formatDate(item.started_at)} · {formatDuration(item)}</strong>
-                                </span>
-                                <span className='HistoryMetric anomalies'>
-                                    <span>{t('异常', 'Anomalies')}</span>
-                                <strong>{item.failed_images} {t('失败', 'failed')} · {item.skipped_images} {t('跳过', 'skipped')} · {item.invalid_vectors} {t('无效', 'invalid')}</strong>
-                                </span>
-                                <span className='HistoryExpand' aria-hidden='true'>
-                                    <small>{imageCount} {t('张', 'images')}</small>
-                                    <i className='HistoryExpandIcon' />
-                                </span>
-                            </button>
-                            {TERMINAL_JOB_STATES.has(item.state) && <button
-                                type='button'
-                                className='HistoryDeleteButton'
-                                aria-label={t(`删除 ${versionName} 版本记录`, `Delete ${versionName} version record`)}
-                                title={t('删除版本记录', 'Delete version record')}
-                                onClick={() => {
-                                    setDeleteJobConfirmId(item.job_id);
-                                    setDeleteJobConfirmationText('');
-                                    setJobDeleteError(null);
-                                }}
-                            >{t('删除', 'Delete')}</button>}
-                        </div>
-                        {deleteJobConfirmId === item.job_id && createPortal(
-                            <div
-                                className='HistoryDeleteDialogBackdrop'
-                                role='presentation'
-                                onMouseDown={event => {
-                                    if (event.target !== event.currentTarget || deletingJobId) return;
-                                    setDeleteJobConfirmId(null);
-                                    setDeleteJobConfirmationText('');
-                                    setJobDeleteError(null);
-                                }}
-                            >
-                                <section
-                                    className='HistoryDeleteDialog'
-                                    role='dialog'
-                                    aria-modal='true'
-                                    aria-labelledby={deleteDialogTitleId}
-                                    onMouseDown={event => event.stopPropagation()}
-                                >
-                                    <header>
-                                        <strong id={deleteDialogTitleId}>
-                                            {t(`删除版本 ${deleteConfirmationToken}`, `Delete version ${deleteConfirmationToken}`)}
-                                        </strong>
-                                        <button
-                                            type='button'
-                                            aria-label={t('关闭删除确认', 'Close delete confirmation')}
-                                            disabled={deletingJobId === item.job_id}
-                                            onClick={() => {
-                                                setDeleteJobConfirmId(null);
-                                                setDeleteJobConfirmationText('');
-                                                setJobDeleteError(null);
-                                            }}
-                                        >×</button>
-                                    </header>
-                                    <div className='HistoryDeleteDialogBody'>
-                                        <div className='HistoryDeleteTarget' aria-hidden='true'>
-                                            <span className='HistoryDeleteLock' />
-                                            <strong>{deleteConfirmationToken}</strong>
-                                            <small>{item.job_id}</small>
-                                        </div>
-                                        <p>{t(
-                                            '删除后无法恢复。此操作只删除这条版本历史记录，不会回滚或修改当前向量数据。',
-                                            'This cannot be undone. It removes only this version history record and does not roll back or modify current vector data.',
-                                        )}</p>
-                                        <label htmlFor='history-delete-confirmation'>
-                                            {t('如需确认，请在下方输入', 'To confirm, type')}{' '}
-                                            <code>{deleteConfirmationToken}</code>
-                                        </label>
-                                        <input
-                                            id='history-delete-confirmation'
-                                            type='text'
-                                            value={deleteJobConfirmationText}
-                                            autoFocus
-                                            autoComplete='off'
-                                            spellCheck={false}
-                                            aria-label={t('输入版本标识以确认删除', 'Type the version identifier to confirm deletion')}
-                                            onChange={event => setDeleteJobConfirmationText(event.target.value)}
-                                        />
-                                        {jobDeleteError && <span className='InlineError' role='alert'>{jobDeleteError}</span>}
-                                    </div>
-                                    <footer>
-                                        <button
-                                            type='button'
-                                            className='SecondaryButton'
-                                            disabled={deletingJobId === item.job_id}
-                                            onClick={() => {
-                                                setDeleteJobConfirmId(null);
-                                                setDeleteJobConfirmationText('');
-                                                setJobDeleteError(null);
-                                            }}
-                                        >{t('取消', 'Cancel')}</button>
-                                        <button
-                                            type='button'
-                                            className='DangerButton solid'
-                                            disabled={!deleteConfirmationMatches || deletingJobId === item.job_id}
-                                            onClick={() => deleteHistoryJob(item.job_id)}
-                                        >{deletingJobId === item.job_id
-                                                ? t('删除中…', 'Deleting…')
-                                                : t('删除', 'Delete')}</button>
-                                    </footer>
-                                </section>
-                            </div>,
-                            document.body,
-                        )}
-                        {item.error && <div className='HistoryError'>{item.error}</div>}
-                        {expanded && <div className='HistoryImagesPanel' id={panelId}>
-                            {imageState?.error && <div className='HistoryImagesState error'>
-                                <span>{imageState.error}</span>
-                                <button
-                                    type='button'
-                                    className='SecondaryButton'
-                                    onClick={() => loadJobImages(item.job_id)}
-                                >{t('重试', 'Retry')}</button>
-                            </div>}
-                            {!imageState?.error && imageState?.images.length === 0 && imageState?.loading && (
-                                <div className='HistoryImagesState'>{t('正在加载缩略图…', 'Loading thumbnails…')}</div>
-                            )}
-                            {!imageState?.error && imageState && !imageState.loading && imageState.images.length === 0 && (
-                                <div className='HistoryImagesState'>{t('这条记录没有可浏览的图片。', 'No browsable images are available for this run.')}</div>
-                            )}
-                            {imageState && imageState.images.length > 0 && <div className='HistoryImageGrid'>
-                                {imageState.images.map(image => {
-                                    const encodedJobId = encodeURIComponent(item.job_id);
-                                    return <button
-                                        type='button'
-                                        className='HistoryThumbnail'
-                                        key={image.index}
-                                        aria-label={t(`放大 ${image.filename}`, `Enlarge ${image.filename}`)}
-                                        onClick={() => setImagePreview({
-                                            jobId: item.job_id,
-                                            index: image.index,
-                                            filename: image.filename,
-                                        })}
-                                    >
-                                        <img
-                                            src={`${baseUrl}/jobs/${encodedJobId}/images/${image.index}/thumbnail`}
-                                            alt={image.filename}
-                                            loading='lazy'
-                                        />
-                                        <span title={image.filename}>{image.filename}</span>
-                                    </button>;
-                                })}
-                            </div>}
-                            {imageState && imageState.images.length < imageState.total && (
-                                <button
-                                    type='button'
-                                    className='SecondaryButton HistoryLoadMore'
-                                    disabled={imageState.loading}
-                                    onClick={() => loadJobImages(item.job_id, imageState.images.length)}
-                                >{imageState.loading
-                                        ? t('加载中…', 'Loading…')
-                                        : t(`加载更多（${imageState.images.length}/${imageState.total}）`,
-                                            `Load more (${imageState.images.length}/${imageState.total})`)}</button>
-                            )}
-                        </div>}
-                    </article>;
-                })}
+                {selectedJobs.map(item => renderHistoryJob(item, selected, versionByJobId))}
             </div>
         </div>;
     };

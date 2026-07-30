@@ -160,6 +160,8 @@ export class DataBatchSyncService {
             form.append('metadata', JSON.stringify(metadata));
             if (item.type !== QueueItemType.VIDEO) {
                 files.forEach(file => form.append('files', file, file.name));
+            } else if (item.file?.name) {
+                form.append('video_filename', item.file.name);
             }
             const endpoint = item.type === QueueItemType.VIDEO
                 ? `/datasets/video-sessions/${encodeURIComponent(String(videoSessionId))}`

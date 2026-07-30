@@ -125,6 +125,7 @@ describe('DataBatchSyncService', () => {
         const form = request.body as FormData;
         expect(url).toContain('/datasets/video-sessions/session%2F%E7%82%89%E5%8F%A3');
         expect(form.getAll('files')).toHaveLength(0);
+        expect(form.get('video_filename')).toBe('炉口.mp4');
         expect(JSON.parse(String(form.get('metadata')))).toEqual({
             version: 1,
             classes: [{id: 'hot', name: 'hot'}],

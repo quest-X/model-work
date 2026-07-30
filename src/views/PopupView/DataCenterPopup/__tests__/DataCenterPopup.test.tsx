@@ -11,6 +11,7 @@ import {
     DatasetInferenceSelection,
 } from '../../../../services/DatasetActionSelection';
 import {PendingImportFiles} from '../../../../utils/PendingImportFiles';
+import {VideoDatasetRestoreService} from '../../../../services/VideoDatasetRestoreService';
 import {DataCenterPopup} from '../DataCenterPopup';
 
 jest.mock('../../GenericYesNoPopup/GenericYesNoPopup', () => ({
@@ -36,6 +37,10 @@ jest.mock('../../../../logic/imageRepository/ImageRepository', () => ({
 
 jest.mock('../../../../services/DataBatchSyncService', () => ({
     DataBatchSyncService: {syncQueueItem: jest.fn().mockResolvedValue({dataset_id: 'dataset-1', revision: 1})},
+}));
+
+jest.mock('../../../../services/VideoDatasetRestoreService', () => ({
+    VideoDatasetRestoreService: {restore: jest.fn().mockResolvedValue({})},
 }));
 
 jest.mock('../../../../services/TrainingDatasetSelection', () => ({
@@ -475,6 +480,146 @@ describe('DataCenterPopup', () => {
             expect.objectContaining({name: 'yolo_full_default-project_v2.zip'}),
         ]);
         expect(updateActivePopupTypeAction).toHaveBeenCalledWith(PopupWindowType.IMPORT_ANNOTATIONS);
+    });
+
+    it('restores a persisted video dataset as a video workspace', async () => {
+        const videoDataset = {
+            ...dataset,
+            id: 'video-dataset',
+            image_count: 50,
+            source_type: 'video_queue',
+            source_id: null,
+            media_type: 'video',
+            video: {
+                filename: '炉口.mp4',
+                fps: 25,
+                duration: 2,
+                width: 1920,
+                height: 1080,
+                total_frames: 50,
+            },
+        };
+        (global.fetch as jest.Mock).mockImplementation((input: RequestInfo) => {
+            const url = String(input);
+            if (url.endsWith('/datasets')) {
+                return Promise.resolve(jsonResponse({datasets: [videoDataset]}));
+            }
+            if (url.endsWith('/datasets/video-dataset/stats')) {
+                return Promise.resolve(jsonResponse({
+                    image_count: 50,
+                    annotated_count: 0,
+                    annotation_coverage: 0,
+                    class_distribution: {},
+                }));
+            }
+            return Promise.resolve(jsonResponse({status: 'success'}));
+        });
+        render(<DataCenterPopup
+            language={Language.CHINESE}
+            projectName='default-project'
+            queueItems={[]}
+            activeQueueItemId={null}
+            imagesData={[]}
+            labels={[]}
+            updateActivePopupTypeAction={updateActivePopupTypeAction}
+            updateQueueItemAction={updateQueueItemAction}
+        />);
+
+        fireEvent.click(await screen.findByRole('tab', {name: '持久化数据 1'}));
+        await screen.findByText('default-project', {selector: '.DatasetName'});
+        expect(document.querySelector('.DatasetMeta')).toHaveTextContent('50 帧');
+        fireEvent.click(screen.getByRole('button', {name: /default-project.*50/}));
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', {name: '使用'}));
+        });
+
+        expect(VideoDatasetRestoreService.restore).toHaveBeenCalledWith(
+            'video-dataset',
+            'default-project',
+            2,
+            [],
+        );
+        expect(PendingImportFiles.set).not.toHaveBeenCalled();
+    });
+
+    it('upgrades a legacy frame-only video snapshot with the active reopened video', async () => {
+        const legacyVideoDataset = {
+            ...dataset,
+            id: 'legacy-video-dataset',
+            source_type: 'video_queue',
+            source_id: 'stale-video-queue-id',
+            media_type: 'images',
+        };
+        const reopenedVideo = {
+            id: 'reopened-video',
+            name: '炉口.mp4',
+            type: QueueItemType.VIDEO,
+            file: new File(['video'], '炉口.mp4', {type: 'video/mp4'}),
+            extractionMetadata: {
+                fps: 25,
+                duration: 2,
+                totalFrames: 50,
+                width: 1920,
+                height: 1080,
+            },
+            status: QueueItemStatus.COMPLETED,
+            uploadedAt: 1,
+            dataSyncStatus: QueueDataSyncStatus.LOCAL,
+        };
+        (DataBatchSyncService.syncQueueItem as jest.Mock).mockResolvedValueOnce({
+            dataset_id: 'legacy-video-dataset',
+            revision: 3,
+        });
+        (global.fetch as jest.Mock).mockImplementation((input: RequestInfo) => {
+            const url = String(input);
+            if (url.endsWith('/datasets')) {
+                return Promise.resolve(jsonResponse({datasets: [legacyVideoDataset]}));
+            }
+            if (url.endsWith('/datasets/legacy-video-dataset/stats')) {
+                return Promise.resolve(jsonResponse({
+                    image_count: 465,
+                    annotated_count: 0,
+                    annotation_coverage: 0,
+                    class_distribution: {},
+                }));
+            }
+            return Promise.resolve(jsonResponse({status: 'success'}));
+        });
+        render(<DataCenterPopup
+            language={Language.CHINESE}
+            projectName='default-project'
+            queueItems={[reopenedVideo]}
+            activeQueueItemId='reopened-video'
+            activeVideoId='reopened-video'
+            activeVideoSessionId='reopened-session'
+            imagesData={[]}
+            labels={[]}
+            updateActivePopupTypeAction={updateActivePopupTypeAction}
+            updateQueueItemAction={updateQueueItemAction}
+        />);
+
+        fireEvent.click(await screen.findByRole('tab', {name: '持久化数据 1'}));
+        fireEvent.click(await screen.findByRole('button', {name: /default-project.*465/}));
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', {name: '使用'}));
+        });
+
+        expect(DataBatchSyncService.syncQueueItem).toHaveBeenCalledWith(
+            expect.objectContaining({
+                id: 'reopened-video',
+                datasetId: 'legacy-video-dataset',
+                datasetRevision: 2,
+            }),
+            [],
+            [],
+            'reopened-session',
+        );
+        expect(VideoDatasetRestoreService.restore).toHaveBeenCalledWith(
+            'legacy-video-dataset',
+            'default-project',
+            3,
+            [],
+        );
     });
 
     it('requires confirmation before deleting a server snapshot', async () => {

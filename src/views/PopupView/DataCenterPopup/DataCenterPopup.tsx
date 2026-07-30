@@ -14,6 +14,7 @@ import {QueueDataSyncStatus, QueueItem, QueueItemType} from '../../../store/queu
 import {getEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
 import {DataBatchSyncService} from '../../../services/DataBatchSyncService';
 import {TrainingDatasetSelection} from '../../../services/TrainingDatasetSelection';
+import {VideoDatasetRestoreService} from '../../../services/VideoDatasetRestoreService';
 import {
     DatasetActionTarget,
     DatasetEditSelection,
@@ -52,6 +53,15 @@ interface DatasetSummary {
     deduplicated_bytes?: number;
     last_task_at?: string | null;
     last_task_type?: string | null;
+    media_type?: 'images' | 'video';
+    video?: {
+        filename: string;
+        fps: number;
+        duration: number;
+        width: number;
+        height: number;
+        total_frames: number;
+    } | null;
     versions?: DatasetVersionSummary[];
 }
 
@@ -652,24 +662,75 @@ export const DataCenterPopup: React.FC<IProps> = ({
         sourceId: dataset.source_id,
     });
 
-    const openDatasetForEditing = (dataset: DatasetSummary) => {
+    const upgradeLegacyVideoDataset = async (dataset: DatasetSummary): Promise<number> => {
+        const linkedSource = dataset.source_id ? queueItemById.get(dataset.source_id) : null;
+        const activeSource = activeQueueItemId ? queueItemById.get(activeQueueItemId) : null;
+        const localSource = linkedSource?.type === QueueItemType.VIDEO ? linkedSource : activeSource;
+        const canUpgrade = localSource?.type === QueueItemType.VIDEO
+            && localSource.id === activeVideoId
+            && Boolean(activeVideoSessionId);
+        if (!localSource || !canUpgrade) {
+            throw new Error(zh
+                ? '该旧快照仅包含视频帧。请先重新打开原视频，再点击“使用”补全视频源。'
+                : 'This legacy snapshot only contains frames. Reopen the source video, then use it again to attach the video source.');
+        }
+        const result = await DataBatchSyncService.syncQueueItem(
+            {
+                ...localSource,
+                datasetId: dataset.id,
+                datasetRevision: dataset.revision || 1,
+            },
+            imagesData,
+            labels,
+            activeVideoSessionId,
+        );
+        return result.revision || dataset.revision || 1;
+    };
+
+    const restoreVideoDataset = async (dataset: DatasetSummary): Promise<void> => {
+        const revision = dataset.media_type === 'video'
+            ? dataset.revision || 1
+            : await upgradeLegacyVideoDataset(dataset);
+        await VideoDatasetRestoreService.restore(
+            dataset.id,
+            datasetDisplayName(dataset),
+            revision,
+            imagesData,
+        );
+        PopupActions.close();
+    };
+
+    const openImageDataset = async (dataset: DatasetSummary): Promise<void> => {
+        const response = await fetch(`${baseUrl}/datasets/${dataset.id}/export`);
+        if (!response.ok) throw new Error(`${response.status}`);
+        const archive = await response.blob();
+        const safeName = datasetDisplayName(dataset).replace(/[^A-Za-z0-9._-]+/g, '_') || dataset.id;
+        DatasetEditSelection.set(actionTarget(dataset));
+        PendingImportFiles.set([
+            new File([archive], `yolo_full_${safeName}_v${dataset.revision || 1}.zip`, {
+                type: 'application/zip',
+            }),
+        ]);
+        updateActivePopupTypeAction(PopupWindowType.IMPORT_ANNOTATIONS);
+    };
+
+    const openDatasetForEditing = async (dataset: DatasetSummary) => {
         setDatasetActionId(dataset.id);
         setDatasetActionError(null);
-        fetch(`${baseUrl}/datasets/${dataset.id}/export`).then(async response => {
-            if (!response.ok) throw new Error(`${response.status}`);
-            const archive = await response.blob();
-            const safeName = datasetDisplayName(dataset).replace(/[^A-Za-z0-9._-]+/g, '_') || dataset.id;
-            DatasetEditSelection.set(actionTarget(dataset));
-            PendingImportFiles.set([
-                new File([archive], `yolo_full_${safeName}_v${dataset.revision || 1}.zip`, {
-                    type: 'application/zip',
-                }),
-            ]);
-            updateActivePopupTypeAction(PopupWindowType.IMPORT_ANNOTATIONS);
-        }).catch(() => {
+        try {
+            if (dataset.media_type === 'video' || dataset.source_type === 'video_queue') {
+                await restoreVideoDataset(dataset);
+                return;
+            }
+            await openImageDataset(dataset);
+        } catch (cause) {
             DatasetEditSelection.set(null);
-            setDatasetActionError(zh ? '无法打开服务器数据集' : 'Unable to open server dataset');
-        }).finally(() => setDatasetActionId(null));
+            setDatasetActionError(cause instanceof Error
+                ? cause.message
+                : (zh ? '无法打开服务器数据集' : 'Unable to open server dataset'));
+        } finally {
+            setDatasetActionId(null);
+        }
     };
 
     const openInferenceSettings = (datasetId: string) => {
@@ -796,7 +857,9 @@ export const DataCenterPopup: React.FC<IProps> = ({
                             <span>v{version.revision}</span>
                         </div>
                         <time dateTime={version.created_at}>{formatDatasetTime(version.created_at, zh)}</time>
-                        <small>{version.image_count} {zh ? '张图片' : 'images'}</small>
+                        <small>{version.image_count} {dataset.media_type === 'video'
+                            ? (zh ? '帧' : 'frames')
+                            : (zh ? '张图片' : 'images')}</small>
                     </li>
                 ))}
             </ol>
@@ -854,7 +917,9 @@ export const DataCenterPopup: React.FC<IProps> = ({
         const projectLabel = linkedProject
             ? `${zh ? '项目' : 'Project'} ${linkedProject}`
             : (zh ? '未关联项目' : 'Unassigned project');
-        const serverLabel = zh ? '服务器数据集' : 'Server dataset';
+        const serverLabel = dataset.media_type === 'video'
+            ? (zh ? '服务器视频项目' : 'Server video project')
+            : (zh ? '服务器数据集' : 'Server dataset');
         const localCopyLabel = hasLocalSource
             ? ` · ${zh ? '关联本地工作副本' : 'linked local copy'}`
             : '';
@@ -882,7 +947,9 @@ export const DataCenterPopup: React.FC<IProps> = ({
                             <span className='DatasetName'>{datasetName}</span>
                             <span className={`DatasetState ${status.className}`} aria-live='polite'>{status.label}</span>
                         </span>
-                        <span className='DatasetMeta'>{dataset.image_count} {zh ? '张图片' : 'images'} · {dataset.classes.length} {zh ? '类' : 'classes'}</span>
+                        <span className='DatasetMeta'>{dataset.image_count} {dataset.media_type === 'video'
+                            ? (zh ? '帧' : 'frames')
+                            : (zh ? '张图片' : 'images')} · {dataset.classes.length} {zh ? '类' : 'classes'}</span>
                         <span className='DatasetSource'>{sourceLabel}</span>
                     </span>
                     <span className={`DatasetChevron${expanded ? ' expanded' : ''}`} aria-hidden='true' />

@@ -383,6 +383,49 @@ describe('DataCenterPopup', () => {
         expect(DataBatchSyncService.syncQueueItem).not.toHaveBeenCalled();
     });
 
+    it('persists the active video as a server frame dataset', async () => {
+        const videoItem = {
+            id: 'video-1',
+            name: '炉口.mp4',
+            type: QueueItemType.VIDEO,
+            file: new File(['video'], '炉口.mp4', {type: 'video/mp4'}),
+            extractionMetadata: {
+                fps: 25,
+                duration: 2,
+                totalFrames: 50,
+                width: 1920,
+                height: 1080,
+            },
+            status: QueueItemStatus.COMPLETED,
+            uploadedAt: 1,
+            dataSyncStatus: QueueDataSyncStatus.LOCAL,
+        };
+        render(<DataCenterPopup
+            language={Language.CHINESE}
+            projectName='default-project'
+            queueItems={[videoItem]}
+            activeQueueItemId='video-1'
+            activeVideoId='video-1'
+            activeVideoSessionId='session-video-1'
+            imagesData={[]}
+            labels={[]}
+            updateActivePopupTypeAction={updateActivePopupTypeAction}
+            updateQueueItemAction={updateQueueItemAction}
+        />);
+
+        await screen.findByRole('tab', {name: '持久化数据 1'});
+        expect(screen.queryByText('视频暂不支持持久化')).not.toBeInTheDocument();
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', {name: '同步至服务器'}));
+        });
+        expect(DataBatchSyncService.syncQueueItem).toHaveBeenCalledWith(
+            videoItem,
+            [],
+            [],
+            'session-video-1',
+        );
+    });
+
     it('shows downstream tasks only inside the expanded persistent dataset', async () => {
         renderPopup();
         await screen.findByRole('tab', {name: '持久化数据 1'});

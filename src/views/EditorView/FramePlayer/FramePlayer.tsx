@@ -22,6 +22,7 @@ import { Language, LanguageConfig } from '../../../data/LanguageConfig';
 import { EditorModel } from '../../../staticModels/EditorModel';
 import { EditorActions } from '../../../logic/actions/EditorActions';
 import { FrameExtractorService, SessionExpiredError } from '../../../services/FrameExtractorService';
+import {getVideoThumbnailSize} from '../../../utils/VideoThumbnailUtil';
 
 interface IProps {
     language: Language;
@@ -42,7 +43,6 @@ interface IProps {
     onFrameReady?: (frameIdx: number, thumbnailImage: HTMLImageElement) => void;
 }
 
-const THUMBNAIL_SIZE = 150;
 const BATCH_SIZE = 100;
 
 // === available_frames 滑动窗口（基于秒数 × fps 动态计算） ===
@@ -317,20 +317,16 @@ const FramePlayer: React.FC<IProps> = ({
             if (!cb || videoSize.width === 0) return;
 
             if (!thumbnailCanvasRef.current) {
-                const c = document.createElement('canvas');
-                c.width = THUMBNAIL_SIZE;
-                c.height = THUMBNAIL_SIZE;
-                thumbnailCanvasRef.current = c;
+                thumbnailCanvasRef.current = document.createElement('canvas');
             }
+            const thumbnailSize = getVideoThumbnailSize(videoSize.width, videoSize.height);
+            thumbnailCanvasRef.current.width = thumbnailSize.width;
+            thumbnailCanvasRef.current.height = thumbnailSize.height;
             const ctx = thumbnailCanvasRef.current.getContext('2d');
             if (!ctx) return;
 
-            const scale = Math.min(THUMBNAIL_SIZE / videoSize.width, THUMBNAIL_SIZE / videoSize.height);
-            const sw = videoSize.width * scale;
-            const sh = videoSize.height * scale;
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
-            ctx.drawImage(img, (THUMBNAIL_SIZE - sw) / 2, (THUMBNAIL_SIZE - sh) / 2, sw, sh);
+            ctx.clearRect(0, 0, thumbnailSize.width, thumbnailSize.height);
+            ctx.drawImage(img, 0, 0, thumbnailSize.width, thumbnailSize.height);
 
             // Use async toBlob instead of synchronous toDataURL to avoid blocking
             // the main thread (~512ms total savings per Gemini/DevTools analysis).

@@ -102,6 +102,8 @@ interface IProps {
     projectName: string;
     queueItems: QueueItem[];
     activeQueueItemId: string | null;
+    activeVideoId?: string | null;
+    activeVideoSessionId?: string;
     imagesData: ImageData[];
     labels: LabelName[];
     updateActivePopupTypeAction: (activePopupType: PopupWindowType) => void;
@@ -321,6 +323,8 @@ export const DataCenterPopup: React.FC<IProps> = ({
     projectName,
     queueItems,
     activeQueueItemId,
+    activeVideoId,
+    activeVideoSessionId,
     imagesData,
     labels,
     updateActivePopupTypeAction,
@@ -632,7 +636,10 @@ export const DataCenterPopup: React.FC<IProps> = ({
             : ImageRepository.getFileCacheSnapshot(item.id);
         if (!cachedAnnotations) return;
         const annotations = cachedAnnotations;
-        void DataBatchSyncService.syncQueueItem(item, annotations, labels).catch(() => undefined);
+        const syncPromise = item.type === QueueItemType.VIDEO
+            ? DataBatchSyncService.syncQueueItem(item, annotations, labels, activeVideoSessionId)
+            : DataBatchSyncService.syncQueueItem(item, annotations, labels);
+        void syncPromise.catch(() => undefined);
     };
 
     const actionTarget = (dataset: DatasetSummary): DatasetActionTarget => ({
@@ -717,9 +724,10 @@ export const DataCenterPopup: React.FC<IProps> = ({
         const status = syncStatus(item);
         const isActive = item.id === activeQueueItemId;
         const localProjectName = projectName.trim() || item.name;
-        const supportsSync = item.type !== QueueItemType.VIDEO;
         const syncing = item.dataSyncStatus === QueueDataSyncStatus.SYNCING;
-        const hasReliableSnapshot = isActive || ImageRepository.hasFileCache(item.id);
+        const hasReliableSnapshot = item.type === QueueItemType.VIDEO
+            ? isActive && activeVideoId === item.id && Boolean(activeVideoSessionId)
+            : isActive || ImageRepository.hasFileCache(item.id);
         return <article className={`LocalDataCard${isActive ? ' active' : ''}`} key={item.id}>
             <div className='DataCardIdentity'>
                 <div className='DataCardTitleRow'>
@@ -734,13 +742,12 @@ export const DataCenterPopup: React.FC<IProps> = ({
                 <button type='button' onClick={() => openLocalItem(item)}>
                     {zh ? '使用' : 'Use'}
                 </button>
-                {supportsSync && <button
+                <button
                     type='button'
                     className='PrimaryAction'
                     disabled={syncing || !hasReliableSnapshot}
                     onClick={() => syncLocalItem(item)}
-                >{syncActionLabel(item, hasReliableSnapshot)}</button>}
-                {!supportsSync && <span className='UnsupportedHint'>{zh ? '视频暂不支持持久化' : 'Video persistence is not supported yet'}</span>}
+                >{syncActionLabel(item, hasReliableSnapshot)}</button>
             </div>
         </article>;
     };
@@ -1265,6 +1272,8 @@ const mapStateToProps = (state: AppState) => ({
     projectName: state.general.projectData.name,
     queueItems: state.queue.items,
     activeQueueItemId: state.queue.activeQueueItemId,
+    activeVideoId: state.video.activeVideo?.id || null,
+    activeVideoSessionId: state.video.activeVideo?.sessionId,
     imagesData: state.labels.imagesData,
     labels: state.labels.labels,
 });

@@ -15,6 +15,7 @@ import { EditorModel } from "../../../../staticModels/EditorModel";
 import { FrameExtractorService } from "../../../../services/FrameExtractorService";
 import './ImagePreview.scss';
 import { CSSHelper } from "../../../../logic/helpers/CSSHelper";
+import {getVideoThumbnailSize} from "../../../../utils/VideoThumbnailUtil";
 
 interface IProps {
     imageData: ImageData;
@@ -163,16 +164,13 @@ export class ImagePreview extends React.Component<IProps, IState> {
                 // Downscale to thumbnail size (~200px) to save memory.
                 // Full-size frames (e.g. 2560×1440 ≈ 15MB decoded) are wasteful
                 // for sidebar thumbnails displayed at ~150×84px.
-                const THUMB_MAX = 200;
-                const scale = Math.min(THUMB_MAX / fullImg.naturalWidth, THUMB_MAX / fullImg.naturalHeight, 1);
-                const tw = Math.round(fullImg.naturalWidth * scale);
-                const th = Math.round(fullImg.naturalHeight * scale);
+                const thumbnailSize = getVideoThumbnailSize(fullImg.naturalWidth, fullImg.naturalHeight);
                 const thumbCanvas = document.createElement('canvas');
-                thumbCanvas.width = tw;
-                thumbCanvas.height = th;
+                thumbCanvas.width = thumbnailSize.width;
+                thumbCanvas.height = thumbnailSize.height;
                 const ctx = thumbCanvas.getContext('2d');
                 if (ctx) {
-                    ctx.drawImage(fullImg, 0, 0, tw, th);
+                    ctx.drawImage(fullImg, 0, 0, thumbnailSize.width, thumbnailSize.height);
                 }
                 URL.revokeObjectURL(fullUrl); // Release full-size blob
 

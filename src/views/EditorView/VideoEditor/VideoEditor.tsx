@@ -21,6 +21,7 @@ import { EditorActions } from '../../../logic/actions/EditorActions';
 import { ViewPortActions } from '../../../logic/actions/ViewPortActions';
 import { EditorModel } from '../../../staticModels/EditorModel';
 import { Language } from '../../../data/LanguageConfig';
+import {getVideoThumbnailSize} from '../../../utils/VideoThumbnailUtil';
 
 // Module-level stable empty array used as fallback for `frames` prop when
 // fast_ffmpeg_mode runs in on-demand mode (sessionId only, preExtractedFrames undefined).
@@ -277,26 +278,17 @@ const VideoEditor: React.FC<IProps> = ({
                 return;
             }
 
-            // 生成缩略图给 ImagePreview 用（150x150）
-            const thumbnailSize = 150;
+            // 生成等比例缩略图给 ImagePreview，避免首帧被塞进方形黑底。
+            const sourceWidth = activeVideo.videoSize.width || canvas.width;
+            const sourceHeight = activeVideo.videoSize.height || canvas.height;
+            const thumbnailSize = getVideoThumbnailSize(sourceWidth, sourceHeight);
             const thumbnailCanvas = document.createElement('canvas');
-            thumbnailCanvas.width = thumbnailSize;
-            thumbnailCanvas.height = thumbnailSize;
+            thumbnailCanvas.width = thumbnailSize.width;
+            thumbnailCanvas.height = thumbnailSize.height;
             const thumbnailCtx = thumbnailCanvas.getContext('2d');
 
-            if (thumbnailCtx && activeVideo.videoSize.width > 0 && activeVideo.videoSize.height > 0) {
-                const scale = Math.min(
-                    thumbnailSize / activeVideo.videoSize.width,
-                    thumbnailSize / activeVideo.videoSize.height
-                );
-                const scaledWidth = activeVideo.videoSize.width * scale;
-                const scaledHeight = activeVideo.videoSize.height * scale;
-                const offsetX = (thumbnailSize - scaledWidth) / 2;
-                const offsetY = (thumbnailSize - scaledHeight) / 2;
-
-                thumbnailCtx.fillStyle = '#000';
-                thumbnailCtx.fillRect(0, 0, thumbnailSize, thumbnailSize);
-                thumbnailCtx.drawImage(canvas, offsetX, offsetY, scaledWidth, scaledHeight);
+            if (thumbnailCtx && sourceWidth > 0 && sourceHeight > 0) {
+                thumbnailCtx.drawImage(canvas, 0, 0, thumbnailSize.width, thumbnailSize.height);
 
                 // Async toBlob to avoid blocking main thread
                 thumbnailCanvas.toBlob((blob) => {

@@ -98,20 +98,28 @@ export class DataBatchSyncService {
         };
     }
 
+    public static buildVideoMetadata(imagesData: ImageData[], labels: LabelName[]): BatchMetadata {
+        return this.buildMetadata(imagesData.map(image => image.fileData), imagesData, labels);
+    }
+
     public static syncQueueItem(
         item: QueueItem,
         imagesData: ImageData[],
         labels: LabelName[],
+        videoSessionId?: string,
     ): Promise<BatchUploadResponse> {
         const existing = this.inFlight.get(item.id);
         if (existing) return existing;
 
         const files = filesForItem(item);
-        if (files.length === 0) {
+        if (item.type === QueueItemType.VIDEO && !videoSessionId) {
+            return Promise.reject(new Error('Open the video again before synchronizing it'));
+        }
+        if (item.type !== QueueItemType.VIDEO && files.length === 0) {
             return Promise.reject(new Error('Only image batches can be synchronized to Resource Center'));
         }
 
-        const promise = this.performSync(item, files, imagesData, labels)
+        const promise = this.performSync(item, files, imagesData, labels, videoSessionId)
             .finally(() => this.inFlight.delete(item.id));
         this.inFlight.set(item.id, promise);
         return promise;
@@ -122,6 +130,7 @@ export class DataBatchSyncService {
         files: File[],
         imagesData: ImageData[],
         labels: LabelName[],
+        videoSessionId?: string,
     ): Promise<BatchUploadResponse> {
         const texts = LanguageConfig[store.getState().general.language];
         const task = TaskTracker.startTask({
@@ -145,9 +154,17 @@ export class DataBatchSyncService {
             form.append('source_id', item.id);
             if (item.datasetId) form.append('dataset_id', item.datasetId);
             form.append('operation_type', item.datasetId ? 'annotation_edit' : 'raw');
-            form.append('metadata', JSON.stringify(this.buildMetadata(files, imagesData, labels)));
-            files.forEach(file => form.append('files', file, file.name));
-            const response = await fetch(`${getEngineBaseUrl()}/datasets/batches`, {
+            const metadata = item.type === QueueItemType.VIDEO
+                ? this.buildVideoMetadata(imagesData, labels)
+                : this.buildMetadata(files, imagesData, labels);
+            form.append('metadata', JSON.stringify(metadata));
+            if (item.type !== QueueItemType.VIDEO) {
+                files.forEach(file => form.append('files', file, file.name));
+            }
+            const endpoint = item.type === QueueItemType.VIDEO
+                ? `/datasets/video-sessions/${encodeURIComponent(String(videoSessionId))}`
+                : '/datasets/batches';
+            const response = await fetch(`${getEngineBaseUrl()}${endpoint}`, {
                 method: 'POST',
                 body: form,
             });

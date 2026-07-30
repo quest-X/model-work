@@ -82,6 +82,19 @@ export type LabelsState = {
     labels: LabelName[];
 }
 
+export interface VisualSearchBBoxAcceptance {
+    clientJobId: string;
+    backendJobId: string;
+    resultId: string;
+    queueItemId: string;
+    datasetId: string;
+    datasetRevision: string | number;
+    assetId: string;
+    imageId: string;
+    expectedFile: File;
+    labelRect: LabelRect;
+}
+
 interface UpdateActiveImageIndex {
     type: typeof Action.UPDATE_ACTIVE_IMAGE_INDEX;
     payload: {
@@ -189,6 +202,11 @@ interface DeleteImageById {
     }
 }
 
+interface AcceptVisualSearchBBox {
+    type: typeof Action.ACCEPT_VISUAL_SEARCH_BBOX;
+    payload: VisualSearchBBoxAcceptance;
+}
+
 export type LabelsActionTypes = UpdateActiveImageIndex
     | UpdateActiveLabelNameId
     | UpdateActiveLabelType
@@ -204,4 +222,4 @@ export type LabelsActionTypes = UpdateActiveImageIndex
     | ToggleImageSelection
     | SelectImageRange
     | DeleteImageById
-
+    | AcceptVisualSearchBBox

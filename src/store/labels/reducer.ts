@@ -14,6 +14,8 @@ const initialState: LabelsState = {
     labels: []
 };
 
+// This legacy reducer owns the complete label action surface.
+// eslint-disable-next-line complexity
 export function labelsReducer(
     state = initialState,
     action: LabelsActionTypes
@@ -154,6 +156,29 @@ export function labelsReducer(
                 imagesData: newImagesData,
                 activeImageIndex: newActiveIndex
             }
+        }
+        case Action.ACCEPT_VISUAL_SEARCH_BBOX: {
+            const targetIndex = state.imagesData.findIndex(
+                imageData => imageData.id === action.payload.imageId,
+            );
+            if (targetIndex < 0) return state;
+            const target = state.imagesData[targetIndex];
+            if (target.labelRects.some(rect => rect.id === action.payload.labelRect.id)) {
+                return state;
+            }
+            const imagesData = [...state.imagesData];
+            imagesData[targetIndex] = {
+                ...target,
+                labelRects: [...target.labelRects, action.payload.labelRect],
+            };
+            return {
+                ...state,
+                imagesData,
+                activeImageIndex: targetIndex,
+                activeLabelId: action.payload.labelRect.id,
+                activeLabelViewType: LabelType.RECT,
+                firstLabelCreatedFlag: true,
+            };
         }
         default:
             return state;

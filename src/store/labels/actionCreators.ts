@@ -1,4 +1,9 @@
-import {LabelsActionTypes, ImageData, LabelName} from './types';
+import {
+    LabelsActionTypes,
+    ImageData,
+    LabelName,
+    VisualSearchBBoxAcceptance,
+} from './types';
 import {Action} from '../Actions';
 import {LabelType} from '../../data/enums/LabelType';
 
@@ -142,4 +147,13 @@ export function deleteSelectedImages(): LabelsActionTypes {
         type: Action.DELETE_SELECTED_IMAGES,
         payload: {}
     }
+}
+
+export function acceptVisualSearchBBox(
+    acceptance: VisualSearchBBoxAcceptance,
+): LabelsActionTypes {
+    return {
+        type: Action.ACCEPT_VISUAL_SEARCH_BBOX,
+        payload: acceptance,
+    };
 }

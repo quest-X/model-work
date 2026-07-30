@@ -95,4 +95,43 @@ describe('DataBatchSyncService', () => {
         expect(form.get('dataset_id')).toBe('dataset-existing');
         expect(form.get('operation_type')).toBe('annotation_edit');
     });
+
+    it('persists an active video session as an annotated frame dataset', async () => {
+        const frame = new File([], 'frame_000000.jpg', {type: 'image/jpeg'});
+        const labels: LabelName[] = [{id: 'hot', name: 'hot'}];
+        const image = {
+            id: 'frame-0',
+            fileData: frame,
+            labelRects: [{labelId: 'hot', rect: {x: 5, y: 6, width: 20, height: 10}}],
+            labelPolygons: [],
+        } as ImageData;
+        const item: QueueItem = {
+            id: 'video-queue',
+            name: '炉口.mp4',
+            type: QueueItemType.VIDEO,
+            file: new File(['video'], '炉口.mp4', {type: 'video/mp4'}),
+            status: QueueItemStatus.COMPLETED,
+            uploadedAt: 1,
+        };
+        global.fetch = jest.fn().mockResolvedValue(jsonResponse({
+            status: 'success',
+            dataset_id: 'video-dataset',
+            revision: 1,
+        }));
+
+        await DataBatchSyncService.syncQueueItem(item, [image], labels, 'session/炉口');
+
+        const [url, request] = (global.fetch as jest.Mock).mock.calls[0] as [string, RequestInit];
+        const form = request.body as FormData;
+        expect(url).toContain('/datasets/video-sessions/session%2F%E7%82%89%E5%8F%A3');
+        expect(form.getAll('files')).toHaveLength(0);
+        expect(JSON.parse(String(form.get('metadata')))).toEqual({
+            version: 1,
+            classes: [{id: 'hot', name: 'hot'}],
+            images: [{
+                index: 0,
+                regions: [{label_id: 'hot', bbox: [5, 6, 20, 10]}],
+            }],
+        });
+    });
 });

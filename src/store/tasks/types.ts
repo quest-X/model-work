@@ -12,6 +12,7 @@ export enum TaskType {
     EXPORT = 'EXPORT',
     QUEUE_LOAD = 'QUEUE_LOAD',
     DATA_SYNC = 'DATA_SYNC',
+    VISUAL_SEARCH = 'VISUAL_SEARCH',
 }
 
 export interface ManagedTask {

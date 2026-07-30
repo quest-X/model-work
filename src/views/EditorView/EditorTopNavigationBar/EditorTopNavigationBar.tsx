@@ -43,6 +43,7 @@ import { getTimelineRange, FrameRange } from '../VideoTimeline/VideoTimeline';
 import { NotificationUtil } from '../../../utils/NotificationUtil';
 import { inferModelTaskFromName } from '../../../utils/ModelTaskUtil';
 import {ModelInspectorTrigger} from './ModelInspectorTrigger';
+import {VisualSearchTrigger} from './VisualSearchTrigger';
 const BUTTON_SIZE: ISize = { width: 30, height: 30 };
 const BUTTON_PADDING: number = 10;
 
@@ -914,6 +915,12 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                 </div>;
             }, [imagesData, activeImageIndex, isSAMLoaded, smartAnnotationActive, samNegativeMode, smartAnnotationOnClick, smartAnnotationOnDoubleClick, isTrackingModelLoaded, trackingOnClick, trackingMode, trackingInProgress, currentTexts, eraserMode, eraserFineMode, eraserOnClick, language])}
             <div style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', gap: 6, height: '100%' }}>
+                <VisualSearchTrigger
+                    disabled={imagesData.length === 0}
+                    hasExtensionEngine={hasExtensionEngine}
+                    language={language}
+                    onOpen={() => updateActivePopupTypeAction(PopupWindowType.VISUAL_SEARCH)}
+                />
                 <ModelInspectorTrigger
                     key={modelInspectorBackendKey}
                     backendKey={modelInspectorBackendKey}

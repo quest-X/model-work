@@ -40,6 +40,7 @@ type VideoSessionResponse = {
         height: number;
     };
     workspace?: WorkspaceMetadata;
+    dataset?: {revision?: number};
 };
 
 const readError = async (response: Response): Promise<string> => {
@@ -102,13 +103,19 @@ export class VideoDatasetRestoreService {
         currentImagesData: ImageData[],
     ): Promise<QueueItem> {
         const response = await fetch(
-            `${getEngineBaseUrl()}/datasets/${encodeURIComponent(datasetId)}/video-session`,
+            `${getEngineBaseUrl()}/datasets/${encodeURIComponent(datasetId)}/video-session` +
+            `?revision=${encodeURIComponent(String(datasetRevision))}`,
             {method: 'POST'},
         );
         if (!response.ok) throw new Error(await readError(response));
         const result = await response.json() as VideoSessionResponse;
         if (!result.sessionId || !result.metadata?.totalFrames) {
             throw new Error('Resource Center returned an incomplete video session');
+        }
+        if (result.dataset?.revision !== datasetRevision) {
+            throw new Error(
+                `Dataset revision mismatch: expected v${datasetRevision}, received v${result.dataset?.revision ?? 'unknown'}`,
+            );
         }
 
         const labels = buildLabels(result.workspace || {});
@@ -123,6 +130,7 @@ export class VideoDatasetRestoreService {
             name: result.filename || datasetName,
             type: QueueItemType.VIDEO,
             file: new File([], result.filename || `${datasetName}.mp4`, {type: 'video/mp4'}),
+            videoSessionId: result.sessionId,
             extractionMetadata: result.metadata,
             status: QueueItemStatus.PENDING,
             uploadedAt: Date.now(),

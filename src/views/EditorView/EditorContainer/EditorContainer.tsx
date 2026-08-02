@@ -152,7 +152,7 @@ const EditorContainer: React.FC<IProps> = (
     }, []);
 
     const handleSave = useCallback(() => {
-        AutoSaveService.saveCurrentState();
+        AutoSaveService.saveCurrentState(true);
     }, []);
 
     useEffect(() => {
@@ -436,6 +436,7 @@ const EditorContainer: React.FC<IProps> = (
                             type: QueueItemType.VIDEO,
                             file: videoFile,
                             extractedFrames: undefined,
+                            videoSessionId: result.sessionId,
                             extractionMetadata: {
                                 fps: result.fps,
                                 duration: result.duration,

@@ -28,6 +28,7 @@ export type QueueItem = {
     file?: File;
     files?: File[]; // For folders
     extractedFrames?: File[];          // FFmpeg 拆出的 JPEG 帧（VIDEO 模式专用）
+    videoSessionId?: string;           // On-demand backend session owned by this video item
     extractionMetadata?: {             // 拆帧时的视频元信息
         fps: number;
         duration: number;

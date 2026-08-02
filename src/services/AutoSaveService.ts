@@ -1,204 +1,364 @@
 import { store } from '../index';
 import { LocalStorageManager, ProjectSettings } from '../utils/LocalStorageManager';
-import { IndexedDBManager, StoredProjectData, StoredImageData } from '../utils/IndexedDBManager';
+import {
+    IndexedDBManager,
+    StoredExtractionMetadata,
+    StoredImageData,
+    StoredProjectData,
+    StoredQueueAnnotationFrame,
+    StoredQueueAnnotationSnapshot,
+    StoredVideoPlaybackMode,
+    StoredVideoRecoveryData,
+} from '../utils/IndexedDBManager';
 import { AIStateStorageManager } from '../utils/AIStateStorageManager';
-import { LabelsSelector } from '../store/selectors/LabelsSelector';
-import { GeneralSelector } from '../store/selectors/GeneralSelector';
-import { ImageRepository } from '../logic/imageRepository/ImageRepository';
+import {ImageRepository} from '../logic/imageRepository/ImageRepository';
 import { TaskTracker } from './TaskTracker';
 import { TaskType } from '../store/tasks/types';
 import { LanguageConfig } from '../data/LanguageConfig';
-import {QueueItem} from '../store/queue/types';
+import {QueueItem, QueueItemType} from '../store/queue/types';
+import {ImageData} from '../store/labels/types';
+
+const MAX_RECOVERY_BYTES = 500 * 1024 * 1024;
+
+type PersistableValue = null | boolean | number | string | PersistableValue[] | {
+    [key: string]: PersistableValue;
+};
+
+interface FramePersistenceDecision {
+    image: ImageData;
+    frameIndex: number;
+    persistBytes: boolean;
+    allowPlaceholder: boolean;
+}
+
+const fileDescriptor = (file: File | null | undefined): PersistableValue => file ? {
+    name: file.name,
+    size: file.size,
+    type: file.type,
+    lastModified: file.lastModified,
+} : null;
+
+const canonicalize = (value: any): PersistableValue => {
+    if (value === null) return null;
+    if (value === undefined) return '__undefined__';
+    if (typeof File !== 'undefined' && value instanceof File) return fileDescriptor(value);
+    if (value instanceof Map) {
+        return Array.from(value.entries())
+            .sort(([left], [right]) => String(left).localeCompare(String(right)))
+            .map(([key, entry]) => [canonicalize(key), canonicalize(entry)]);
+    }
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (typeof value === 'number') {
+        if (Number.isNaN(value)) return '__NaN__';
+        if (!Number.isFinite(value)) return value > 0 ? '__Infinity__' : '__-Infinity__';
+        return value;
+    }
+    if (typeof value === 'boolean' || typeof value === 'string') return value;
+    if (typeof value === 'object') {
+        return Object.keys(value)
+            .sort()
+            .reduce<Record<string, PersistableValue>>((result, key) => {
+                result[key] = canonicalize(value[key]);
+                return result;
+            }, {});
+    }
+    return String(value);
+};
+
+const normalizeQueueItem = (item: QueueItem): Record<string, any> => {
+    const {
+        file,
+        files,
+        extractedFrames,
+        // Runtime backend leases are intentionally not durable.
+        videoSessionId: _videoSessionId,
+        ...metadata
+    } = item;
+    return {
+        ...metadata,
+        file: fileDescriptor(file),
+        files: files?.map(fileDescriptor),
+        extractedFrames: extractedFrames?.map(fileDescriptor),
+    };
+};
+
+const annotationFrameFor = (
+    image: ImageData,
+    frameIndex: number,
+): StoredQueueAnnotationFrame => ({
+    id: image.id,
+    frameIndex,
+    fileName: image.fileData?.name || `frame-${frameIndex}`,
+    fileType: image.fileData?.type || '',
+    loadStatus: image.loadStatus,
+    labelRects: image.labelRects || [],
+    labelPoints: image.labelPoints || [],
+    labelLines: image.labelLines || [],
+    labelPolygons: image.labelPolygons || [],
+    labelNameIds: image.labelNameIds || [],
+});
+
+const queueAnnotationSnapshotsFor = (state: any): StoredQueueAnnotationSnapshot[] => {
+    const activeQueueItemId = state.queue?.activeQueueItemId || null;
+    return (state.queue?.items || []).flatMap((item: QueueItem) => {
+        const images = item.id === activeQueueItemId
+            ? state.labels?.imagesData || []
+            : ImageRepository.getFileCacheSnapshot(item.id);
+        if (!images) return [];
+        return [{
+            queueItemId: item.id,
+            frames: images.map(annotationFrameFor),
+        }];
+    });
+};
+
+const activeVideoQueueItemFor = (state: any, activeVideo: any): QueueItem | undefined => {
+    const queueItems: QueueItem[] = state.queue?.items || [];
+    const activeQueueItem = queueItems.find(
+        item => item.id === state.queue?.activeQueueItemId,
+    );
+    if (activeQueueItem?.type === QueueItemType.VIDEO) return activeQueueItem;
+    return queueItems.find(
+        item => item.type === QueueItemType.VIDEO && item.id === activeVideo?.id,
+    );
+};
+
+/** Exact signature of every state field written by AutoSaveService. */
+export const buildPersistenceSignature = (state: any): string => {
+    const activeVideo = state.video?.activeVideo;
+    const activeVideoQueueItem = activeVideoQueueItemFor(state, activeVideo);
+    const signatureState = {
+        settings: {
+            language: state.general?.language,
+            projectData: state.general?.projectData,
+            zoom: state.general?.zoom,
+            imageDragMode: state.general?.imageDragMode,
+            smartAnnotationActive: state.general?.smartAnnotationActive,
+            currentImageIndex: state.labels?.activeImageIndex,
+            activeLabelType: state.labels?.activeLabelType,
+        },
+        labels: state.labels?.labels || [],
+        images: (state.labels?.imagesData || []).map((image: ImageData, frameIndex: number) => ({
+            frameIndex,
+            id: image.id,
+            file: fileDescriptor(image.fileData),
+            labelRects: image.labelRects || [],
+            labelPoints: image.labelPoints || [],
+            labelLines: image.labelLines || [],
+            labelPolygons: image.labelPolygons || [],
+            labelNameIds: image.labelNameIds || [],
+        })),
+        video: {
+            isVideoMode: state.video?.isVideoMode || false,
+            activeVideoIndex: state.video?.activeVideoIndex,
+            activeVideo: activeVideo ? {
+                id: activeVideo.id,
+                sourceFile: fileDescriptor(activeVideo.fileData),
+                loadStatus: activeVideo.loadStatus,
+                duration: activeVideo.duration,
+                fps: activeVideo.fps,
+                totalFrames: activeVideo.totalFrames,
+                videoSize: activeVideo.videoSize,
+                sessionBacked: Boolean(activeVideo.sessionId),
+                fallbackSessionId: activeVideoQueueItem?.videoSessionId || activeVideo.sessionId,
+                preExtractedFrames: activeVideo.preExtractedFrames?.map(fileDescriptor),
+            } : null,
+        },
+        queue: {
+            activeQueueItemId: state.queue?.activeQueueItemId || null,
+            items: (state.queue?.items || []).map(normalizeQueueItem),
+            annotationSnapshots: queueAnnotationSnapshotsFor(state),
+        },
+        ai: {
+            segmentationResults: state.ai?.segmentationResults || [],
+            imageSegmentationResults: state.ai?.imageSegmentationResults || new Map(),
+            imageAIStates: state.ai?.imageAIStates || new Map(),
+        },
+    };
+    return JSON.stringify(canonicalize(signatureState));
+};
+
+const extractionMetadataFor = (activeVideo: any): StoredExtractionMetadata => ({
+    fps: activeVideo?.fps || 0,
+    duration: activeVideo?.duration || 0,
+    totalFrames: activeVideo?.totalFrames || 0,
+    width: activeVideo?.videoSize?.width || 0,
+    height: activeVideo?.videoSize?.height || 0,
+});
+
+const playbackModeFor = (activeVideo: any): StoredVideoPlaybackMode => {
+    if (activeVideo?.preExtractedFrames) return 'pre-extracted';
+    if (activeVideo?.sessionId) return 'on-demand';
+    return 'raw';
+};
+
+const sameFile = (left: File | null | undefined, right: File | null | undefined): boolean =>
+    left === right || Boolean(left && right &&
+        left.name === right.name &&
+        left.size === right.size &&
+        left.type === right.type &&
+        left.lastModified === right.lastModified);
 
 export class AutoSaveService {
     private static saveTimer: NodeJS.Timeout | null = null;
-    // 周期 save 间隔：配合 edit-debounce 和 visibilitychange flush，
-    // 周期保存仅作兜底，3 分钟足够。
     private static readonly SAVE_INTERVAL = 180000;
-    // Edit-driven debounce：每次 Redux dispatch 后 N 毫秒无新动作就 save。
-    // 比纯 interval 反应快，比"每个 dispatch 都 save"省得多。
     private static readonly EDIT_DEBOUNCE_MS = 3000;
     private static editDebounceTimer: NodeJS.Timeout | null = null;
     private static unsubscribeStore: (() => void) | null = null;
-    /** 视频 on-demand 模式下"全占位帧 → 跳过 IDB 写入"会反复触发，节流避免刷屏（首次 + 每 N 次 warn 一次） */
-    private static placeholderFilterWarnCount = 0;
-    private static readonly PLACEHOLDER_FILTER_WARN_INTERVAL = 20;
     private static visibilityListener: (() => void) | null = null;
     private static isInitialized = false;
-    // 保存完成回调：UI 层注册，用于触发绿色闪烁等视觉反馈
+    private static initializationPromise: Promise<void> | null = null;
+    private static lastSavedSignature = '';
+    private static inFlightSave: Promise<void> | null = null;
+    private static pendingSave = false;
+    private static pendingForce = false;
+    private static suspendDepth = 0;
     public static onSaveComplete: (() => void) | null = null;
 
     public static async initialize(): Promise<void> {
-        if (this.isInitialized) {
-            console.log('自动保存服务已经初始化，跳过重复初始化');
-            return;
-        }
+        if (this.isInitialized) return;
+        if (this.initializationPromise) return this.initializationPromise;
+        this.initializationPromise = this.initializeOnce().finally(() => {
+            this.initializationPromise = null;
+        });
+        return this.initializationPromise;
+    }
 
-        console.log('开始初始化自动保存服务...');
-
-        // 清理可能存在的旧定时器
+    private static async initializeOnce(): Promise<void> {
         this.stopAutoSave();
-
-        // 初始化IndexedDB
         const dbInitialized = await IndexedDBManager.initialize();
         if (!dbInitialized) {
-            console.warn('IndexedDB初始化失败，将只使用localStorage');
+            console.warn('IndexedDB暂不可用；关闭旧标签页后，后续自动保存将重试');
         }
 
-        // 设置定期自动保存
         this.startAutoSave();
-
-        // Redux store 订阅：编辑后 EDIT_DEBOUNCE_MS 内无新动作就触发一次 save。
         this.unsubscribeStore = store.subscribe(() => {
             if (this.editDebounceTimer) clearTimeout(this.editDebounceTimer);
             this.editDebounceTimer = setTimeout(() => {
                 if (typeof document !== 'undefined' && document.hidden) return;
-                this.saveCurrentState();
+                void this.saveCurrentState();
             }, this.EDIT_DEBOUNCE_MS);
         });
-
-        // 标签页切换到隐藏时强制 flush 一次（用户切走前这一刻可能有未持久化的编辑）。
-        // beforeunload 之外的额外保障，因为浏览器对 beforeunload 期间的 IDB 异步写入不可靠。
         this.visibilityListener = () => {
             if (typeof document !== 'undefined' && document.hidden) {
-                this.saveCurrentState();
+                void this.saveCurrentState();
             }
         };
         document.addEventListener('visibilitychange', this.visibilityListener);
-
-        // 监听页面关闭事件，确保保存
         window.addEventListener('beforeunload', this.saveBeforeUnload);
-
         this.isInitialized = true;
-        console.log('自动保存服务初始化完成');
     }
-    
+
     public static startAutoSave(): void {
-        if (this.saveTimer) {
-            clearInterval(this.saveTimer);
-        }
-        
+        if (this.saveTimer) clearInterval(this.saveTimer);
         this.saveTimer = setInterval(() => {
-            // 标签页/屏幕休眠时跳过：用户没在编辑，没新东西要存；
-            // 整夜每 N 秒一次序列化整个 store 写 IndexedDB 是 dev 模式下内存增长的主因之一。
             if (typeof document !== 'undefined' && document.hidden) return;
-            this.saveCurrentState();
+            void this.saveCurrentState();
         }, this.SAVE_INTERVAL);
-
-        console.log('自动保存定时器已启动');
     }
-    
+
     public static stopAutoSave(): void {
-        if (this.saveTimer) {
-            clearInterval(this.saveTimer);
-            this.saveTimer = null;
-            console.log('自动保存定时器已停止');
-        }
+        if (!this.saveTimer) return;
+        clearInterval(this.saveTimer);
+        this.saveTimer = null;
     }
-    
-    /**
-     * Cheap signature of the data slices we serialize, so we can skip the
-     * heavy IndexedDB write when nothing relevant has changed since the last
-     * save. Catches add/remove/move of any label or queue item, video mode
-     * toggle, and active selection. Does NOT catch in-place vertex drags
-     * where rect/polygon count stays constant — for that case we still rely
-     * on the manual Ctrl+S path; the periodic save is best-effort. Worth it
-     * because it turns "videos with 8000+ frame placeholders, idle, polling"
-     * from "serialize 400 MB to IDB every minute forever" into "no-op".
-     */
-    private static lastSavedSignature: string = '';
+
     public static queueSignature(items: QueueItem[]): string {
-        return JSON.stringify(items.map(item => [
-            item.id,
-            item.name,
-            item.status,
-            item.dataSyncStatus || '',
-            item.datasetId || '',
-            item.datasetRevision || 0,
-            item.syncedAt || 0,
-            item.dataSyncError || '',
-        ]));
+        return JSON.stringify(canonicalize(items.map(normalizeQueueItem)));
     }
 
-    private static computeSignature(): string {
-        const state = store.getState();
-        const imagesData = state.labels.imagesData;
-        const queueItems = state.queue?.items || [];
-        // Aggregate per-image label counts into one string. For 10k images
-        // this is ~150 KB string compare per tick — negligible vs. a full
-        // ArrayBuffer serialize.
-        const labelDetail = imagesData.map(i => {
-            const r = i.labelRects?.length || 0;
-            const p = i.labelPoints?.length || 0;
-            const l = i.labelLines?.length || 0;
-            // Polygon vertex total catches "added a vertex" without scanning coords.
-            const polyVerts = (i.labelPolygons || []).reduce(
-                (s, poly: any) => s + (poly?.vertices?.length || 0), 0
-            );
-            return `${r},${p},${l},${(i.labelPolygons?.length || 0)}/${polyVerts}`;
-        }).join('|');
-        return [
-            imagesData.length,
-            (state.labels.labels || []).length,
-            state.labels.activeImageIndex,
-            state.video?.isVideoMode ? 'V' : 'I',
-            state.video?.activeVideo?.id || '',
-            queueItems.length,
-            this.queueSignature(queueItems),
-            state.queue?.activeQueueItemId || '',
-            (state.ai?.segmentationResults || []).length,
-            labelDetail,
-        ].join('::');
+    public static suspend(): void {
+        // Idempotent because React StrictMode may run the App bootstrap effect
+        // twice; one matching resume must still make the writer ready.
+        this.suspendDepth = 1;
+        // A queued save represents pre-restore state. Never carry it across a
+        // restore/clear boundary; the caller may explicitly force-save later.
+        this.pendingSave = false;
+        this.pendingForce = false;
     }
 
-    public static async saveCurrentState(): Promise<void> {
-        // Skip the entire heavy path when nothing changed since last save.
-        // First call always falls through (lastSavedSignature is empty).
-        // 注意：信号无变化时直接 return，不创建 task — 避免每 3s 闪一次面板。
-        const sig = this.computeSignature();
-        if (sig === this.lastSavedSignature && this.lastSavedSignature !== '') {
-            return;
+    public static resume(): void {
+        this.suspendDepth = 0;
+        if (this.suspendDepth === 0 && this.pendingSave) {
+            void this.startSaveLoop();
         }
+    }
 
-        // 走到这里就是真正要写盘了，登记 P0 task。stableId='autosave' 确保
-        // 每次保存独立记录，不再 upsert 覆盖，保留完整保存历史。
-        const lang = store.getState().general.language;
-        const t = LanguageConfig[lang].taskManager;
+    public static async drain(): Promise<void> {
+        while (this.inFlightSave) {
+            await this.inFlightSave;
+        }
+    }
+
+    public static saveCurrentState(force: boolean = false): Promise<void> {
+        if (this.suspendDepth > 0) return Promise.resolve();
+        this.pendingSave = true;
+        this.pendingForce = this.pendingForce || force;
+        return this.startSaveLoop();
+    }
+
+    private static startSaveLoop(): Promise<void> {
+        if (this.inFlightSave) return this.inFlightSave;
+        const loop = this.runSaveLoop();
+        this.inFlightSave = loop.then(async () => {
+            this.inFlightSave = null;
+            if (this.pendingSave && this.suspendDepth === 0) {
+                await this.startSaveLoop();
+            }
+        });
+        return this.inFlightSave;
+    }
+
+    private static async runSaveLoop(): Promise<void> {
+        while (this.pendingSave && this.suspendDepth === 0) {
+            const force = this.pendingForce;
+            this.pendingSave = false;
+            this.pendingForce = false;
+            await this.performSave(force);
+        }
+    }
+
+    private static async performSave(force: boolean): Promise<void> {
+        const signature = buildPersistenceSignature(store.getState());
+        if (!force && signature === this.lastSavedSignature && this.lastSavedSignature !== '') return;
+
+        const stateAtStart = store.getState();
+        const texts = LanguageConfig[stateAtStart.general.language].taskManager;
         const task = TaskTracker.startTask({
             type: TaskType.AUTO_SAVE,
             priority: 'P0',
-            title: t.types.autoSave,
+            title: texts.types.autoSave,
             cancellable: false,
             autoRemoveAfterMs: 0,
         });
 
         try {
-            // 保存轻量设置到localStorage
-            await this.saveSettings();
-
-            // 保存AI状态到localStorage
-            await this.saveAIState();
-
-            // 保存重型数据到IndexedDB
             const saved = await this.saveProjectData();
-
-            if (saved) {
-                this.lastSavedSignature = sig;
-                if (this.onSaveComplete) this.onSaveComplete();
-                task.complete();
-            } else {
-                // 比如数据量超 500MB 守卫触发，跳过但不算失败
-                task.complete();
+            if (!saved) {
+                task.fail(new Error('Recovery snapshot was not committed'));
+                return;
             }
+            // The lightweight timestamps are only evidence of a durable recovery
+            // point after the IndexedDB transaction has committed.
+            await this.saveSettings();
+            await this.saveAIState();
+            this.lastSavedSignature = signature;
+            this.onSaveComplete?.();
+            task.complete();
         } catch (error) {
             console.error('保存当前状态失败:', error);
             task.fail(error);
+        } finally {
+            // A mutation that landed during serialization must receive a newer,
+            // ordered commit even if its debounce has not fired yet.
+            if (buildPersistenceSignature(store.getState()) !== signature) {
+                this.pendingSave = true;
+            }
         }
     }
-    
+
     private static async saveSettings(): Promise<void> {
         const state = store.getState();
-        
         const settings: Partial<ProjectSettings> = {
             language: state.general.language,
             projectName: state.general.projectData.name,
@@ -206,162 +366,174 @@ export class AutoSaveService {
             imageDragMode: state.general.imageDragMode,
             smartAnnotationActive: state.general.smartAnnotationActive,
             currentImageIndex: state.labels.activeImageIndex,
-            activeLabelType: state.labels.activeLabelType
+            activeLabelType: state.labels.activeLabelType,
         };
-
         LocalStorageManager.saveSettings(settings);
     }
-    
+
     private static async saveAIState(): Promise<void> {
-        const state = store.getState();
-        
-        // 保存每张图片的AI状态
-        AIStateStorageManager.saveImageAIStates(state.ai.imageAIStates);
+        AIStateStorageManager.saveImageAIStates(store.getState().ai.imageAIStates);
     }
-    
+
+    private static videoRecoveryFor(state: any): StoredVideoRecoveryData | undefined {
+        const activeVideo = state.video?.isVideoMode ? state.video.activeVideo : null;
+        if (!activeVideo) return undefined;
+        const activeQueueItem = activeVideoQueueItemFor(state, activeVideo);
+        const sourceFile = activeQueueItem?.file?.size > 0
+            ? activeQueueItem.file
+            : activeVideo.fileData;
+        return {
+            mode: playbackModeFor(activeVideo),
+            sourceQueueItemId: activeQueueItem?.id || null,
+            // Store the source once regardless of size. If quota cannot hold it,
+            // IndexedDB aborts atomically and the previous snapshot survives.
+            sourceFile: sourceFile?.size > 0 ? sourceFile : undefined,
+            sessionId: activeQueueItem?.videoSessionId || activeVideo.sessionId,
+            metadata: extractionMetadataFor(activeVideo),
+        };
+    }
+
+    private static queueItemsForStorage(
+        queueItems: QueueItem[],
+        videoRecovery: StoredVideoRecoveryData | undefined,
+    ): QueueItem[] {
+        return queueItems.map(item => {
+            const runtimeItem = item as QueueItem & {videoSessionId?: string};
+            const {
+                videoSessionId: _videoSessionId,
+                ...durableItem
+            } = runtimeItem;
+            if (item.id !== videoRecovery?.sourceQueueItemId) return durableItem as QueueItem;
+            return {
+                ...durableItem,
+                file: undefined,
+                extractedFrames: undefined,
+            } as QueueItem;
+        });
+    }
+
+    private static frameDecisions(
+        images: ImageData[],
+        videoRecovery: StoredVideoRecoveryData | undefined,
+        queueItems: QueueItem[],
+    ): FramePersistenceDecision[] {
+        const sourceQueueItem = queueItems.find(
+            item => item.id === videoRecovery?.sourceQueueItemId,
+        );
+        const allowPlaceholder = Boolean(
+            (videoRecovery?.sourceFile && videoRecovery.sourceFile.size > 0) ||
+            sourceQueueItem?.datasetId,
+        );
+        // This cap applies only to optional, reconstructable frame caches. The
+        // original video source is a separate durable recovery dependency.
+        let remainingBytes = MAX_RECOVERY_BYTES;
+        return images.map((image, frameIndex) => {
+            const isVideoSource = sameFile(image.fileData, videoRecovery?.sourceFile);
+            const fitsRecoveryBudget = !isVideoSource && image.fileData.size <= remainingBytes;
+            // Non-video and non-reconstructable video bytes must never be silently
+            // truncated. Let IndexedDB reject the transaction and keep the previous
+            // committed snapshot if quota is insufficient.
+            const persistBytes = image.fileData.size > 0 &&
+                (!allowPlaceholder || fitsRecoveryBudget);
+            if (allowPlaceholder && persistBytes) remainingBytes -= image.fileData.size;
+            return {image, frameIndex, persistBytes, allowPlaceholder};
+        });
+    }
+
+    private static async storedImageFor(
+        decision: FramePersistenceDecision,
+    ): Promise<StoredImageData> {
+        const {image, frameIndex} = decision;
+        let fileData = new ArrayBuffer(0);
+        let isPlaceholder = true;
+        if (decision.persistBytes) {
+            try {
+                fileData = await image.fileData.arrayBuffer();
+                isPlaceholder = fileData.byteLength === 0;
+            } catch (error) {
+                if (!decision.allowPlaceholder) throw error;
+                fileData = new ArrayBuffer(0);
+            }
+        }
+        return {
+            id: image.id,
+            frameIndex,
+            isPlaceholder,
+            fileName: image.fileData.name,
+            fileData,
+            fileType: image.fileData.type,
+            loadStatus: image.loadStatus,
+            labelRects: image.labelRects || [],
+            labelPoints: image.labelPoints || [],
+            labelLines: image.labelLines || [],
+            labelPolygons: image.labelPolygons || [],
+            labelNameIds: image.labelNameIds || [],
+        };
+    }
+
     private static async saveProjectData(): Promise<boolean> {
         const state = store.getState();
         const imagesData = state.labels.imagesData;
-        const labelNames = state.labels.labels;
-
-        if (imagesData.length === 0) {
-            return true;
-        }
-
-        // 估算总数据大小，超过 500MB 跳过（防止 OOM）
-        const totalSize = imagesData.reduce((sum, img) => sum + (img.fileData?.size || 0), 0);
-        if (totalSize > 500 * 1024 * 1024) {
-            console.warn(`自动保存跳过：数据量过大 (${(totalSize / 1024 / 1024).toFixed(0)}MB)`);
-            return false;
-        }
-
-        // 转换ImageData到StoredImageData格式（File → ArrayBuffer 以支持 IndexedDB 持久化）
-        // 视频模式下每帧是小 JPEG (~50KB)，可以正常保存
-        const storedImages: StoredImageData[] = (await Promise.all(
-            imagesData.map(async (imageData): Promise<StoredImageData | null> => {
-                try {
-                    return {
-                        id: imageData.id,
-                        fileName: imageData.fileData.name,
-                        fileData: await imageData.fileData.arrayBuffer(),
-                        fileType: imageData.fileData.type,
-                        loadStatus: imageData.loadStatus,
-                        labelRects: imageData.labelRects || [],
-                        labelPoints: imageData.labelPoints || [],
-                        labelLines: imageData.labelLines || [],
-                        labelPolygons: imageData.labelPolygons || [],
-                        labelNameIds: imageData.labelNameIds || []
-                    };
-                } catch {
-                    // File reference expired (e.g. on-demand video frame not yet loaded)
-                    return null;
-                }
-            })
-        )).filter((img): img is StoredImageData => img !== null && img.fileData.byteLength > 0);
-
-        // 关键守卫：filter 后全空但 Redux 里其实有 entries（典型场景：视频 on-demand
-        // 模式下的 0-byte 占位帧，autosave 在帧数据真正解码前触发）。这种情况下绝不能
-        // 把 images:[] 写进 IDB，否则会覆盖之前真正有数据的快照，导致下次"恢复工作"
-        // 弹窗显示 0 张 / 0 帧、点击恢复后进到空白编辑器。
-        if (storedImages.length === 0 && imagesData.length > 0) {
-            this.placeholderFilterWarnCount++;
-            // 首次和每 N 次打 warn，其余 N-1 次完全静默——视频 on-demand 期间 autosave
-            // 每 3 分钟跑一次，几小时累积下来这条会刷上百遍，对调试毫无帮助。
-            if (this.placeholderFilterWarnCount === 1 ||
-                this.placeholderFilterWarnCount % this.PLACEHOLDER_FILTER_WARN_INTERVAL === 0) {
-                console.warn(
-                    `[AutoSave] all ${imagesData.length} imagesData entries filtered (byteLength=0 placeholders); ` +
-                    `skipping IDB write to preserve prior snapshot ` +
-                    `(occurrence #${this.placeholderFilterWarnCount})`
-                );
-            }
-            return false;
-        }
-
-        // 转换 imageSegmentationResults Map 到普通对象以便序列化
-        const imageSegmentationResultsObj: Record<string, any[]> = {};
-        if (state.ai?.imageSegmentationResults) {
-            state.ai.imageSegmentationResults.forEach((results, imageId) => {
-                imageSegmentationResultsObj[imageId] = results;
-            });
-        }
-
-        // 视频模式：保存拆帧元数据以支持恢复
-        const isVideoMode = state.video?.isVideoMode || false;
-        const activeVideo = isVideoMode ? state.video?.activeVideo : null;
-
-        // 保存队列数据
         const queueItems = state.queue?.items || [];
         const activeQueueItemId = state.queue?.activeQueueItemId || null;
+        const videoRecovery = this.videoRecoveryFor(state);
 
+        // Preserve annotations and frame topology even when pixels are only a
+        // runtime/backend cache. A zero-byte frame is a record, not an empty project.
+        const decisions = this.frameDecisions(imagesData, videoRecovery, queueItems);
+        const storedImages = await Promise.all(
+            decisions.map(decision => this.storedImageFor(decision)),
+        );
+
+        const imageSegmentationResults: Record<string, any[]> = {};
+        state.ai?.imageSegmentationResults?.forEach((results: any[], imageId: string) => {
+            imageSegmentationResults[imageId] = results;
+        });
+
+        const activeVideo = state.video?.isVideoMode ? state.video.activeVideo : null;
         const projectData: StoredProjectData = {
             id: 'current-project',
             images: storedImages,
-            labelNames: labelNames || [],
+            labelNames: state.labels.labels || [],
             currentImageIndex: state.labels.activeImageIndex,
             lastModified: Date.now(),
-            version: '2.1.0',
+            version: '3.0.0-recovery',
             segmentationResults: state.ai?.segmentationResults || [],
-            imageSegmentationResults: imageSegmentationResultsObj,
-            isVideoProject: isVideoMode && !!activeVideo?.preExtractedFrames,
-            extractionMetadata: activeVideo?.preExtractedFrames ? {
-                fps: activeVideo.fps,
-                duration: activeVideo.duration,
-                totalFrames: activeVideo.totalFrames,
-                width: activeVideo.videoSize.width,
-                height: activeVideo.videoSize.height,
-            } : undefined,
-            queueItems: queueItems,
-            activeQueueItemId: activeQueueItemId,
+            imageSegmentationResults,
+            isVideoProject: Boolean(activeVideo),
+            extractionMetadata: activeVideo ? extractionMetadataFor(activeVideo) : undefined,
+            videoRecovery,
+            queueItems: this.queueItemsForStorage(queueItems, videoRecovery),
+            queueAnnotationSnapshots: queueAnnotationSnapshotsFor(state),
+            activeQueueItemId,
         };
 
-        const saved = await IndexedDBManager.saveProject(projectData);
-        if (!saved) {
-            console.warn('[AutoSave] IndexedDB save failed — project data may not be persisted. Check storage quota.');
-        }
-        return saved;
+        return IndexedDBManager.saveProject(projectData);
     }
-    
+
     private static saveBeforeUnload = (): void => {
-        // NOTE: IndexedDB writes are async and cannot be reliably completed in beforeunload.
-        // Only synchronous localStorage settings are saved here. Project data relies on the
-        // 60-second autosave interval.
-        // 同步保存（页面关闭时）
-        try {
-            const state = store.getState();
-            const settings: Partial<ProjectSettings> = {
-                language: state.general.language,
-                projectName: state.general.projectData.name,
-                zoom: state.general.zoom,
-                imageDragMode: state.general.imageDragMode,
-                smartAnnotationActive: state.general.smartAnnotationActive,
-                currentImageIndex: state.labels.activeImageIndex,
-                activeLabelType: state.labels.activeLabelType
-            };
-            
-            LocalStorageManager.saveSettings(settings);
-            console.log('页面关闭前保存完成');
-        } catch (error) {
-            console.error('页面关闭前保存失败:', error);
-        }
+        // Best effort only. Never advance LocalStorage's lastSaved marker until
+        // the matching IndexedDB snapshot has actually committed.
+        void this.saveCurrentState();
     };
-    
+
     public static destroy(): void {
         this.stopAutoSave();
         if (this.editDebounceTimer) {
             clearTimeout(this.editDebounceTimer);
             this.editDebounceTimer = null;
         }
-        if (this.unsubscribeStore) {
-            this.unsubscribeStore();
-            this.unsubscribeStore = null;
-        }
+        this.unsubscribeStore?.();
+        this.unsubscribeStore = null;
         if (this.visibilityListener) {
             document.removeEventListener('visibilitychange', this.visibilityListener);
             this.visibilityListener = null;
         }
         window.removeEventListener('beforeunload', this.saveBeforeUnload);
+        this.pendingSave = false;
+        this.pendingForce = false;
+        this.suspendDepth = 0;
+        this.initializationPromise = null;
         this.isInitialized = false;
-        console.log('自动保存服务已销毁');
     }
 }

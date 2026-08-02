@@ -347,6 +347,11 @@ const VideoEditor: React.FC<IProps> = ({
                 ImageRepository.setLiveImageCap(Math.min(frames + 100, 30000));
 
                 const currentImagesData = imagesDataRef.current;
+                // ProjectRestoreService restores both the timeline and the last
+                // edited frame. Metadata callbacks must not silently jump it back
+                // to frame 0 after the recovery commit.
+                const restoredFrame = Math.max(0, Math.min(activeVideo.currentFrame, frames - 1));
+                const restoredTime = restoredFrame / fps;
 
                 // ========== 检查是否已经有缓存的 imagesData ==========
                 const cachedFileId = ImageRepository.getActiveFileId();
@@ -358,8 +363,8 @@ const VideoEditor: React.FC<IProps> = ({
 
                     if (loadedCount > frames * 0.5) {
                         console.log(`[VideoEditor] 8. 缓存有效（${loadedPercentage.toFixed(1)}% 已加载），跳过重新生成`);
-                        updateActiveImageIndex(0);
-                        updateVideoCurrentFrame(activeVideo.id, 0, 0);
+                        updateActiveImageIndex(restoredFrame);
+                        updateVideoCurrentFrame(activeVideo.id, restoredFrame, restoredTime);
                         setLoadedThumbnailCount(loadedCount);
                         setTotalFrameCount(frames);
                         return;
@@ -410,8 +415,8 @@ const VideoEditor: React.FC<IProps> = ({
                         }
 
                         setTimeout(() => {
-                            updateVideoCurrentFrame(activeVideo.id, 0, 0);
-                            updateActiveImageIndex(0);
+                            updateVideoCurrentFrame(activeVideo.id, restoredFrame, restoredTime);
+                            updateActiveImageIndex(restoredFrame);
                         }, 0);
                     }
 

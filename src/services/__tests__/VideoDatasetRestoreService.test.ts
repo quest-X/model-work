@@ -20,6 +20,11 @@ const jsonResponse = (body: unknown): Response => ({
 } as unknown as Response);
 
 describe('VideoDatasetRestoreService', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        (QueueActions.switchToQueueItem as jest.Mock).mockResolvedValue(undefined);
+    });
+
     it('recreates a video queue, timeline metadata and frame annotations', async () => {
         global.fetch = jest.fn().mockResolvedValue(jsonResponse({
             sessionId: 'restored-session',
@@ -31,6 +36,7 @@ describe('VideoDatasetRestoreService', () => {
                 width: 1920,
                 height: 1080,
             },
+            dataset: {revision: 3},
             workspace: {
                 classes: [{id: 'hot', name: 'hot'}],
                 images: [{
@@ -60,6 +66,11 @@ describe('VideoDatasetRestoreService', () => {
         expect(item.datasetRevision).toBe(3);
         expect(item.file?.name).toBe('炉口.mp4');
         expect(item.file?.size).toBe(0);
+        expect(item.videoSessionId).toBe('restored-session');
+        expect(global.fetch).toHaveBeenCalledWith(
+            expect.stringContaining('/datasets/dataset-video/video-session?revision=3'),
+            {method: 'POST'},
+        );
         expect(EditorModel.videoSessionId).toBe('restored-session');
         const cachedFrames = (ImageRepository.saveFileCache as jest.Mock).mock.calls[0][1];
         expect(cachedFrames).toHaveLength(2);
@@ -80,5 +91,30 @@ describe('VideoDatasetRestoreService', () => {
             expect.objectContaining({id: 'hot', name: 'hot'}),
         ]);
         expect(QueueActions.switchToQueueItem).toHaveBeenCalledWith(item, []);
+    });
+
+    it('does not create a queue item when the server opens another revision', async () => {
+        global.fetch = jest.fn().mockResolvedValue(jsonResponse({
+            sessionId: 'wrong-revision-session',
+            filename: '炉口.mp4',
+            metadata: {
+                fps: 25,
+                duration: 0.08,
+                totalFrames: 2,
+                width: 1920,
+                height: 1080,
+            },
+            dataset: {revision: 4},
+        }));
+
+        await expect(VideoDatasetRestoreService.restore(
+            'dataset-video',
+            '炉口项目',
+            3,
+            [],
+        )).rejects.toThrow('Dataset revision mismatch');
+
+        expect(ImageRepository.saveFileCache).not.toHaveBeenCalled();
+        expect(QueueActions.switchToQueueItem).not.toHaveBeenCalled();
     });
 });

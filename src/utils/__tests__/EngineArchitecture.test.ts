@@ -4,6 +4,7 @@ import {
     getEngineBaseUrl,
     normalizeEngineBaseUrl,
     registerEngineStore,
+    resolveEngineBaseUrl,
 } from '../DefaultBackendUrl';
 
 describe('engine service URL normalization', () => {
@@ -41,6 +42,11 @@ describe('engine service URL normalization', () => {
         });
 
         expect(getEngineBaseUrl()).toBe('http://localhost/core_service');
+    });
+
+    it('routes an explicitly selected same-deployment engine through the browser gateway', () => {
+        expect(resolveEngineBaseUrl('https://localhost:58600', 'core'))
+            .toBe('http://localhost/core_service');
     });
 
     it('preserves a genuinely remote registered engine', () => {

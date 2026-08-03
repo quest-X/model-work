@@ -65,7 +65,7 @@ export const getDefaultCoreServiceUrl = (path: string = ''): string => {
  * by that host's gateway, keep browser traffic same-origin so certificates
  * and CORS cannot make otherwise healthy services look unavailable.
  */
-const resolveRegisteredEngineBaseUrl = (url: string, type: ServiceEngineType): string => {
+export const resolveEngineBaseUrl = (url: string, type: ServiceEngineType): string => {
     const normalized = normalizeEngineBaseUrl(url, type);
     if (typeof window === 'undefined' || !window.location) return normalized;
 
@@ -112,11 +112,11 @@ const getRegisteredEngineBaseUrl = (type: ServiceEngineType): string | null => {
             const activeId = state.aimodels?.activeModelId;
             if (activeId) {
                 const active = matchingModels.find((m: any) => m.id === activeId);
-                if (active?.url) return resolveRegisteredEngineBaseUrl(active.url, type);
+                if (active?.url) return resolveEngineBaseUrl(active.url, type);
             }
             const enabled = matchingModels.find((m: any) => m.isActive);
-            if (enabled?.url) return resolveRegisteredEngineBaseUrl(enabled.url, type);
-            if (matchingModels[0]?.url) return resolveRegisteredEngineBaseUrl(matchingModels[0].url, type);
+            if (enabled?.url) return resolveEngineBaseUrl(enabled.url, type);
+            if (matchingModels[0]?.url) return resolveEngineBaseUrl(matchingModels[0].url, type);
         }
     } catch {
         // store 访问失败

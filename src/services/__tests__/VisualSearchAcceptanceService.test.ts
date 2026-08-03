@@ -25,6 +25,7 @@ jest.mock('../../logic/actions/EditorActions', () => ({
 }));
 
 const DIGEST = 'a'.repeat(64);
+const ASSET_ID = '0123456789abcdef0123456789abcdef';
 
 const metadata: VisualSearchSnapshotMetadata = {
     snapshotId: 'snapshot-bbox',
@@ -105,7 +106,7 @@ const readyStore = () => {
             elapsedMs: 8,
             items: [{
                 resultId: 'result-1',
-                assetId: `sha256:${DIGEST}`,
+                assetId: ASSET_ID,
                 datasetId: 'dataset-1',
                 datasetRevision: 7,
                 rank: 1,
@@ -212,5 +213,57 @@ describe('VisualSearchAcceptanceService', () => {
         );
         expect(testStore.getState().labels.imagesData[0].labelRects).toEqual([]);
         expect(UndoStack.size()).toBe(0);
+    });
+
+    it('accepts a stable logical asset id that differs from the content SHA-256', async () => {
+        const {testStore} = readyStore();
+        UndoStack.clear();
+        const service = new VisualSearchAcceptanceService({
+            getState: testStore.getState,
+            dispatch: testStore.dispatch,
+            digestFile: async () => DIGEST,
+            afterAccept: jest.fn(),
+        });
+
+        await expect(service.accept('snapshot-bbox', 'result-1')).resolves.toEqual({
+            imageId: 'target-image',
+            labelRectId: 'visual-search:task-1:result-1',
+        });
+        expect(testStore.getState().labels.imagesData[0].labelRects).toHaveLength(1);
+    });
+
+    it('rejects an empty logical asset id before hashing', async () => {
+        const {testStore} = readyStore();
+        testStore.getState().visualSearch.jobsById['snapshot-bbox'].result!.items[0].assetId = '  ';
+        const digest = jest.fn(async () => DIGEST);
+        const service = new VisualSearchAcceptanceService({
+            getState: testStore.getState,
+            dispatch: testStore.dispatch,
+            digestFile: digest,
+            afterAccept: jest.fn(),
+        });
+
+        await expect(service.accept('snapshot-bbox', 'result-1')).rejects.toThrow(
+            'no stable asset identity',
+        );
+        expect(digest).not.toHaveBeenCalled();
+    });
+
+    it('rejects a malformed content SHA-256 before hashing', async () => {
+        const {testStore} = readyStore();
+        testStore.getState().visualSearch.jobsById['snapshot-bbox']
+            .result!.items[0].contentSha256 = 'not-a-sha256';
+        const digest = jest.fn(async () => DIGEST);
+        const service = new VisualSearchAcceptanceService({
+            getState: testStore.getState,
+            dispatch: testStore.dispatch,
+            digestFile: digest,
+            afterAccept: jest.fn(),
+        });
+
+        await expect(service.accept('snapshot-bbox', 'result-1')).rejects.toThrow(
+            'no valid SHA-256 content identity',
+        );
+        expect(digest).not.toHaveBeenCalled();
     });
 });

@@ -112,12 +112,14 @@ const requireDatasetBinding = (
 };
 
 const requireAssetDigest = (item: VisualSearchResultItem): string => {
-    const assetDigest = normalizeSha256(item.assetId);
-    const contentDigest = normalizeSha256(item.contentSha256);
-    if (!assetDigest || !contentDigest || assetDigest !== contentDigest) {
-        throw new Error('The result has no consistent SHA-256 asset identity');
+    if (!item.assetId?.trim()) {
+        throw new Error('The result has no stable asset identity');
     }
-    return assetDigest;
+    const contentDigest = normalizeSha256(item.contentSha256);
+    if (!contentDigest) {
+        throw new Error('The result has no valid SHA-256 content identity');
+    }
+    return contentDigest;
 };
 
 const validateBBox = (item: VisualSearchResultItem): VisualSearchBBox => {

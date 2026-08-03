@@ -675,9 +675,12 @@ export class AIDetectionActions {
         // （wasCancelled=true 时面板那边已经 dispatch 过 TASK_CANCEL，下面这次也是
         // 幂等的 — reducer 只是覆盖 status，cancelled 优先级高于 completed 的语义
         // 取决于谁后到。为避免被 complete() 反向覆盖成 completed，这里区分一下。）
+        const allFailed = !wasCancelled && failCount > 0 && successCount === 0;
         if (wasCancelled) {
             // 由 panel × 触发的取消已经 dispatch TASK_CANCEL；非 panel 路径下也走 cancel。
             task.cancel();
+        } else if (allFailed) {
+            task.fail(new Error('Batch detection failed for every image'));
         } else {
             task.complete();
         }
@@ -686,13 +689,16 @@ export class AIDetectionActions {
         console.log(`[BatchDetect] ${wasCancelled ? 'Cancelled' : 'Complete'}`, { totalTime: totalTime + 's', successCount, failCount, totalObjects });
 
         const doneTexts = t();
-        store.dispatch(submitNewNotification(NotificationUtil.createSuccessNotification({
-            header: wasCancelled ? '推理已停止' : doneTexts.notifications.batchDetectionCompleted,
-            description: doneTexts.notifications.batchDetectionCompletedMessage
-                .replace('{total}', String(successCount))
-                .replace('{count}', String(totalObjects))
-                .replace('{time}', totalTime)
-        })));
+        const completionNotification = allFailed
+            ? NotificationUtil.createErrorNotification(doneTexts.notifications.modelInferenceError)
+            : NotificationUtil.createSuccessNotification({
+                header: wasCancelled ? '推理已停止' : doneTexts.notifications.batchDetectionCompleted,
+                description: doneTexts.notifications.batchDetectionCompletedMessage
+                    .replace('{total}', String(successCount))
+                    .replace('{count}', String(totalObjects))
+                    .replace('{time}', totalTime)
+            });
+        store.dispatch(submitNewNotification(completionNotification));
 
         if (!store.getState().general.enablePerClassColoration) {
             store.dispatch(updatePerClassColorationStatus(true));

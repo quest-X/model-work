@@ -284,19 +284,29 @@ export class AISegmentationActions {
         const wasCancelled = this.isCancelled();
         store.dispatch(deleteNotificationById(progressNotification.id));
         store.dispatch(updateFullImageInferenceStatus(false));
-        if (wasCancelled) task.cancel(); else task.complete();
+        const allFailed = !wasCancelled && failCount > 0 && successCount === 0;
+        if (wasCancelled) {
+            task.cancel();
+        } else if (allFailed) {
+            task.fail(new Error('Batch segmentation failed for every image'));
+        } else {
+            task.complete();
+        }
 
         const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
         console.log('[BatchSegment] Complete', { totalTime: totalTime + 's', successCount, failCount, totalObjects });
 
         const doneTexts = t();
-        store.dispatch(submitNewNotification(NotificationUtil.createSuccessNotification({
-            header: doneTexts.notifications.batchDetectionCompleted,
-            description: doneTexts.notifications.batchDetectionCompletedMessage
-                .replace('{total}', String(successCount))
-                .replace('{count}', String(totalObjects))
-                .replace('{time}', totalTime)
-        })));
+        const completionNotification = allFailed
+            ? NotificationUtil.createErrorNotification(doneTexts.notifications.modelInferenceError)
+            : NotificationUtil.createSuccessNotification({
+                header: doneTexts.notifications.batchDetectionCompleted,
+                description: doneTexts.notifications.batchDetectionCompletedMessage
+                    .replace('{total}', String(successCount))
+                    .replace('{count}', String(totalObjects))
+                    .replace('{time}', totalTime)
+            });
+        store.dispatch(submitNewNotification(completionNotification));
 
         if (!store.getState().general.enablePerClassColoration) {
             store.dispatch(updatePerClassColorationStatus(true));

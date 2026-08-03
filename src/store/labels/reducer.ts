@@ -180,6 +180,28 @@ export function labelsReducer(
                 firstLabelCreatedFlag: true,
             };
         }
+        case Action.ACCEPT_VISUAL_SEARCH_MASK: {
+            const targetIndex = state.imagesData.findIndex(
+                imageData => imageData.id === action.payload.imageId,
+            );
+            if (targetIndex < 0 || action.payload.labelPolygons.length === 0) return state;
+            const target = state.imagesData[targetIndex];
+            const acceptedIds = new Set(action.payload.labelPolygons.map(polygon => polygon.id));
+            if (target.labelPolygons.some(polygon => acceptedIds.has(polygon.id))) return state;
+            const imagesData = [...state.imagesData];
+            imagesData[targetIndex] = {
+                ...target,
+                labelPolygons: [...target.labelPolygons, ...action.payload.labelPolygons],
+            };
+            return {
+                ...state,
+                imagesData,
+                activeImageIndex: targetIndex,
+                activeLabelId: action.payload.labelPolygons[0].id,
+                activeLabelViewType: LabelType.POLYGON,
+                firstLabelCreatedFlag: true,
+            };
+        }
         default:
             return state;
     }

@@ -4,11 +4,16 @@ import {
     QueueState,
 } from './types';
 import { Action } from '../Actions';
-import {VisualSearchBBoxAcceptance} from '../labels/types';
+import {VisualSearchBBoxAcceptance, VisualSearchMaskAcceptance} from '../labels/types';
 
 type AcceptVisualSearchBBoxAction = {
     type: Action.ACCEPT_VISUAL_SEARCH_BBOX;
     payload: VisualSearchBBoxAcceptance;
+};
+
+type AcceptVisualSearchMaskAction = {
+    type: Action.ACCEPT_VISUAL_SEARCH_MASK;
+    payload: VisualSearchMaskAcceptance;
 };
 
 const initialState: QueueState = {
@@ -18,7 +23,7 @@ const initialState: QueueState = {
 
 export function queueReducer(
     state = initialState,
-    action: QueueActionTypes | AcceptVisualSearchBBoxAction
+    action: QueueActionTypes | AcceptVisualSearchBBoxAction | AcceptVisualSearchMaskAction
 ): QueueState {
     switch (action.type) {
         case Action.ADD_QUEUE_ITEM: {
@@ -64,6 +69,15 @@ export function queueReducer(
             return initialState;
         }
         case Action.ACCEPT_VISUAL_SEARCH_BBOX: {
+            return {
+                ...state,
+                items: state.items.map(item =>
+                    item.id === action.payload.queueItemId
+                        ? {...item, dataSyncStatus: QueueDataSyncStatus.DIRTY}
+                        : item),
+            };
+        }
+        case Action.ACCEPT_VISUAL_SEARCH_MASK: {
             return {
                 ...state,
                 items: state.items.map(item =>

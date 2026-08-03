@@ -2,7 +2,13 @@ import {Middleware} from 'redux';
 import {Action} from '../../store/Actions';
 import {UndoStack, RestoreFlag, UndoSnapshot} from './UndoStack';
 import {AppState} from '../../store';
-import {ImageData, LabelsActionTypes} from '../../store/labels/types';
+import {
+    ImageData,
+    LabelsActionTypes,
+    VisualSearchBBoxAcceptance,
+    VisualSearchMaskAcceptance,
+} from '../../store/labels/types';
+import {VisualSearchResultItem} from '../../store/visualSearch/types';
 import {QueueItemType} from '../../store/queue/types';
 
 // Actions whose "before" state we want on the undo stack
@@ -54,43 +60,60 @@ type AcceptVisualSearchBBoxAction = Extract<
     {type: Action.ACCEPT_VISUAL_SEARCH_BBOX}
 >;
 
-// The acceptance gate intentionally enumerates every identity boundary so a
-// partial check can never turn into a partial write.
+type AcceptVisualSearchMaskAction = Extract<
+    LabelsActionTypes,
+    {type: Action.ACCEPT_VISUAL_SEARCH_MASK}
+>;
+
+type AcceptVisualSearchAction = AcceptVisualSearchBBoxAction | AcceptVisualSearchMaskAction;
+type VisualSearchAcceptance = VisualSearchBBoxAcceptance | VisualSearchMaskAcceptance;
+
+const samePolygons = (
+    left: ReadonlyArray<ReadonlyArray<readonly [number, number]>> | null | undefined,
+    right: ReadonlyArray<ReadonlyArray<readonly [number, number]>> | null | undefined,
+): boolean => Boolean(left && right && left.length === right.length && left.every(
+    (polygon, polygonIndex) => polygon.length === right[polygonIndex].length && polygon.every(
+        (point, pointIndex) => point.length === 2 &&
+            point.every((value, axis) =>
+                Math.abs(value - right[polygonIndex][pointIndex][axis]) <= 1e-6),
+    ),
+));
+
+const sameMask = (
+    left: VisualSearchMaskAcceptance['mask'] | null | undefined,
+    right: VisualSearchMaskAcceptance['mask'] | null | undefined,
+): boolean => Boolean(left && right &&
+    left.encoding === right.encoding &&
+    left.order === right.order &&
+    left.size[0] === right.size[0] &&
+    left.size[1] === right.size[1] &&
+    left.countsBase64 === right.countsBase64);
+
+// The CAS intentionally enumerates every mutable identity boundary.
 // eslint-disable-next-line complexity
-const assertVisualSearchAcceptanceCAS = (
+const assertCommonAcceptanceCAS = (
     state: AppState,
-    action: AcceptVisualSearchBBoxAction,
-): void => {
-    const acceptance = action.payload;
+    acceptance: VisualSearchAcceptance,
+    kind: 'bbox' | 'mask',
+): {result: VisualSearchResultItem; image: ImageData} => {
     const job = state.visualSearch.jobsById[acceptance.clientJobId];
     if (!job || job.status !== 'succeeded') acceptanceCASFailure('job_state');
     if (job.backendJobId !== acceptance.backendJobId) acceptanceCASFailure('task_id');
-    if (job.snapshot.geometry.kind !== 'bbox' || job.result?.queryKind !== 'bbox') {
+    if (job.snapshot.geometry.kind !== kind || job.result?.queryKind !== kind) {
         acceptanceCASFailure('query_kind');
     }
     if (job.snapshot.target.datasetId !== acceptance.datasetId ||
         !sameRevision(job.snapshot.target.datasetRevision, acceptance.datasetRevision)) {
         acceptanceCASFailure('snapshot_dataset_revision');
     }
-
     const result = job.result?.items.find(item => item.resultId === acceptance.resultId);
     if (!result) acceptanceCASFailure('result_id');
     if (result.assetId !== acceptance.assetId ||
+        result.contentSha256 !== acceptance.contentSha256 ||
         result.datasetId !== acceptance.datasetId ||
         !sameRevision(result.datasetRevision, acceptance.datasetRevision)) {
         acceptanceCASFailure('result_asset_revision');
     }
-    const resultBBox = result.geometry?.bbox ?? result.bbox;
-    const acceptedBBox = [
-        acceptance.labelRect.rect.x,
-        acceptance.labelRect.rect.y,
-        acceptance.labelRect.rect.x + acceptance.labelRect.rect.width,
-        acceptance.labelRect.rect.y + acceptance.labelRect.rect.height,
-    ];
-    if (result.geometry?.kind !== 'bbox' || !sameBBox(resultBBox, acceptedBBox)) {
-        acceptanceCASFailure('result_geometry');
-    }
-
     if (state.video.isVideoMode) acceptanceCASFailure('video_mode');
     if (state.queue.activeQueueItemId !== acceptance.queueItemId) {
         acceptanceCASFailure('active_queue');
@@ -103,13 +126,82 @@ const assertVisualSearchAcceptanceCAS = (
         !sameRevision(queueItem.datasetRevision, acceptance.datasetRevision)) {
         acceptanceCASFailure('queue_dataset_revision');
     }
-
     const image = state.labels.imagesData.find(item => item.id === acceptance.imageId);
     if (!image || image.fileData !== acceptance.expectedFile) {
         acceptanceCASFailure('image_identity');
     }
+    return {result, image};
+};
+
+const assertBBoxAcceptanceCAS = (
+    state: AppState,
+    action: AcceptVisualSearchBBoxAction,
+): void => {
+    const acceptance = action.payload;
+    const {result, image} = assertCommonAcceptanceCAS(state, acceptance, 'bbox');
+    const resultBBox = result.geometry?.bbox ?? result.bbox;
+    const acceptedBBox = [
+        acceptance.labelRect.rect.x,
+        acceptance.labelRect.rect.y,
+        acceptance.labelRect.rect.x + acceptance.labelRect.rect.width,
+        acceptance.labelRect.rect.y + acceptance.labelRect.rect.height,
+    ];
+    if (result.geometry?.kind !== 'bbox' || !sameBBox(resultBBox, acceptedBBox)) {
+        acceptanceCASFailure('result_geometry');
+    }
     if (image.labelRects.some(rect => rect.id === acceptance.labelRect.id)) {
         acceptanceCASFailure('already_accepted');
+    }
+};
+
+const assertMaskLabels = (
+    acceptance: VisualSearchMaskAcceptance,
+): void => {
+    if (acceptance.labelPolygons.length !== acceptance.sourcePolygons.length ||
+        acceptance.labelPolygons.length === 0) acceptanceCASFailure('mask_labels');
+    const ids = new Set<string>();
+    acceptance.labelPolygons.forEach((label, index) => {
+        const expectedId = `visual-search:${acceptance.backendJobId}:` +
+            `${acceptance.resultId}:mask:${index}`;
+        const vertices = label.vertices.map(point => [point.x, point.y] as const);
+        if (label.id !== expectedId ||
+            !samePolygons([vertices], [acceptance.sourcePolygons[index]]) ||
+            ids.has(label.id)) acceptanceCASFailure('mask_labels');
+        ids.add(label.id);
+    });
+};
+
+const assertMaskAcceptanceCAS = (
+    state: AppState,
+    action: AcceptVisualSearchMaskAction,
+): void => {
+    const acceptance = action.payload;
+    const {result, image} = assertCommonAcceptanceCAS(state, acceptance, 'mask');
+    if (result.geometry?.kind !== 'mask' ||
+        result.granularity !== 'mask' ||
+        result.geometrySha256 !== acceptance.geometrySha256 ||
+        result.geometry.rasterizerRevision !== acceptance.rasterizerRevision ||
+        result.acceptanceEligible !== true ||
+        Boolean(result.acceptanceReason) ||
+        !sameMask(result.geometry.mask, acceptance.mask) ||
+        !samePolygons(result.geometry.polygons, acceptance.sourcePolygons)) {
+        acceptanceCASFailure('result_geometry');
+    }
+    assertMaskLabels(acceptance);
+    const acceptedIds = new Set(acceptance.labelPolygons.map(polygon => polygon.id));
+    if (image.labelPolygons.some(polygon => acceptedIds.has(polygon.id))) {
+        acceptanceCASFailure('already_accepted');
+    }
+};
+
+const assertVisualSearchAcceptanceCAS = (
+    state: AppState,
+    action: AcceptVisualSearchAction,
+): void => {
+    if (action.type === Action.ACCEPT_VISUAL_SEARCH_BBOX) {
+        assertBBoxAcceptanceCAS(state, action);
+    } else {
+        assertMaskAcceptanceCAS(state, action);
     }
 };
 
@@ -152,9 +244,10 @@ function takeSnapshot(state: AppState): UndoSnapshot {
 
 export const undoMiddleware: Middleware<Record<string, never>, AppState> =
 store => next => (action: any) => {
-    if (action?.type === Action.ACCEPT_VISUAL_SEARCH_BBOX) {
+    if (action?.type === Action.ACCEPT_VISUAL_SEARCH_BBOX ||
+        action?.type === Action.ACCEPT_VISUAL_SEARCH_MASK) {
         const before = store.getState();
-        assertVisualSearchAcceptanceCAS(before, action as AcceptVisualSearchBBoxAction);
+        assertVisualSearchAcceptanceCAS(before, action as AcceptVisualSearchAction);
         if (!RestoreFlag.get()) UndoStack.push(takeSnapshot(before));
         const result = next(action);
         lastSnapshot = takeSnapshot(store.getState());

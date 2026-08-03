@@ -4,6 +4,7 @@ import {LabelType} from '../../data/enums/LabelType';
 import {IPoint} from '../../interfaces/IPoint';
 import {LabelStatus} from '../../data/enums/LabelStatus';
 import {ILine} from '../../interfaces/ILine';
+import {VisualSearchMaskRLE, VisualSearchPolygon} from '../visualSearch/types';
 
 export type Annotation = {
     id: string;
@@ -90,9 +91,28 @@ export interface VisualSearchBBoxAcceptance {
     datasetId: string;
     datasetRevision: string | number;
     assetId: string;
+    contentSha256: string;
     imageId: string;
     expectedFile: File;
     labelRect: LabelRect;
+}
+
+export interface VisualSearchMaskAcceptance {
+    clientJobId: string;
+    backendJobId: string;
+    resultId: string;
+    queueItemId: string;
+    datasetId: string;
+    datasetRevision: string | number;
+    assetId: string;
+    contentSha256: string;
+    geometrySha256: string;
+    rasterizerRevision: string;
+    imageId: string;
+    expectedFile: File;
+    mask: VisualSearchMaskRLE;
+    sourcePolygons: ReadonlyArray<VisualSearchPolygon>;
+    labelPolygons: LabelPolygon[];
 }
 
 interface UpdateActiveImageIndex {
@@ -207,6 +227,11 @@ interface AcceptVisualSearchBBox {
     payload: VisualSearchBBoxAcceptance;
 }
 
+interface AcceptVisualSearchMask {
+    type: typeof Action.ACCEPT_VISUAL_SEARCH_MASK;
+    payload: VisualSearchMaskAcceptance;
+}
+
 export type LabelsActionTypes = UpdateActiveImageIndex
     | UpdateActiveLabelNameId
     | UpdateActiveLabelType
@@ -223,3 +248,4 @@ export type LabelsActionTypes = UpdateActiveImageIndex
     | SelectImageRange
     | DeleteImageById
     | AcceptVisualSearchBBox
+    | AcceptVisualSearchMask

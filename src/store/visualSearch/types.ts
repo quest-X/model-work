@@ -1,4 +1,5 @@
 export type VisualSearchQueryKind = 'image' | 'bbox' | 'mask';
+export const VISUAL_SEARCH_MASK_RASTERIZER_REVISION = 'integer_bresenham_half_open_v1';
 export type VisualSearchRemoteState = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 export type VisualSearchJobStatus = 'submitting' | VisualSearchRemoteState;
 export type VisualSearchRevision = string | number;
@@ -87,6 +88,7 @@ export interface VisualSearchResultGeometry {
     bbox?: VisualSearchBBox | null;
     polygons?: ReadonlyArray<VisualSearchPolygon> | null;
     mask?: VisualSearchMaskRLE | null;
+    rasterizerRevision?: string | null;
     [key: string]: unknown;
 }
 
@@ -110,6 +112,9 @@ export interface VisualSearchResultItem {
     regionId: string | null;
     granularity: string | null;
     regionSource: string | null;
+    geometrySha256: string | null;
+    acceptanceEligible: boolean | null;
+    acceptanceReason: string | null;
     geometry: VisualSearchResultGeometry | null;
 }
 

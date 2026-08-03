@@ -80,6 +80,9 @@ const optionalBoolean = (record: JsonObject, keys: string[]): boolean | undefine
     return typeof value === 'boolean' ? value : undefined;
 };
 
+const booleanOrNull = (record: JsonObject, keys: string[]): boolean | null =>
+    optionalBoolean(record, keys) ?? null;
+
 const asTimestamp = (value: unknown): number | undefined => {
     const numeric = asNumber(value);
     if (numeric !== undefined) return numeric;
@@ -151,7 +154,10 @@ const normalizePolygons = (value: unknown): ReadonlyArray<VisualSearchPolygon> |
             if (!Array.isArray(rawPoint) || rawPoint.length !== 2) return null;
             const x = asNumber(rawPoint[0]);
             const y = asNumber(rawPoint[1]);
-            return x === undefined || y === undefined ? null : [x, y] as const;
+            return x === undefined || y === undefined ||
+                !Number.isInteger(x) || !Number.isInteger(y)
+                ? null
+                : [x, y] as const;
         });
         if (polygon.some(point => point === null)) return null;
         const typed = polygon as VisualSearchPolygon;
@@ -197,6 +203,9 @@ const normalizeGeometry = (value: unknown): VisualSearchResultGeometry | null =>
         bbox: normalizeBBox(geometry.bbox),
         polygons: normalizePolygons(geometry.polygons),
         mask: normalizeMaskRLE(geometry.mask),
+        rasterizerRevision: stringOrNull(
+            firstValue(geometry, ['rasterizer_revision', 'rasterizerRevision']),
+        ),
     };
 };
 
@@ -212,7 +221,7 @@ const pointOutside = (
     width: number,
     height: number,
 ): boolean =>
-    point[0] < 0 || point[1] < 0 || point[0] > width || point[1] > height;
+    point[0] < 0 || point[1] < 0 || point[0] >= width || point[1] >= height;
 
 const sanitizeMaskGeometry = (item: VisualSearchResultItem): void => {
     if (!item.geometry || item.width === null || item.height === null) return;
@@ -254,6 +263,9 @@ const normalizeResultItem = (
     if (!serverResultId) {
         throw new Error(`visual-search result ${rank} is missing stable result_id`);
     }
+    const rawGeometry = asObject(item.geometry);
+    const geometry = normalizeGeometry(item.geometry);
+    const geometryAcceptance = asObject(rawGeometry.acceptance);
     return {
         resultId: serverResultId,
         assetId: stringOrNull(firstValue(item, ['asset_id', 'assetId'])),
@@ -274,7 +286,23 @@ const normalizeResultItem = (
         regionId: stringOrNull(firstValue(item, ['region_id', 'regionId'])),
         granularity: stringOrNull(item.granularity),
         regionSource: stringOrNull(firstValue(item, ['region_source', 'regionSource'])),
-        geometry: normalizeGeometry(item.geometry),
+        geometrySha256: stringOrNull(
+            firstValue(item, ['geometry_sha256', 'geometrySha256']) ??
+            firstValue(asObject(item.geometry), ['geometry_sha256', 'geometrySha256']),
+        ),
+        acceptanceEligible: booleanOrNull(
+            item,
+            ['acceptance_eligible', 'acceptanceEligible'],
+        ) ?? booleanOrNull(
+            rawGeometry,
+            ['acceptance_eligible', 'acceptanceEligible'],
+        ) ?? booleanOrNull(geometryAcceptance, ['eligible']),
+        acceptanceReason: stringOrNull(
+            firstValue(item, ['acceptance_reason', 'acceptanceReason']) ??
+            firstValue(rawGeometry, ['acceptance_reason', 'acceptanceReason']) ??
+            geometryAcceptance.reason,
+        ),
+        geometry,
     };
 };
 

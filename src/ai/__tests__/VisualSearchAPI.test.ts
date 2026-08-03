@@ -4,7 +4,10 @@ import {
     VisualSearchAPI,
     VisualSearchAPIError,
 } from '../VisualSearchAPI';
-import {VisualSearchQuerySnapshot} from '../../store/visualSearch/types';
+import {
+    VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+    VisualSearchQuerySnapshot,
+} from '../../store/visualSearch/types';
 
 jest.mock('../../utils/DefaultBackendUrl', () => ({
     getExtensionEngineBaseUrl: () => 'https://gateway.test/extension_service',
@@ -275,11 +278,15 @@ describe('VisualSearchAPI', () => {
                     content_sha256: 'a'.repeat(64),
                     region_id: 'region-mask-1',
                     granularity: 'mask',
+                    geometry_sha256: 'b'.repeat(64),
                     bbox: [1, 2, 4, 5],
                     geometry: {
                         kind: 'mask',
                         bbox: [1, 2, 4, 5],
+                        rasterizer_revision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
                         polygons: [[[1, 2], [4, 2], [4, 5], [1, 5]]],
+                        acceptance_eligible: true,
+                        acceptance_reason: null,
                         mask: {
                             encoding: 'binary_rle_varint_zlib_base64_v1',
                             order: 'row-major',
@@ -300,6 +307,14 @@ describe('VisualSearchAPI', () => {
         expect(task.result?.items[0].geometry?.polygons).toEqual([
             [[1, 2], [4, 2], [4, 5], [1, 5]],
         ]);
+        expect(task.result?.items[0].geometry?.rasterizerRevision).toBe(
+            VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+        );
+        expect(task.result?.items[0]).toEqual(expect.objectContaining({
+            geometrySha256: 'b'.repeat(64),
+            acceptanceEligible: true,
+            acceptanceReason: null,
+        }));
     });
 
     it('keeps a mask result previewable but non-acceptable when canonical RLE is absent', () => {
@@ -329,6 +344,36 @@ describe('VisualSearchAPI', () => {
             mask: null,
             polygons: expect.any(Array),
         }));
+    });
+
+    it('drops non-integer result polygons instead of guessing backend rasterization', () => {
+        const task = normalizeVisualSearchTask({
+            task_id: 'task-mask-fractional',
+            state: 'succeeded',
+            result: {
+                query_kind: 'mask',
+                items: [{
+                    result_id: 'result-mask-fractional',
+                    width: 8,
+                    height: 6,
+                    granularity: 'mask',
+                    bbox: [1, 1, 5, 5],
+                    geometry: {
+                        kind: 'mask',
+                        bbox: [1, 1, 5, 5],
+                        polygons: [[[1.5, 1], [5, 1], [5, 5], [1.5, 5]]],
+                        mask: {
+                            encoding: 'binary_rle_varint_zlib_base64_v1',
+                            order: 'row-major',
+                            size: [6, 8],
+                            counts_base64: 'eJxjZAQAAAMAAg==',
+                        },
+                    },
+                }],
+            },
+        });
+
+        expect(task.result?.items[0].geometry?.polygons).toBeNull();
     });
 
     it('maps interrupted to a retryable terminal failure', () => {

@@ -23,6 +23,7 @@ import {
     VisualSearchJobState,
     VisualSearchResultItem,
     VisualSearchRevision,
+    VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
 } from '../../../store/visualSearch/types';
 import {visualSearchSetActiveJob} from '../../../store/visualSearch/actionCreators';
 import {
@@ -43,6 +44,7 @@ import {
 import {
     VisualSearchAcceptanceService,
     visualSearchAcceptanceService,
+    visualSearchAcceptedMaskPolygonId,
     visualSearchAcceptedRectId,
 } from '../../../services/VisualSearchAcceptanceService';
 import './VisualSearchPopup.scss';
@@ -83,6 +85,7 @@ interface StateProps {
     jobs: VisualSearchJobState[];
     activeJobId: string | null;
     acceptedRectIds: string[];
+    acceptedPolygonIds: string[];
 }
 
 interface DispatchProps {
@@ -345,6 +348,7 @@ export const VisualSearchPopup: React.FC<Props> = ({
     jobs,
     activeJobId,
     acceptedRectIds = [],
+    acceptedPolygonIds = [],
     selectJob,
     collectionLoader = loadVisualSearchCollections,
     sourceResolver = resolveVisualSearchSource,
@@ -480,14 +484,24 @@ export const VisualSearchPopup: React.FC<Props> = ({
         const acceptedIds = new Set(acceptedThisSession);
         if (!activeJob?.backendJobId) return acceptedIds;
         activeJob.result?.items.forEach(item => {
-            if (acceptedRectIds.includes(
+            const acceptedBBox = acceptedRectIds.includes(
                 visualSearchAcceptedRectId(activeJob.backendJobId as string, item.resultId),
-            )) {
+            );
+            const polygonCount = item.geometry?.polygons?.length ?? 0;
+            const acceptedMask = polygonCount > 0 && Array.from(
+                {length: polygonCount},
+                (_unused, index) => visualSearchAcceptedMaskPolygonId(
+                    activeJob.backendJobId as string,
+                    item.resultId,
+                    index,
+                ),
+            ).every(id => acceptedPolygonIds.includes(id));
+            if (acceptedBBox || acceptedMask) {
                 acceptedIds.add(item.resultId);
             }
         });
         return acceptedIds;
-    }, [acceptedRectIds, acceptedThisSession, activeJob]);
+    }, [acceptedPolygonIds, acceptedRectIds, acceptedThisSession, activeJob]);
     const canSubmit = Boolean(
         queryImage &&
         source &&
@@ -532,12 +546,18 @@ export const VisualSearchPopup: React.FC<Props> = ({
         }
     };
 
+    // Every acceptance boundary is kept explicit for an operator-readable reason.
+    // eslint-disable-next-line complexity
     const acceptanceBlockReason = (
         job: VisualSearchJobState,
         item: VisualSearchResultItem,
     ): string | null => {
-        if (job.snapshot.geometry.kind !== 'bbox' || job.result?.queryKind !== 'bbox') {
-            return t('仅 bbox → bbox 结果可接受', 'Only bbox → bbox results can be accepted');
+        const kind = job.snapshot.geometry.kind;
+        if ((kind !== 'bbox' && kind !== 'mask') || job.result?.queryKind !== kind) {
+            return t(
+                '仅同类型 bbox 或 mask 结果可接受',
+                'Only same-kind bbox or mask results can be accepted',
+            );
         }
         if (isVideoMode) {
             return t('视频结果接受尚未启用', 'Acceptance is disabled for video frames');
@@ -566,7 +586,24 @@ export const VisualSearchPopup: React.FC<Props> = ({
             );
         }
         if (!item.assetId || !item.contentSha256) {
-            return t('结果缺少 SHA-256 资产身份', 'The result lacks SHA-256 asset identity');
+            return t('结果缺少资产 ID 或内容 SHA-256', 'The result lacks asset or content identity');
+        }
+        if (kind === 'mask' && item.acceptanceEligible !== true) {
+            return t(
+                `掩码仅可预览：${item.acceptanceReason || 'source_polygon_unavailable'}`,
+                `Mask is preview-only: ${item.acceptanceReason || 'source_polygon_unavailable'}`,
+            );
+        }
+        if (kind === 'mask' && (
+            !item.geometrySha256 ||
+            !item.geometry?.mask ||
+            !item.geometry.polygons?.length ||
+            item.geometry.rasterizerRevision !== VISUAL_SEARCH_MASK_RASTERIZER_REVISION
+        )) {
+            return t(
+                '掩码结果缺少 canonical RLE 或源多边形',
+                'The mask result lacks canonical RLE or source polygons',
+            );
         }
         return null;
     };
@@ -582,7 +619,7 @@ export const VisualSearchPopup: React.FC<Props> = ({
         } catch (cause) {
             setAcceptanceError(errorText(
                 cause,
-                t('接受标注框失败', 'Failed to accept the bbox'),
+                t('接受检索标注失败', 'Failed to accept the search result'),
             ));
         } finally {
             setAcceptingResultId(null);
@@ -781,7 +818,12 @@ export const VisualSearchPopup: React.FC<Props> = ({
                         '仅 bbox → bbox 可原子接受；提交前会校验任务、资产 SHA-256 与 dataset revision，一次接受对应一次撤销。',
                         'Only bbox → bbox can be accepted atomically. Task identity, asset SHA-256, and dataset revision are checked before one acceptance creates one undo step.',
                     )
-                    : t(
+                    : activeJob.snapshot.geometry.kind === 'mask'
+                        ? t(
+                            'mask → mask 接受会校验源多边形与 canonical RLE 完全一致，并作为一次原子撤销写入一个或多个分割标注。',
+                            'Mask acceptance verifies source polygons against canonical RLE bit-exactly, then writes one or more segmentation labels as one atomic undo step.',
+                        )
+                        : t(
                         '整图结果保持预览/定位用途，不会写入标注。',
                         'Full-image results remain preview/navigation-only and never create annotations.',
                     )}
@@ -847,6 +889,10 @@ const mapStateToProps = (state: AppState): StateProps => {
         acceptedRectIds: state.labels.imagesData.flatMap(image =>
             image.labelRects
                 .map(rect => rect.id)
+                .filter(id => id.startsWith('visual-search:'))),
+        acceptedPolygonIds: state.labels.imagesData.flatMap(image =>
+            image.labelPolygons
+                .map(polygon => polygon.id)
                 .filter(id => id.startsWith('visual-search:'))),
     };
 };

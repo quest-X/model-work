@@ -13,7 +13,10 @@ import {
     visualSearchJobStarted,
     visualSearchJobUpdated,
 } from '../../store/visualSearch/actionCreators';
-import {VisualSearchSnapshotMetadata} from '../../store/visualSearch/types';
+import {
+    VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+    VisualSearchSnapshotMetadata,
+} from '../../store/visualSearch/types';
 import {VisualSearchAcceptanceService} from '../VisualSearchAcceptanceService';
 
 jest.mock('../../index', () => ({
@@ -26,6 +29,10 @@ jest.mock('../../logic/actions/EditorActions', () => ({
 
 const DIGEST = 'a'.repeat(64);
 const ASSET_ID = '0123456789abcdef0123456789abcdef';
+const MASK_POLYGONS = [
+    [[10, 20], [30, 20], [30, 40], [10, 40]],
+    [[40, 25], [55, 25], [55, 45], [40, 45]],
+] as const;
 
 const metadata: VisualSearchSnapshotMetadata = {
     snapshotId: 'snapshot-bbox',
@@ -124,7 +131,80 @@ const readyStore = () => {
                 regionId: 'region-1',
                 granularity: 'bbox',
                 regionSource: 'dataset',
+                geometrySha256: null,
+                acceptanceEligible: null,
+                acceptanceReason: null,
                 geometry: {kind: 'bbox', bbox: [10, 20, 50, 60]},
+            }],
+        },
+    }, 120));
+    return {testStore, file};
+};
+
+const readyMaskStore = () => {
+    const {testStore, file} = readyStore();
+    const maskMetadata: VisualSearchSnapshotMetadata = {
+        ...metadata,
+        snapshotId: 'snapshot-mask',
+        geometry: {
+            kind: 'mask',
+            polygons: MASK_POLYGONS,
+            bbox: [10, 20, 55, 45],
+            maskFileName: 'snapshot-mask.png',
+        },
+        options: {...metadata.options, idempotencyKey: 'snapshot-mask'},
+    };
+    testStore.dispatch(visualSearchJobStarted('snapshot-mask', maskMetadata, 100));
+    testStore.dispatch(visualSearchJobUpdated('snapshot-mask', {
+        taskId: 'task-mask-1',
+        state: 'succeeded',
+        phase: 'completed',
+        result: {
+            collection: 'collection-mask',
+            queryKind: 'mask',
+            queryGeometry: {kind: 'mask', bbox: [10, 20, 55, 45]},
+            profileId: 'profile-mask',
+            modelRevision: 'model-rev-1',
+            collectionRevision: 'collection-mask-rev-1',
+            executedStages: ['dino'],
+            stageStatus: {dino: 'completed'},
+            total: 1,
+            elapsedMs: 8,
+            items: [{
+                resultId: 'mask-result-1',
+                assetId: ASSET_ID,
+                datasetId: 'dataset-1',
+                datasetRevision: 7,
+                rank: 1,
+                path: '/datasets/goose.jpg',
+                fileName: 'goose.jpg',
+                width: 100,
+                height: 80,
+                className: 'goose',
+                confidence: 0.84,
+                score: 0.94,
+                dinoScore: 0.94,
+                bbox: [10, 20, 55, 45],
+                thumbnail: null,
+                contentSha256: DIGEST,
+                regionId: 'mask-region-1',
+                granularity: 'mask',
+                regionSource: 'workspace_polygon',
+                geometrySha256: 'c'.repeat(64),
+                acceptanceEligible: true,
+                acceptanceReason: null,
+                geometry: {
+                    kind: 'mask',
+                    bbox: [10, 20, 55, 45],
+                    rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+                    polygons: MASK_POLYGONS,
+                    mask: {
+                        encoding: 'binary_rle_varint_zlib_base64_v1',
+                        order: 'row-major',
+                        size: [80, 100],
+                        countsBase64: 'eJw=',
+                    },
+                },
             }],
         },
     }, 120));
@@ -198,6 +278,32 @@ describe('VisualSearchAcceptanceService', () => {
         expect(UndoStack.size()).toBe(0);
     });
 
+    it('fails the synchronous CAS if result content identity changes during hashing', async () => {
+        const {testStore} = readyStore();
+        UndoStack.clear();
+        let resolveDigest: ((value: string) => void) | undefined;
+        const service = new VisualSearchAcceptanceService({
+            getState: testStore.getState,
+            dispatch: testStore.dispatch,
+            digestFile: () => new Promise(resolve => {
+                resolveDigest = resolve;
+            }),
+            afterAccept: jest.fn(),
+        });
+
+        const accepting = service.accept('snapshot-bbox', 'result-1');
+        await Promise.resolve();
+        testStore.getState().visualSearch.jobsById['snapshot-bbox']
+            .result!.items[0].contentSha256 = 'b'.repeat(64);
+        resolveDigest?.(DIGEST);
+
+        await expect(accepting).rejects.toThrow(
+            'visual_search_acceptance_cas: result_asset_revision',
+        );
+        expect(testStore.getState().labels.imagesData[0].labelRects).toEqual([]);
+        expect(UndoStack.size()).toBe(0);
+    });
+
     it('rejects a local filename match whose SHA-256 identity differs', async () => {
         const {testStore} = readyStore();
         UndoStack.clear();
@@ -265,5 +371,108 @@ describe('VisualSearchAcceptanceService', () => {
             'no valid SHA-256 content identity',
         );
         expect(digest).not.toHaveBeenCalled();
+    });
+
+    it('accepts all source mask components atomically as one undo step', async () => {
+        const {testStore} = readyMaskStore();
+        UndoStack.clear();
+        const verifyMaskGeometry = jest.fn().mockResolvedValue(MASK_POLYGONS);
+        const afterAccept = jest.fn();
+        const service = new VisualSearchAcceptanceService({
+            getState: testStore.getState,
+            dispatch: testStore.dispatch,
+            digestFile: async () => DIGEST,
+            verifyMaskGeometry,
+            afterAccept,
+        });
+
+        const accepted = await service.accept('snapshot-mask', 'mask-result-1');
+        const state = testStore.getState();
+        const polygons = state.labels.imagesData[0].labelPolygons;
+
+        expect(accepted).toEqual({
+            imageId: 'target-image',
+            labelPolygonIds: [
+                'visual-search:task-mask-1:mask-result-1:mask:0',
+                'visual-search:task-mask-1:mask-result-1:mask:1',
+            ],
+        });
+        expect(polygons).toHaveLength(2);
+        expect(polygons[0]).toEqual(expect.objectContaining({
+            id: 'visual-search:task-mask-1:mask-result-1:mask:0',
+            vertices: MASK_POLYGONS[0].map(([x, y]) => ({x, y})),
+            status: LabelStatus.ACCEPTED,
+            isCreatedByAI: true,
+            confidence: 0.84,
+            extra: {visualSearch: expect.objectContaining({
+                geometrySha256: 'c'.repeat(64),
+                rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+                componentIndex: 0,
+            })},
+        }));
+        expect(state.labels.activeLabelId).toBe(polygons[0].id);
+        expect(state.queue.items[0].dataSyncStatus).toBe(QueueDataSyncStatus.DIRTY);
+        expect(UndoStack.size()).toBe(1);
+        await expect(service.accept('snapshot-mask', 'mask-result-1')).rejects.toThrow(
+            'visual_search_acceptance_cas: already_accepted',
+        );
+        expect(UndoStack.size()).toBe(1);
+        expect(UndoStack.pop()?.imagesData[0].labelPolygons).toEqual([]);
+        expect(verifyMaskGeometry).toHaveBeenCalledTimes(2);
+        expect(afterAccept).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a preview-only mask before hashing or mutation', async () => {
+        const {testStore} = readyMaskStore();
+        UndoStack.clear();
+        testStore.getState().visualSearch.jobsById['snapshot-mask']
+            .result!.items[0].acceptanceEligible = false;
+        testStore.getState().visualSearch.jobsById['snapshot-mask']
+            .result!.items[0].acceptanceReason = 'source_polygon_unavailable';
+        const digest = jest.fn(async () => DIGEST);
+        const verifyMaskGeometry = jest.fn().mockResolvedValue(MASK_POLYGONS);
+        const service = new VisualSearchAcceptanceService({
+            getState: testStore.getState,
+            dispatch: testStore.dispatch,
+            digestFile: digest,
+            verifyMaskGeometry,
+            afterAccept: jest.fn(),
+        });
+
+        await expect(service.accept('snapshot-mask', 'mask-result-1')).rejects.toThrow(
+            'preview-only: source_polygon_unavailable',
+        );
+        expect(digest).not.toHaveBeenCalled();
+        expect(verifyMaskGeometry).not.toHaveBeenCalled();
+        expect(testStore.getState().labels.imagesData[0].labelPolygons).toEqual([]);
+        expect(UndoStack.size()).toBe(0);
+    });
+
+    it('fails mask CAS if geometry identity changes while file hashing is pending', async () => {
+        const {testStore} = readyMaskStore();
+        UndoStack.clear();
+        let resolveDigest: ((value: string) => void) | undefined;
+        const service = new VisualSearchAcceptanceService({
+            getState: testStore.getState,
+            dispatch: testStore.dispatch,
+            digestFile: () => new Promise(resolve => {
+                resolveDigest = resolve;
+            }),
+            verifyMaskGeometry: jest.fn().mockResolvedValue(MASK_POLYGONS),
+            afterAccept: jest.fn(),
+        });
+
+        const accepting = service.accept('snapshot-mask', 'mask-result-1');
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(resolveDigest).toBeDefined();
+        testStore.getState().visualSearch.jobsById['snapshot-mask']
+            .result!.items[0].geometrySha256 = 'd'.repeat(64);
+        resolveDigest?.(DIGEST);
+
+        await expect(accepting).rejects.toThrow(
+            'visual_search_acceptance_cas: result_geometry',
+        );
+        expect(testStore.getState().labels.imagesData[0].labelPolygons).toEqual([]);
+        expect(UndoStack.size()).toBe(0);
     });
 });

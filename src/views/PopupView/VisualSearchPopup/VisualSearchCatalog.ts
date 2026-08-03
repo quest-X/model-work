@@ -1,7 +1,7 @@
 import {getExtensionEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
 import {VisualSearchQueryKind, VisualSearchRevision} from '../../../store/visualSearch/types';
 
-export type VisualSearchGranularity = 'image' | 'bbox';
+export type VisualSearchGranularity = VisualSearchQueryKind;
 
 interface RawFeatureProfile {
     profile_id?: string;
@@ -122,7 +122,6 @@ export const collectionSupportsQuery = (
     collection: VisualSearchCollection,
     kind: VisualSearchQueryKind,
 ): boolean =>
-    kind !== 'mask' &&
     collection.granularity === kind &&
     collection.compatible &&
     collection.count > 0;

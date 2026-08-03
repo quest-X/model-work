@@ -91,13 +91,15 @@ const activeImage = (selected: 'rect' | 'polygon' | 'none' = 'none'): ImageData 
 });
 
 const collection = (
-    granularity: 'image' | 'bbox',
+    granularity: 'image' | 'bbox' | 'mask',
     name: string = `scene/${granularity}/v1`,
 ): VisualSearchCollection => ({
     name,
     displayName: name,
     sceneName: 'Line A',
-    targetName: granularity === 'bbox' ? 'Scratch boxes' : 'Full images',
+    targetName: granularity === 'bbox'
+        ? 'Scratch boxes'
+        : granularity === 'mask' ? 'Scratch masks' : 'Full images',
     version: 1,
     granularity,
     count: 25,
@@ -179,6 +181,7 @@ const baseProps = () => ({
         ...dependencies,
         createId: () => 'snapshot-test',
         now: () => 100,
+        encodeMask: async () => new Blob(['mask-png'], {type: 'image/png'}),
     })),
     jobRunner: {
         start: jest.fn().mockReturnValue({
@@ -254,23 +257,37 @@ describe('VisualSearchPopup', () => {
         expect(props.selectJob).toHaveBeenCalledWith('snapshot-test');
     });
 
-    it('keeps mask geometry visible but disables submission without a real mask stage', async () => {
+    it('submits polygon masks only to a populated compatible mask collection', async () => {
         const props = baseProps();
         props.activeImage = activeImage('polygon');
         props.activeLabelId = 'polygon-1';
         props.collectionLoader.mockResolvedValue([
             collection('image'),
             collection('bbox'),
+            collection('mask', 'scene/masks/v1'),
         ]);
         render(<VisualSearchPopup {...props}/>);
 
-        expect(await screen.findByText('Mask search is not enabled yet')).toBeInTheDocument();
-        expect(screen.getByText(/never silently fall back to an image/)).toBeInTheDocument();
+        expect(await screen.findByText('Strict mask search')).toBeInTheDocument();
+        expect(screen.getByText(/must contain real mask RLE/)).toBeInTheDocument();
         expect(await screen.findByTestId('visual-search-query-overlay')).toBeInTheDocument();
-        expect(screen.getByTestId('submit-visual-search')).toBeDisabled();
-        fireEvent.click(screen.getByTestId('submit-visual-search'));
-        expect(props.snapshotCapture).not.toHaveBeenCalled();
-        expect(props.jobRunner.start).not.toHaveBeenCalled();
+        expect(screen.getByRole('combobox')).toHaveValue('scene/masks/v1');
+        expect(screen.getByTestId('submit-visual-search')).toBeEnabled();
+        await act(async () => fireEvent.click(screen.getByTestId('submit-visual-search')));
+        await waitFor(() => expect(props.snapshotCapture).toHaveBeenCalledTimes(1));
+        const input = props.snapshotCapture.mock.calls[0][0] as QuerySnapshotInput;
+        expect(input.geometry).toEqual({
+            kind: 'mask',
+            polygons: [[[3, 4], [50, 4], [50, 60]]],
+        });
+        expect(input.target.collection).toBe('scene/masks/v1');
+        expect(props.jobRunner.start).toHaveBeenCalledWith(
+            expect.objectContaining({
+                geometry: expect.objectContaining({kind: 'mask'}),
+                maskFile: expect.any(File),
+            }),
+            expect.objectContaining({subtitle: expect.stringContaining('Mask')}),
+        );
     });
 
     it('freezes one video frame context while later editor state advances', async () => {

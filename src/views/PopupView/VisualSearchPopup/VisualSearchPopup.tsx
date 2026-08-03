@@ -325,7 +325,7 @@ const createSnapshotInput = ({
     options: {
         topK,
         candidateK: Math.max(topK, Math.min(100, topK * 4)),
-        className: query.kind === 'bbox' ? className : undefined,
+        className: query.kind === 'image' ? undefined : className,
     },
     geometry: query.geometry,
 });
@@ -488,12 +488,10 @@ export const VisualSearchPopup: React.FC<Props> = ({
         });
         return acceptedIds;
     }, [acceptedRectIds, acceptedThisSession, activeJob]);
-    const maskUnavailable = query.kind === 'mask';
     const canSubmit = Boolean(
         queryImage &&
         source &&
         selectedCollection &&
-        !maskUnavailable &&
         !submitting,
     );
 
@@ -618,11 +616,11 @@ export const VisualSearchPopup: React.FC<Props> = ({
                     : t('未选中框或掩码，使用整图', 'No box or mask selected; using full image')}
             </small>
         </div>
-        {maskUnavailable && <div className='vs-notice warning' role='status'>
-            <strong>{t('掩码检索暂未启用', 'Mask search is not enabled yet')}</strong>
+        {query.kind === 'mask' && <div className='vs-notice' role='status'>
+            <strong>{t('严格掩码检索', 'Strict mask search')}</strong>
             <span>{t(
-                '当前 DINO-only geometry stage 不具备真实掩码定位器。输入会保持为 mask，绝不会降级成整图；因此本轮禁止提交。',
-                'The current DINO-only geometry stage has no real mask locator. The query remains a mask and will never silently fall back to an image, so submission is disabled.',
+                '输入会编码为全图 PNG mask，仅绑定 mask 向量版本；结果必须返回真实 mask RLE，不会降级成框或整图。',
+                'The input is encoded as a full-image PNG mask and binds only to a mask vector version. Results must contain real mask RLE and never fall back to boxes or images.',
             )}</span>
         </div>}
     </section>;
@@ -634,7 +632,7 @@ export const VisualSearchPopup: React.FC<Props> = ({
             <select
                 aria-label={t('向量版本', 'Vector version')}
                 value={selectedCollectionName}
-                disabled={collectionsLoading || maskUnavailable}
+                disabled={collectionsLoading}
                 onChange={event => setSelectedCollectionName(event.target.value)}
             >
                 {eligibleCollections.length === 0 && <option value=''>
@@ -680,7 +678,7 @@ export const VisualSearchPopup: React.FC<Props> = ({
                     ))}
                 />
             </label>
-            {query.kind === 'bbox' && <label>
+            {query.kind !== 'image' && <label>
                 {t('类别筛选（可选）', 'Class filter (optional)')}
                 <input
                     value={className}
@@ -699,7 +697,7 @@ export const VisualSearchPopup: React.FC<Props> = ({
                 ? capturePhaseLabel(capturePhase, chinese)
                 : t('冻结快照并提交', 'Freeze snapshot and submit')}
         </button>
-        {!maskUnavailable && !collectionsLoading && eligibleCollections.length === 0 && <p className='vs-help'>
+        {!collectionsLoading && eligibleCollections.length === 0 && <p className='vs-help'>
             {t(
                 `当前输入为${visualSearchKindLabel(query.kind, true)}，不会自动改用其他粒度。请先在向量数据库创建并入库同类型版本。`,
                 `The input is ${visualSearchKindLabel(query.kind, false)}. Other granularities are never substituted; create and ingest a same-kind vector version first.`,

@@ -7,6 +7,14 @@ export type VisualSearchPoint = readonly [number, number];
 export type VisualSearchBBox = readonly [number, number, number, number];
 export type VisualSearchPolygon = ReadonlyArray<VisualSearchPoint>;
 
+export interface VisualSearchMaskRLE {
+    encoding: 'binary_rle_varint_zlib_base64_v1';
+    order: 'row-major';
+    /** Backend/Pillow convention: [height, width]. */
+    size: readonly [number, number];
+    countsBase64: string;
+}
+
 export type VisualSearchQueryGeometry =
     | {kind: 'image'}
     | {kind: 'bbox'; bbox: VisualSearchBBox}
@@ -78,6 +86,7 @@ export interface VisualSearchResultGeometry {
     kind?: VisualSearchQueryKind | string;
     bbox?: VisualSearchBBox | null;
     polygons?: ReadonlyArray<VisualSearchPolygon> | null;
+    mask?: VisualSearchMaskRLE | null;
     [key: string]: unknown;
 }
 

@@ -1,6 +1,8 @@
 import {getExtensionEngineBaseUrl} from '../utils/DefaultBackendUrl';
 import {
     VisualSearchBBox,
+    VisualSearchMaskRLE,
+    VisualSearchPolygon,
     VisualSearchQueryKind,
     VisualSearchQuerySnapshot,
     VisualSearchRemoteError,
@@ -139,14 +141,106 @@ const normalizeBBox = (value: unknown): VisualSearchBBox | null => {
     ];
 };
 
+const normalizePolygons = (value: unknown): ReadonlyArray<VisualSearchPolygon> | null => {
+    if (value === undefined || value === null) return null;
+    if (!Array.isArray(value)) return null;
+    const polygons: VisualSearchPolygon[] = [];
+    for (const rawPolygon of value) {
+        if (!Array.isArray(rawPolygon) || rawPolygon.length < 3) return null;
+        const polygon = rawPolygon.map(rawPoint => {
+            if (!Array.isArray(rawPoint) || rawPoint.length !== 2) return null;
+            const x = asNumber(rawPoint[0]);
+            const y = asNumber(rawPoint[1]);
+            return x === undefined || y === undefined ? null : [x, y] as const;
+        });
+        if (polygon.some(point => point === null)) return null;
+        const typed = polygon as VisualSearchPolygon;
+        const doubleArea = typed.reduce((sum, point, index) => {
+            const next = typed[(index + 1) % typed.length];
+            return sum + point[0] * next[1] - next[0] * point[1];
+        }, 0);
+        if (Math.abs(doubleArea) <= 1e-6) return null;
+        polygons.push(typed);
+    }
+    return polygons.length > 0 ? polygons : null;
+};
+
+const normalizeMaskRLE = (value: unknown): VisualSearchMaskRLE | null => {
+    const mask = asObject(value);
+    const rawSize = mask.size;
+    const countsBase64 = asString(firstValue(mask, ['counts_base64', 'countsBase64']));
+    if (mask.encoding !== 'binary_rle_varint_zlib_base64_v1' ||
+        mask.order !== 'row-major' ||
+        !Array.isArray(rawSize) ||
+        rawSize.length !== 2 ||
+        !countsBase64 ||
+        !/^[A-Za-z0-9+/]+={0,2}$/.test(countsBase64)) {
+        return null;
+    }
+    const height = asNumber(rawSize[0]);
+    const width = asNumber(rawSize[1]);
+    if (!Number.isInteger(height) || !Number.isInteger(width) ||
+        (height as number) <= 0 || (width as number) <= 0) return null;
+    return {
+        encoding: 'binary_rle_varint_zlib_base64_v1',
+        order: 'row-major',
+        size: [height as number, width as number],
+        countsBase64,
+    };
+};
+
 const normalizeGeometry = (value: unknown): VisualSearchResultGeometry | null => {
     const geometry = asObject(value);
     if (Object.keys(geometry).length === 0) return null;
     return {
-        ...geometry,
         kind: asString(geometry.kind ?? geometry.type),
         bbox: normalizeBBox(geometry.bbox),
+        polygons: normalizePolygons(geometry.polygons),
+        mask: normalizeMaskRLE(geometry.mask),
     };
+};
+
+const sameBBox = (
+    left: VisualSearchBBox | null | undefined,
+    right: VisualSearchBBox | null | undefined,
+): boolean => Boolean(left && right && left.every(
+    (coordinate, index) => Math.abs(coordinate - right[index]) <= 1e-6,
+));
+
+const pointOutside = (
+    point: readonly [number, number],
+    width: number,
+    height: number,
+): boolean =>
+    point[0] < 0 || point[1] < 0 || point[0] > width || point[1] > height;
+
+const sanitizeMaskGeometry = (item: VisualSearchResultItem): void => {
+    if (!item.geometry || item.width === null || item.height === null) return;
+    const {mask, polygons} = item.geometry;
+    if (mask && (mask.size[0] !== item.height || mask.size[1] !== item.width)) {
+        item.geometry.mask = null;
+    }
+    if (polygons && polygons.some(polygon => polygon.some(point =>
+        pointOutside(point, item.width as number, item.height as number)))) {
+        item.geometry.polygons = null;
+    }
+};
+
+const assertSameKindResult = (
+    kind: VisualSearchQueryKind | string,
+    item: VisualSearchResultItem,
+): void => {
+    if (kind !== 'image' && kind !== 'bbox' && kind !== 'mask') {
+        throw new Error(`visual-search result has unsupported query kind: ${kind}`);
+    }
+    if (item.geometry?.kind !== kind || !sameBBox(item.geometry.bbox, item.bbox)) {
+        throw new Error(`visual-search result ${item.resultId} violates ${kind} geometry contract`);
+    }
+    if (item.granularity !== null && item.granularity !== kind) {
+        throw new Error(`visual-search result ${item.resultId} has mismatched granularity`);
+    }
+    if (kind !== 'mask') return;
+    sanitizeMaskGeometry(item);
 };
 
 const normalizeResultItem = (
@@ -196,9 +290,14 @@ const normalizeResult = (
     const rawItems = Array.isArray(result.items) ? result.items : [];
     const stageValue = firstValue(result, ['executed_stages', 'executedStages']);
     const stages = Array.isArray(stageValue) ? stageValue : [];
+    const normalizedKind = normalizeQueryKind(
+        firstValue(result, ['query_kind', 'queryKind']) ?? queryKind,
+    );
+    const items = rawItems.map((item, index) => normalizeResultItem(item, index));
+    items.forEach(item => assertSameKindResult(normalizedKind, item));
     return {
         collection: stringOrEmpty(result.collection),
-        queryKind: normalizeQueryKind(firstValue(result, ['query_kind', 'queryKind']) ?? queryKind),
+        queryKind: normalizedKind,
         queryGeometry: normalizeGeometry(firstValue(result, ['query_geometry', 'queryGeometry'])),
         profileId: stringOrEmpty(firstValue(result, ['profile_id', 'profileId'])),
         modelRevision: stringOrNull(firstValue(result, ['model_revision', 'modelRevision'])),
@@ -209,7 +308,7 @@ const normalizeResult = (
         stageStatus: asObject(firstValue(result, ['stage_status', 'stageStatus'])),
         total: numberOr(result.total, rawItems.length),
         elapsedMs: numberOr(firstValue(result, ['elapsed_ms', 'elapsedMs']), 0),
-        items: rawItems.map((item, index) => normalizeResultItem(item, index)),
+        items,
     };
 };
 

@@ -242,6 +242,95 @@ describe('VisualSearchAPI', () => {
         }));
     });
 
+    it('normalizes only full-image canonical RLE for mask results', () => {
+        const task = normalizeVisualSearchTask({
+            task_id: 'task-mask',
+            state: 'succeeded',
+            result: {
+                collection: 'scene/masks/v1',
+                query_kind: 'mask',
+                profile_id: 'profile-mask',
+                collection_revision: 'collection-mask-1',
+                query_geometry: {
+                    kind: 'mask',
+                    bbox: [1, 2, 4, 5],
+                    mask: {
+                        encoding: 'binary_rle_varint_zlib_base64_v1',
+                        order: 'row-major',
+                        size: [6, 8],
+                        counts_base64: 'eJxjZAQAAAMAAg==',
+                    },
+                },
+                items: [{
+                    result_id: 'result-mask-1',
+                    asset_id: '0123456789abcdef0123456789abcdef',
+                    dataset_id: 'dataset-mask',
+                    dataset_revision: 2,
+                    rank: 1,
+                    filename: 'mask.png',
+                    image_path: '/dataset/mask.png',
+                    width: 8,
+                    height: 6,
+                    score: 0.97,
+                    content_sha256: 'a'.repeat(64),
+                    region_id: 'region-mask-1',
+                    granularity: 'mask',
+                    bbox: [1, 2, 4, 5],
+                    geometry: {
+                        kind: 'mask',
+                        bbox: [1, 2, 4, 5],
+                        polygons: [[[1, 2], [4, 2], [4, 5], [1, 5]]],
+                        mask: {
+                            encoding: 'binary_rle_varint_zlib_base64_v1',
+                            order: 'row-major',
+                            size: [6, 8],
+                            counts_base64: 'eJxjZAQAAAMAAg==',
+                        },
+                    },
+                }],
+            },
+        });
+
+        expect(task.result?.items[0].geometry?.mask).toEqual({
+            encoding: 'binary_rle_varint_zlib_base64_v1',
+            order: 'row-major',
+            size: [6, 8],
+            countsBase64: 'eJxjZAQAAAMAAg==',
+        });
+        expect(task.result?.items[0].geometry?.polygons).toEqual([
+            [[1, 2], [4, 2], [4, 5], [1, 5]],
+        ]);
+    });
+
+    it('keeps a mask result previewable but non-acceptable when canonical RLE is absent', () => {
+        const task = normalizeVisualSearchTask({
+            task_id: 'task-mask-invalid',
+            state: 'succeeded',
+            result: {
+                query_kind: 'mask',
+                profile_id: 'profile-mask',
+                collection_revision: 'collection-mask-1',
+                items: [{
+                    result_id: 'result-mask-invalid',
+                    width: 8,
+                    height: 6,
+                    granularity: 'mask',
+                    bbox: [1, 2, 4, 5],
+                    geometry: {
+                        kind: 'mask',
+                        bbox: [1, 2, 4, 5],
+                        polygons: [[[1, 2], [4, 2], [4, 5], [1, 5]]],
+                    },
+                }],
+            },
+        });
+        expect(task.result?.items[0].geometry).toEqual(expect.objectContaining({
+            kind: 'mask',
+            mask: null,
+            polygons: expect.any(Array),
+        }));
+    });
+
     it('maps interrupted to a retryable terminal failure', () => {
         expect(normalizeVisualSearchTask({
             task_id: 'task-interrupted',

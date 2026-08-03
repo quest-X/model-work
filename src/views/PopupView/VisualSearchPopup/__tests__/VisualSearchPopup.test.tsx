@@ -192,6 +192,10 @@ const baseProps = () => ({
         }),
         cancelByClientJobId: jest.fn().mockResolvedValue(undefined),
     },
+    acceptanceRunner: {accept: jest.fn().mockResolvedValue({
+        imageId: 'target-image',
+        labelRectId: 'visual-search:task-1:result-1',
+    })},
     onClose: jest.fn(),
 });
 

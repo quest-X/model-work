@@ -4,6 +4,7 @@ import {acceptVisualSearchBBox} from '../store/labels/actionCreators';
 import {LabelRect, VisualSearchBBoxAcceptance} from '../store/labels/types';
 import {AppState} from '../store';
 import {LabelStatus} from '../data/enums/LabelStatus';
+import {sha256File} from '../utils/Sha256';
 import {
     VisualSearchBBox,
     VisualSearchJobState,
@@ -28,16 +29,6 @@ const normalizeSha256 = (value: string | null | undefined): string | null => {
         ? normalized.slice('sha256:'.length)
         : normalized;
     return /^[0-9a-f]{64}$/.test(digest) ? digest : null;
-};
-
-const hex = (bytes: ArrayBuffer): string =>
-    Array.from(new Uint8Array(bytes))
-        .map(value => value.toString(16).padStart(2, '0'))
-        .join('');
-
-const digestFile = async (file: File): Promise<string> => {
-    if (!globalThis.crypto?.subtle) throw new Error('SHA-256 is unavailable in this browser');
-    return hex(await globalThis.crypto.subtle.digest('SHA-256', await file.arrayBuffer()));
 };
 
 const sameRevision = (
@@ -160,7 +151,7 @@ export class VisualSearchAcceptanceService {
     constructor(options: VisualSearchAcceptanceOptions = {}) {
         this.getState = options.getState ?? (() => store.getState());
         this.dispatch = options.dispatch ?? (action => store.dispatch(action));
-        this.fileDigest = options.digestFile ?? digestFile;
+        this.fileDigest = options.digestFile ?? sha256File;
         this.afterAccept = options.afterAccept ?? (() => EditorActions.fullRender());
     }
 

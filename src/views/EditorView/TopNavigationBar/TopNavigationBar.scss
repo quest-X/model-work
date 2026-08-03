@@ -143,6 +143,28 @@
       position: relative;
     }
 
+    .ServicesChangeBadge {
+      position: absolute;
+      z-index: 1;
+      top: -1px;
+      right: 1px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      min-width: 16px;
+      height: 16px;
+      border: 2px solid $darkThemeFirstColor;
+      border-radius: 999px;
+      background-color: #ffa726;
+      padding: 0 3px;
+      color: $darkThemeFirstColor;
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1;
+      pointer-events: none;
+    }
+
     .ServicesDropdown {
       z-index: 10000;
       position: absolute;

@@ -504,7 +504,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
         languageToggle: '中文',
         
         // EmptyProjectView
-        welcomeTitle: '欢迎使用 opensight Platform',
+        welcomeTitle: '欢迎使用 Opensight Platform',
         welcomeDescription: '点击上传或拖拽到此处释放',
         dragActiveMessage: '释放文件以上传图像',
         uploadHints: {
@@ -920,7 +920,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
         },
 
         // Common
-        makeSense: 'opensight Platform',
+        makeSense: 'Opensight Platform',
         ok: '确定',
         cancel: '取消',
         delete: '删除',
@@ -994,7 +994,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
         languageToggle: 'English',
         
         // EmptyProjectView
-        welcomeTitle: 'Welcome to opensight Platform',
+        welcomeTitle: 'Welcome to Opensight Platform',
         welcomeDescription: 'Click to upload or drag here to release',
         dragActiveMessage: 'Drop files to upload images',
         uploadHints: {
@@ -1410,7 +1410,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
         },
 
         // Common
-        makeSense: 'opensight Platform',
+        makeSense: 'Opensight Platform',
         ok: 'OK',
         cancel: 'Cancel',
         delete: 'Delete',

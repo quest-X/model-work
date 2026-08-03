@@ -10,7 +10,7 @@ import {ProjectData} from '../../../store/general/types';
 import DropDownMenu from './DropDownMenu/DropDownMenu';
 import {TextButton} from '../../Common/TextButton/TextButton';
 import {Language, LanguageConfig} from '../../../data/LanguageConfig';
-import {QueueItem} from '../../../store/queue/types';
+import {QueueDataSyncStatus, QueueItem} from '../../../store/queue/types';
 import {updateQueueItem} from '../../../store/queue/actionCreators';
 import {getEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
 
@@ -29,12 +29,18 @@ interface IProps {
 
 type ServicesDropdown = 'core' | 'extension' | null;
 
-const TopNavigationBar: React.FC<IProps> = (props) => {
+export const TopNavigationBar: React.FC<IProps> = (props) => {
     const currentTexts = LanguageConfig[props.language];
     const [showActionsDropdown, setShowActionsDropdown] = useState(false);
     const [activeServicesDropdown, setActiveServicesDropdown] = useState<ServicesDropdown>(null);
     const renameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const activeQueueItem = props.queueItems.find(item => item.id === props.activeQueueItemId);
+    const localChangeCount = props.queueItems.filter(
+        item => item.dataSyncStatus === QueueDataSyncStatus.DIRTY,
+    ).length;
+    const localChangeDescription = props.language === Language.CHINESE
+        ? `${localChangeCount} 个本地变动待处理`
+        : `${localChangeCount} local ${localChangeCount === 1 ? 'change' : 'changes'} pending`;
 
     const onFocus = (event: React.FocusEvent<HTMLInputElement>) => {
         event.target.setSelectionRange(0, event.target.value.length);
@@ -207,6 +213,16 @@ const TopNavigationBar: React.FC<IProps> = (props) => {
                                 onClick={() => toggleServicesDropdown('core')}
                                 externalClassName={'services-button'}
                             />
+                            {localChangeCount > 0 && (
+                                <span
+                                    className='ServicesChangeBadge'
+                                    role='status'
+                                    aria-label={localChangeDescription}
+                                    title={localChangeDescription}
+                                >
+                                    {localChangeCount}
+                                </span>
+                            )}
                             {activeServicesDropdown === 'core' && (
                                 <div className='DropDownMenuContent ServicesDropdown'>
                                     <div className='DropDownMenuContentOption active'

@@ -6,7 +6,10 @@ import {QueueDataSyncStatus, QueueItem, QueueItemType} from '../store/queue/type
 import {TaskType} from '../store/tasks/types';
 import {getEngineBaseUrl} from '../utils/DefaultBackendUrl';
 import {TaskTracker} from './TaskTracker';
-import {VISUAL_SEARCH_MASK_RASTERIZER_REVISION} from '../store/visualSearch/types';
+import {
+    allVisualSearchMaskGroups,
+    ValidatedVisualSearchMaskComponent,
+} from '../utils/VisualSearchMaskProvenance';
 
 type BatchMaskGroup = {
     schema_version: 1;
@@ -58,63 +61,18 @@ const polygonBoundingBox = (vertices: Array<{x: number; y: number}>): [number, n
     return [minX, minY, maxX - minX, maxY - minY];
 };
 
-const objectValue = (value: unknown): Record<string, unknown> | null =>
-    value && typeof value === 'object' && !Array.isArray(value)
-        ? value as Record<string, unknown>
-        : null;
-
-const maskGroupFrom = (extra: unknown): BatchMaskGroup | undefined => {
-    const extraRecord = objectValue(extra);
-    if (!extraRecord || !Object.prototype.hasOwnProperty.call(extraRecord, 'visualSearch')) {
-        return undefined;
-    }
-    const provenance = objectValue(extraRecord.visualSearch);
-    if (!provenance) throw new Error('Invalid visual-search mask group provenance');
-    const geometrySha256 = provenance.geometrySha256;
-    const rasterizerRevision = provenance.rasterizerRevision;
-    const componentIndex = provenance.componentIndex;
-    const componentCount = provenance.componentCount;
-    if (provenance.schemaVersion !== 1 ||
-        typeof geometrySha256 !== 'string' || !/^[0-9a-f]{64}$/.test(geometrySha256) ||
-        rasterizerRevision !== VISUAL_SEARCH_MASK_RASTERIZER_REVISION ||
-        !Number.isInteger(componentIndex) || (componentIndex as number) < 0 ||
-        !Number.isInteger(componentCount) || (componentCount as number) <= 0 ||
-        (componentIndex as number) >= (componentCount as number)) {
-        throw new Error('Invalid visual-search mask group provenance');
-    }
+const maskGroupFrom = (
+    component: ValidatedVisualSearchMaskComponent | undefined,
+): BatchMaskGroup | undefined => {
+    if (!component) return undefined;
+    const provenance = component.provenance;
     return {
         schema_version: 1,
-        geometry_sha256: geometrySha256,
-        rasterizer_revision: rasterizerRevision,
-        component_index: componentIndex as number,
-        component_count: componentCount as number,
+        geometry_sha256: provenance.geometrySha256,
+        rasterizer_revision: provenance.rasterizerRevision,
+        component_index: provenance.componentIndex,
+        component_count: provenance.componentCount,
     };
-};
-
-const assertCompleteMaskGroups = (regions: BatchRegion[]): void => {
-    const groups = new Map<string, {componentCount: number; indices: Set<number>}>();
-    regions.forEach(region => {
-        const group = region.mask_group;
-        if (!group) return;
-        const key = `${group.geometry_sha256}:${group.rasterizer_revision}`;
-        const current = groups.get(key) ?? {
-            componentCount: group.component_count,
-            indices: new Set<number>(),
-        };
-        if (current.componentCount !== group.component_count ||
-            current.indices.has(group.component_index)) {
-            throw new Error('Inconsistent visual-search mask group components');
-        }
-        current.indices.add(group.component_index);
-        groups.set(key, current);
-    });
-    groups.forEach(group => {
-        if (group.indices.size !== group.componentCount ||
-            Array.from({length: group.componentCount}, (_unused, index) => index)
-                .some(index => !group.indices.has(index))) {
-            throw new Error('Incomplete visual-search mask group components');
-        }
-    });
 };
 
 const readError = async (response: Response): Promise<string> => {
@@ -140,6 +98,12 @@ export class DataBatchSyncService {
                 : remainingImages.findIndex(image => fileSignature(image.fileData) === fileSignature(file));
             const image = signatureIndex >= 0 ? remainingImages.splice(signatureIndex, 1)[0] : undefined;
             const regions: BatchRegion[] = [];
+            const maskComponents = new Map<string, ValidatedVisualSearchMaskComponent>();
+            if (image) {
+                allVisualSearchMaskGroups(image.labelPolygons).forEach(group => {
+                    group.forEach(component => maskComponents.set(component.label.id, component));
+                });
+            }
 
             image?.labelRects.forEach(labelRect => {
                 if (!labelRect.labelId || !labelIds.has(labelRect.labelId) || labelRect.isPrompt) return;
@@ -159,7 +123,7 @@ export class DataBatchSyncService {
                     .filter(vertex => Number.isFinite(vertex.x) && Number.isFinite(vertex.y))
                     .map(vertex => ({x: vertex.x, y: vertex.y}));
                 const bbox = polygonBoundingBox(vertices);
-                const maskGroup = maskGroupFrom(labelPolygon.extra);
+                const maskGroup = maskGroupFrom(maskComponents.get(labelPolygon.id));
                 if (maskGroup && (!bbox || vertices.length < 3)) {
                     throw new Error('Invalid visual-search mask component geometry');
                 }
@@ -174,7 +138,6 @@ export class DataBatchSyncService {
                     usedLabelIds.add(labelPolygon.labelId);
                 }
             });
-            assertCompleteMaskGroups(regions);
             return {index, regions};
         });
 

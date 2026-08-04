@@ -10,6 +10,11 @@ import {
 } from '../../store/labels/types';
 import {VisualSearchResultItem} from '../../store/visualSearch/types';
 import {QueueItemType} from '../../store/queue/types';
+import {
+    parseVisualSearchMaskComponent,
+    validateVisualSearchMaskGroup,
+    ValidatedVisualSearchMaskComponent,
+} from '../../utils/VisualSearchMaskProvenance';
 
 // Actions whose "before" state we want on the undo stack
 const SNAPSHOT_ACTIONS = new Set<string>([
@@ -160,6 +165,7 @@ const assertMaskLabels = (
     if (acceptance.labelPolygons.length !== acceptance.sourcePolygons.length ||
         acceptance.labelPolygons.length === 0) acceptanceCASFailure('mask_labels');
     const ids = new Set<string>();
+    const components: ValidatedVisualSearchMaskComponent[] = [];
     acceptance.labelPolygons.forEach((label, index) => {
         const expectedId = `visual-search:${acceptance.backendJobId}:` +
             `${acceptance.resultId}:mask:${index}`;
@@ -168,6 +174,33 @@ const assertMaskLabels = (
             !samePolygons([vertices], [acceptance.sourcePolygons[index]]) ||
             ids.has(label.id)) acceptanceCASFailure('mask_labels');
         ids.add(label.id);
+        try {
+            const component = parseVisualSearchMaskComponent(label);
+            if (!component) acceptanceCASFailure('mask_provenance');
+            components.push(component as ValidatedVisualSearchMaskComponent);
+        } catch {
+            acceptanceCASFailure('mask_provenance');
+        }
+    });
+    let validated: ValidatedVisualSearchMaskComponent[];
+    try {
+        validated = validateVisualSearchMaskGroup(components);
+    } catch {
+        acceptanceCASFailure('mask_provenance');
+    }
+    validated.forEach(component => {
+        const provenance = component.provenance;
+        if (provenance.clientJobId !== acceptance.clientJobId ||
+            provenance.backendJobId !== acceptance.backendJobId ||
+            provenance.resultId !== acceptance.resultId ||
+            provenance.assetId !== acceptance.assetId ||
+            provenance.geometrySha256 !== acceptance.geometrySha256 ||
+            provenance.rasterizerRevision !== acceptance.rasterizerRevision ||
+            provenance.datasetId !== acceptance.datasetId ||
+            !sameRevision(provenance.datasetRevision, acceptance.datasetRevision) ||
+            provenance.componentCount !== acceptance.labelPolygons.length) {
+            acceptanceCASFailure('mask_provenance');
+        }
     });
 };
 

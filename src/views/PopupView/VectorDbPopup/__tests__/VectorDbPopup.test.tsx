@@ -209,6 +209,29 @@ describe('VectorDbPopup', () => {
         });
     });
 
+    it('creates a strict mask target from the vector-unit picker', async () => {
+        render(<VectorDbPopup language={Language.CHINESE}/>);
+        await screen.findAllByText('产线帧库');
+
+        fireEvent.click(screen.getByRole('button', {name: /新建目标/}));
+        fireEvent.click(screen.getByRole('radio', {name: /分割区域/}));
+        fireEvent.change(screen.getByPlaceholderText('例如：划痕'), {target: {value: '大鹅分割库'}});
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', {name: '创建目标'}));
+        });
+
+        await waitFor(() => {
+            const createCall = (global.fetch as jest.Mock).mock.calls.find(([url, init]) =>
+                String(url).endsWith('/targets') && init?.method === 'POST');
+            expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
+                scene_id: 'scene_line_1',
+                scene_name: '一号产线',
+                target_name: '大鹅分割库',
+                granularity: 'mask',
+            });
+        });
+    });
+
     it('uses a real scene selector and preserves the existing scene id', async () => {
         render(<VectorDbPopup language={Language.CHINESE}/>);
         await screen.findAllByText('产线帧库');
@@ -256,6 +279,38 @@ describe('VectorDbPopup', () => {
             const ingestCall = (global.fetch as jest.Mock).mock.calls.find(([url]) => String(url).includes('/ingest'));
             const body = ingestCall?.[1]?.body as FormData;
             expect(body.get('granularity')).toBe('image');
+            expect(body.get('dataset_id')).toBe('dataset-1');
+        });
+    });
+
+    it('keeps mask ingest dataset-only and submits the immutable mask granularity', async () => {
+        collectionList = [{
+            ...collection,
+            granularity: 'mask',
+            mode: 'masks',
+            profile_id: 'fp_test_mask',
+            profile: {...collection.profile, profile_id: 'fp_test_mask', granularity: 'mask'},
+        }];
+        render(<VectorDbPopup language={Language.CHINESE}/>);
+
+        expect((await screen.findAllByText('分割区域')).length).toBeGreaterThan(0);
+        expect(screen.getByText(/入库和检索严格保持 mask→mask/)).toBeInTheDocument();
+        expect(screen.getByRole('tab', {name: '本地上传'})).toBeDisabled();
+        const datasetSelect = await screen.findByRole('combobox');
+        await screen.findByRole('option', {name: '一号产线（24）'});
+        await screen.findByText('向量存储就绪');
+        fireEvent.change(datasetSelect, {target: {value: 'dataset-1'}});
+        const ingestButton = screen.getByRole('button', {name: '开始生成向量'});
+        await waitFor(() => expect(ingestButton).toBeEnabled());
+        await act(async () => {
+            fireEvent.click(ingestButton);
+        });
+
+        await waitFor(() => {
+            const ingestCall = (global.fetch as jest.Mock).mock.calls.find(([url]) =>
+                String(url).includes('/ingest'));
+            const body = ingestCall?.[1]?.body as FormData;
+            expect(body.get('granularity')).toBe('mask');
             expect(body.get('dataset_id')).toBe('dataset-1');
         });
     });

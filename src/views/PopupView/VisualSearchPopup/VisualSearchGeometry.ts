@@ -1,6 +1,7 @@
 import {ImageData} from '../../../store/labels/types';
 import {QueryGeometryInput} from '../../../services/QuerySnapshotService';
 import {VisualSearchQueryKind} from '../../../store/visualSearch/types';
+import {selectedVisualSearchMaskGroup} from '../../../utils/VisualSearchMaskProvenance';
 
 export interface EditorVisualSearchQuery {
     kind: VisualSearchQueryKind;
@@ -29,11 +30,16 @@ export const deriveEditorVisualSearchQuery = (
     }
     const polygon = image.labelPolygons.find(item => item.id === activeLabelId);
     if (polygon) {
+        const group = selectedVisualSearchMaskGroup(image.labelPolygons, polygon);
+        const polygons = group
+            ? group.map(component => component.label.vertices.map(point =>
+                [point.x, point.y] as [number, number]))
+            : [polygon.vertices.map(point => [point.x, point.y] as [number, number])];
         return {
             kind: 'mask',
             geometry: {
                 kind: 'mask',
-                polygons: [polygon.vertices.map(point => [point.x, point.y] as [number, number])],
+                polygons,
             },
             annotationId: polygon.id,
             labelId: polygon.labelId,

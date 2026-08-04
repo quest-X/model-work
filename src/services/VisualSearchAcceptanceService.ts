@@ -10,6 +10,7 @@ import {
 import {AppState} from '../store';
 import {LabelStatus} from '../data/enums/LabelStatus';
 import {sha256File} from '../utils/Sha256';
+import {visualSearchVerticesSignature} from '../utils/VisualSearchMaskProvenance';
 import {
     VisualSearchBBox,
     VisualSearchJobState,
@@ -312,32 +313,36 @@ export class VisualSearchAcceptanceService {
         sourcePolygons: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
         labelId: string | null,
     ): VisualSearchAcceptanceResult {
-        const labelPolygons: LabelPolygon[] = sourcePolygons.map((polygon, index) => ({
-            id: visualSearchAcceptedMaskPolygonId(backendJobId, item.resultId, index),
-            labelId,
-            vertices: polygon.map(point => ({x: point[0], y: point[1]})),
-            isVisible: true,
-            isCreatedByAI: true,
-            status: LabelStatus.ACCEPTED,
-            suggestedLabel: labelId ? null : item.className ?? '',
-            confidence: item.confidence ?? item.score,
-            extra: {
-                visualSearch: {
-                    schemaVersion: 1,
-                    clientJobId,
-                    backendJobId,
-                    resultId: item.resultId,
-                    componentIndex: index,
-                    componentCount: sourcePolygons.length,
-                    assetId: item.assetId,
-                    geometrySha256: item.geometrySha256,
-                    rasterizerRevision: item.geometry?.rasterizerRevision,
-                    regionId: item.regionId,
-                    datasetId: binding.datasetId,
-                    datasetRevision: binding.datasetRevision,
+        const labelPolygons: LabelPolygon[] = sourcePolygons.map((polygon, index) => {
+            const vertices = polygon.map(point => ({x: point[0], y: point[1]}));
+            return {
+                id: visualSearchAcceptedMaskPolygonId(backendJobId, item.resultId, index),
+                labelId,
+                vertices,
+                isVisible: true,
+                isCreatedByAI: true,
+                status: LabelStatus.ACCEPTED,
+                suggestedLabel: labelId ? null : item.className ?? '',
+                confidence: item.confidence ?? item.score,
+                extra: {
+                    visualSearch: {
+                        schemaVersion: 1,
+                        clientJobId,
+                        backendJobId,
+                        resultId: item.resultId,
+                        componentIndex: index,
+                        componentCount: sourcePolygons.length,
+                        assetId: item.assetId,
+                        geometrySha256: item.geometrySha256,
+                        rasterizerRevision: item.geometry?.rasterizerRevision,
+                        regionId: item.regionId,
+                        datasetId: binding.datasetId,
+                        datasetRevision: binding.datasetRevision,
+                        verticesSignature: visualSearchVerticesSignature(vertices),
+                    },
                 },
-            },
-        }));
+            };
+        });
         const acceptance: VisualSearchMaskAcceptance = {
             clientJobId,
             backendJobId,

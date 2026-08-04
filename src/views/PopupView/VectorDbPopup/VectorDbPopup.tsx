@@ -9,7 +9,7 @@ import {Language} from '../../../data/LanguageConfig';
 import {getEngineBaseUrl, getExtensionEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
 import './VectorDbPopup.scss';
 
-type Granularity = 'image' | 'bbox';
+type Granularity = 'image' | 'bbox' | 'mask';
 type WorkspaceTab = 'ingest' | 'history';
 type IngestSource = 'dataset' | 'upload';
 
@@ -51,7 +51,7 @@ interface CollectionInfo {
     dim: number;
     embedder: string;
     granularity: Granularity;
-    mode?: 'objects' | 'images';
+    mode?: 'objects' | 'images' | 'masks';
     count: number;
     search_count?: number;
     created_at: string;
@@ -103,7 +103,7 @@ interface IngestJob {
     data_version?: number | null;
     collection: string;
     granularity: Granularity;
-    mode?: 'objects' | 'images';
+    mode?: 'objects' | 'images' | 'masks';
     source: string;
     dataset_id?: string | null;
     total_images: number;
@@ -181,7 +181,9 @@ const collectionTargetName = (collection: CollectionInfo) =>
     collection.target_name || collection.display_name || collection.name;
 
 const collectionGranularity = (collection: CollectionInfo): Granularity =>
-    collection.granularity || (collection.mode === 'images' ? 'image' : 'bbox');
+    collection.granularity || (collection.mode === 'images'
+        ? 'image'
+        : collection.mode === 'masks' ? 'mask' : 'bbox');
 
 const ingestJobSourceLabel = (item: IngestJob, t: Translate): string => {
     const fromDataset = Boolean(item.dataset_id)
@@ -714,6 +716,13 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
 
     const startIngest = async () => {
         if (!selected || activeJob || submittingIngest) return;
+        if (selected.granularity === 'mask' && ingestSource !== 'dataset') {
+            setIngestError(t(
+                '分割区域只允许从资源中心读取真实 mask 标注。',
+                'Segmentation masks can only ingest real mask annotations from Resource Center.',
+            ));
+            return;
+        }
         setSubmittingIngest(true);
         setIngestError(null);
         const form = new FormData();
@@ -818,9 +827,17 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         }
     };
 
-    const granularityLabel = (granularity: Granularity) => granularity === 'bbox'
-        ? t('目标框', 'Bounding boxes')
-        : t('整张图片', 'Whole images');
+    const granularityLabel = (granularity: Granularity) => {
+        if (granularity === 'bbox') return t('目标框', 'Bounding boxes');
+        if (granularity === 'mask') return t('分割区域', 'Segmentation masks');
+        return t('整张图片', 'Whole images');
+    };
+
+    const granularityIngestDescription = (granularity: Granularity) => granularity === 'mask'
+        ? t('仅从资源中心读取真实分割标注，入库和检索严格保持 mask→mask。',
+            'Only real Resource Center masks are accepted; ingest and retrieval remain mask→mask.')
+        : t('创建时已固定，后续入库将始终使用该粒度。',
+            'Fixed at creation; every ingest uses this granularity.');
 
     const formatDate = (value?: string | null) => {
         if (!value) return t('尚未入库', 'Never ingested');
@@ -971,6 +988,17 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                     <strong>{t('整张图片', 'Whole images')}</strong>
                     <span>{t('每张图片生成一个全局向量', 'Create one global vector per image')}</span>
                 </button>
+                <button
+                    type='button'
+                    className={createGranularity === 'mask' ? 'ModeOption selected' : 'ModeOption'}
+                    role='radio'
+                    aria-checked={createGranularity === 'mask'}
+                    onClick={() => setCreateGranularity('mask')}
+                >
+                    <strong>{t('分割区域', 'Segmentation masks')}</strong>
+                    <span>{t('读取数据批次中的真实 mask；检索严格保持 mask→mask',
+                        'Use real dataset masks; retrieval remains strictly mask→mask')}</span>
+                </button>
             </fieldset>
             {createError && <div className='InlineError' role='alert'>{createError}</div>}
             <div className='InlineActions'>
@@ -1110,12 +1138,13 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         if (!selected) return null;
         const noSource = ingestSource === 'dataset' ? !datasetId : pendingFiles.length === 0;
         const disabled = !embedderReady || !storeReady || !selected.compatible
-            || activeJob || submittingIngest || noSource;
+            || activeJob || submittingIngest || noSource
+            || (selected.granularity === 'mask' && ingestSource !== 'dataset');
         return <div className='WorkspaceBody'>
             <div className='ImmutableModeNotice'>
                 <span>{t('目标向量单位', 'Target vector unit')}</span>
                 <strong>{granularityLabel(selected.granularity)}</strong>
-                <small>{t('创建时已固定，后续入库将始终使用该粒度。', 'Fixed at creation; every ingest uses this granularity.')}</small>
+                <small>{granularityIngestDescription(selected.granularity)}</small>
             </div>
             <div className='FormSection'>
                 <span className='FormLabel'>{t('数据来源', 'Data source')}</span>
@@ -1132,6 +1161,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                         role='tab'
                         aria-selected={ingestSource === 'upload'}
                         className={ingestSource === 'upload' ? 'active' : ''}
+                        disabled={selected.granularity === 'mask'}
                         onClick={() => { setIngestSource('upload'); setDatasetId(''); }}
                     >{t('本地上传', 'Local upload')}</button>
                 </div>

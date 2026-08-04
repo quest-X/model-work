@@ -294,7 +294,7 @@
 
   .ModePicker {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
     margin: 0;
     border: 0;
@@ -589,6 +589,12 @@
       border-color: rgba(176, 145, 255, 0.28);
       background: rgba(176, 145, 255, 0.09);
       color: #cbbaff;
+    }
+
+    &.mask {
+      border-color: rgba(88, 214, 141, 0.3);
+      background: rgba(88, 214, 141, 0.09);
+      color: #9ee5bb;
     }
   }
 

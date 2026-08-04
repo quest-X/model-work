@@ -4,7 +4,37 @@ import {QueueItem, QueueItemStatus, QueueItemType} from '../../store/queue/types
 import {updateProjectData} from '../../store/general/actionCreators';
 import {ProjectType} from '../../data/enums/ProjectType';
 import {store} from '../../index';
-import {VISUAL_SEARCH_MASK_RASTERIZER_REVISION} from '../../store/visualSearch/types';
+import {
+    VISUAL_SEARCH_MASK_LIMITS,
+    VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+} from '../../store/visualSearch/types';
+import {visualSearchVerticesSignature} from '../../utils/VisualSearchMaskProvenance';
+
+const GEOMETRY_SHA = 'c'.repeat(64);
+const groupPolygon = (
+    componentIndex: number,
+    vertices: Array<{x: number; y: number}>,
+    componentCount: number = 2,
+) => ({
+    id: `visual-search:task-mask:result-mask:mask:${componentIndex}`,
+    labelId: 'goose',
+    vertices,
+    extra: {visualSearch: {
+        schemaVersion: 1,
+        clientJobId: 'client-mask',
+        backendJobId: 'task-mask',
+        resultId: 'result-mask',
+        componentIndex,
+        componentCount,
+        assetId: 'asset-mask',
+        geometrySha256: GEOMETRY_SHA,
+        rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+        regionId: 'region-mask',
+        datasetId: 'dataset-mask',
+        datasetRevision: 2,
+        verticesSignature: visualSearchVerticesSignature(vertices),
+    }},
+});
 
 const jsonResponse = (body: unknown): Response => ({
     ok: true,
@@ -50,29 +80,13 @@ describe('DataBatchSyncService', () => {
     it('round-trips multipart visual-search mask grouping in metadata v2', () => {
         const file = new File(['image'], 'goose.png', {type: 'image/png', lastModified: 1});
         const labels: LabelName[] = [{id: 'goose', name: 'goose'}];
-        const geometrySha256 = 'c'.repeat(64);
-        const visualSearch = (componentIndex: number) => ({
-            schemaVersion: 1,
-            geometrySha256,
-            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
-            componentIndex,
-            componentCount: 2,
-        });
         const image = {
             id: 'image-mask',
             fileData: file,
             labelRects: [],
             labelPolygons: [
-                {
-                    labelId: 'goose',
-                    vertices: [{x: 1, y: 1}, {x: 5, y: 1}, {x: 3, y: 4}],
-                    extra: {visualSearch: visualSearch(0)},
-                },
-                {
-                    labelId: 'goose',
-                    vertices: [{x: 8, y: 2}, {x: 12, y: 2}, {x: 10, y: 6}],
-                    extra: {visualSearch: visualSearch(1)},
-                },
+                groupPolygon(0, [{x: 1, y: 1}, {x: 5, y: 1}, {x: 3, y: 4}]),
+                groupPolygon(1, [{x: 8, y: 2}, {x: 12, y: 2}, {x: 10, y: 6}]),
             ],
         } as ImageData;
 
@@ -85,14 +99,14 @@ describe('DataBatchSyncService', () => {
             region.mask_group)).toEqual([
             {
                 schema_version: 1,
-                geometry_sha256: geometrySha256,
+                geometry_sha256: GEOMETRY_SHA,
                 rasterizer_revision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
                 component_index: 0,
                 component_count: 2,
             },
             {
                 schema_version: 1,
-                geometry_sha256: geometrySha256,
+                geometry_sha256: GEOMETRY_SHA,
                 rasterizer_revision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
                 component_index: 1,
                 component_count: 2,
@@ -103,34 +117,27 @@ describe('DataBatchSyncService', () => {
     it('fails closed instead of flattening malformed or incomplete mask groups', () => {
         const file = new File(['image'], 'goose.png', {type: 'image/png', lastModified: 1});
         const labels: LabelName[] = [{id: 'goose', name: 'goose'}];
-        const polygon = (visualSearch: unknown) => ({
-            labelId: 'goose',
-            vertices: [{x: 1, y: 1}, {x: 5, y: 1}, {x: 3, y: 4}],
-            extra: {visualSearch},
-        });
         const image = (labelPolygons: unknown[]): ImageData => ({
             id: 'image-mask',
             fileData: file,
             labelRects: [],
             labelPolygons,
         } as ImageData);
-        const validFirstComponent = {
-            schemaVersion: 1,
-            geometrySha256: 'd'.repeat(64),
-            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
-            componentIndex: 0,
-            componentCount: 2,
-        };
+        const malformed = groupPolygon(
+            0,
+            [{x: 1, y: 1}, {x: 5, y: 1}, {x: 3, y: 4}],
+        );
+        malformed.extra.visualSearch.componentCount = undefined as unknown as number;
 
         expect(() => DataBatchSyncService.buildMetadata(
             [file],
-            [image([polygon({...validFirstComponent, componentCount: undefined})])],
+            [image([malformed])],
             labels,
-        )).toThrow('Invalid visual-search mask group provenance');
+        )).toThrow('Invalid visual-search mask provenance');
         expect(() => DataBatchSyncService.buildMetadata(
             [file],
             [image([
-                polygon(validFirstComponent),
+                groupPolygon(0, [{x: 1, y: 1}, {x: 5, y: 1}, {x: 3, y: 4}]),
                 {
                     labelId: 'goose',
                     vertices: [{x: 8, y: 2}, {x: 12, y: 2}, {x: 10, y: 6}],
@@ -140,16 +147,50 @@ describe('DataBatchSyncService', () => {
         )).toThrow('Incomplete visual-search mask group components');
         expect(() => DataBatchSyncService.buildMetadata(
             [file],
-            [image([{
-                labelId: 'goose',
-                vertices: [{x: 1, y: 1}, {x: 5, y: 1}, {x: 8, y: 1}],
-                extra: {visualSearch: {
-                    ...validFirstComponent,
-                    componentCount: 1,
-                }},
-            }])],
+            [image([groupPolygon(
+                0,
+                [{x: 1, y: 1}, {x: 5, y: 1}, {x: 8, y: 1}],
+                1,
+            )])],
             labels,
         )).toThrow('Invalid visual-search mask component geometry');
+    });
+
+    it('rejects mixed labels, oversized counts, and edited stale geometry SHA groups', () => {
+        const file = new File(['image'], 'goose.png', {type: 'image/png', lastModified: 1});
+        const labels: LabelName[] = [
+            {id: 'goose', name: 'goose'},
+            {id: 'bird', name: 'bird'},
+        ];
+        const build = (labelPolygons: unknown[]) => DataBatchSyncService.buildMetadata(
+            [file],
+            [{
+                id: 'image-mask',
+                fileData: file,
+                labelRects: [],
+                labelPolygons,
+            } as ImageData],
+            labels,
+        );
+        const first = groupPolygon(0, [{x: 1, y: 1}, {x: 5, y: 1}, {x: 3, y: 4}]);
+        const mixedLabel = groupPolygon(1, [{x: 8, y: 2}, {x: 12, y: 2}, {x: 10, y: 6}]);
+        mixedLabel.labelId = 'bird';
+        expect(() => build([first, mixedLabel])).toThrow('provenance or label');
+
+        const oversized = groupPolygon(
+            0,
+            [{x: 1, y: 1}, {x: 5, y: 1}, {x: 3, y: 4}],
+            VISUAL_SEARCH_MASK_LIMITS.maxPolygons + 1,
+        );
+        expect(() => build([oversized])).toThrow('Invalid visual-search mask provenance');
+
+        const stale = groupPolygon(
+            0,
+            [{x: 1, y: 1}, {x: 5, y: 1}, {x: 3, y: 4}],
+            1,
+        );
+        stale.vertices[0].x = 2;
+        expect(() => build([stale])).toThrow('no longer match their geometry SHA');
     });
 
     it('persists the current project name instead of the temporary queue label', async () => {

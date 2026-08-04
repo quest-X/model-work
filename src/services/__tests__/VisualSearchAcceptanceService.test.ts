@@ -410,6 +410,7 @@ describe('VisualSearchAcceptanceService', () => {
                 rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
                 componentIndex: 0,
                 componentCount: 2,
+                verticesSignature: expect.stringMatching(/^[0-9a-f]{64}$/),
             })},
         }));
         expect(state.labels.activeLabelId).toBe(polygons[0].id);

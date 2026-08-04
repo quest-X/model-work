@@ -6,16 +6,26 @@ import {QueueDataSyncStatus, QueueItem, QueueItemType} from '../store/queue/type
 import {TaskType} from '../store/tasks/types';
 import {getEngineBaseUrl} from '../utils/DefaultBackendUrl';
 import {TaskTracker} from './TaskTracker';
+import {VISUAL_SEARCH_MASK_RASTERIZER_REVISION} from '../store/visualSearch/types';
+
+type BatchMaskGroup = {
+    schema_version: 1;
+    geometry_sha256: string;
+    rasterizer_revision: string;
+    component_index: number;
+    component_count: number;
+};
 
 type BatchRegion = {
     label_id: string;
     bbox: [number, number, number, number];
     shape?: 'rect' | 'polygon';
     vertices?: Array<{x: number; y: number}>;
+    mask_group?: BatchMaskGroup;
 };
 
 type BatchMetadata = {
-    version: 1;
+    version: 2;
     classes: Array<{id: string; name: string}>;
     images: Array<{index: number; regions: BatchRegion[]}>;
 };
@@ -46,6 +56,65 @@ const polygonBoundingBox = (vertices: Array<{x: number; y: number}>): [number, n
     const maxY = Math.max(...ys);
     if (maxX <= minX || maxY <= minY) return null;
     return [minX, minY, maxX - minX, maxY - minY];
+};
+
+const objectValue = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : null;
+
+const maskGroupFrom = (extra: unknown): BatchMaskGroup | undefined => {
+    const extraRecord = objectValue(extra);
+    if (!extraRecord || !Object.prototype.hasOwnProperty.call(extraRecord, 'visualSearch')) {
+        return undefined;
+    }
+    const provenance = objectValue(extraRecord.visualSearch);
+    if (!provenance) throw new Error('Invalid visual-search mask group provenance');
+    const geometrySha256 = provenance.geometrySha256;
+    const rasterizerRevision = provenance.rasterizerRevision;
+    const componentIndex = provenance.componentIndex;
+    const componentCount = provenance.componentCount;
+    if (provenance.schemaVersion !== 1 ||
+        typeof geometrySha256 !== 'string' || !/^[0-9a-f]{64}$/.test(geometrySha256) ||
+        rasterizerRevision !== VISUAL_SEARCH_MASK_RASTERIZER_REVISION ||
+        !Number.isInteger(componentIndex) || (componentIndex as number) < 0 ||
+        !Number.isInteger(componentCount) || (componentCount as number) <= 0 ||
+        (componentIndex as number) >= (componentCount as number)) {
+        throw new Error('Invalid visual-search mask group provenance');
+    }
+    return {
+        schema_version: 1,
+        geometry_sha256: geometrySha256,
+        rasterizer_revision: rasterizerRevision,
+        component_index: componentIndex as number,
+        component_count: componentCount as number,
+    };
+};
+
+const assertCompleteMaskGroups = (regions: BatchRegion[]): void => {
+    const groups = new Map<string, {componentCount: number; indices: Set<number>}>();
+    regions.forEach(region => {
+        const group = region.mask_group;
+        if (!group) return;
+        const key = `${group.geometry_sha256}:${group.rasterizer_revision}`;
+        const current = groups.get(key) ?? {
+            componentCount: group.component_count,
+            indices: new Set<number>(),
+        };
+        if (current.componentCount !== group.component_count ||
+            current.indices.has(group.component_index)) {
+            throw new Error('Inconsistent visual-search mask group components');
+        }
+        current.indices.add(group.component_index);
+        groups.set(key, current);
+    });
+    groups.forEach(group => {
+        if (group.indices.size !== group.componentCount ||
+            Array.from({length: group.componentCount}, (_unused, index) => index)
+                .some(index => !group.indices.has(index))) {
+            throw new Error('Incomplete visual-search mask group components');
+        }
+    });
 };
 
 const readError = async (response: Response): Promise<string> => {
@@ -90,21 +159,27 @@ export class DataBatchSyncService {
                     .filter(vertex => Number.isFinite(vertex.x) && Number.isFinite(vertex.y))
                     .map(vertex => ({x: vertex.x, y: vertex.y}));
                 const bbox = polygonBoundingBox(vertices);
+                const maskGroup = maskGroupFrom(labelPolygon.extra);
+                if (maskGroup && (!bbox || vertices.length < 3)) {
+                    throw new Error('Invalid visual-search mask component geometry');
+                }
                 if (bbox && vertices.length >= 3) {
                     regions.push({
                         label_id: labelPolygon.labelId,
                         bbox,
                         shape: 'polygon',
                         vertices,
+                        ...(maskGroup ? {mask_group: maskGroup} : {}),
                     });
                     usedLabelIds.add(labelPolygon.labelId);
                 }
             });
+            assertCompleteMaskGroups(regions);
             return {index, regions};
         });
 
         return {
-            version: 1,
+            version: 2,
             classes: labels
                 .filter(label => usedLabelIds.has(label.id))
                 .map(label => ({id: label.id, name: label.name})),

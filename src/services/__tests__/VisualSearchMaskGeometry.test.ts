@@ -1,8 +1,11 @@
 import {
+    canonicalVisualSearchMaskGeometryJSON,
     rasterizeVisualSearchPolygons,
+    readVisualSearchStreamWithLimit,
     verifyVisualSearchMaskGeometry,
 } from '../VisualSearchMaskGeometry';
 import {
+    VISUAL_SEARCH_MASK_LIMITS,
     VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
     VisualSearchMaskRLE,
     VisualSearchPolygon,
@@ -142,7 +145,7 @@ describe('VisualSearchMaskGeometry', () => {
             height: 7,
             geometrySha256: 'b'.repeat(64),
             rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
-        }, inflate)).rejects.toThrow('not bit-exact');
+        }, inflate, async () => 'b'.repeat(64))).rejects.toThrow('not bit-exact');
     });
 
     it('rejects missing source polygons rather than deriving contours', async () => {
@@ -191,5 +194,125 @@ describe('VisualSearchMaskGeometry', () => {
             geometrySha256: 'f'.repeat(64),
             rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
         }, jest.fn())).rejects.toThrow('outside the full-image pixel bounds');
+    });
+
+    it('rebuilds backend schema-v2 canonical JSON before trusting geometry SHA', async () => {
+        const backendPolygon = [[16, 16], [48, 16], [48, 48], [16, 48]] as const;
+        const backendMask: VisualSearchMaskRLE = {
+            encoding: 'binary_rle_varint_zlib_base64_v1',
+            order: 'row-major',
+            size: [64, 64],
+            countsBase64: 'eNqbwKEoTyE8zw4AR2wJkA==',
+        };
+        expect(canonicalVisualSearchMaskGeometryJSON({
+            mask: backendMask,
+            polygons: [backendPolygon],
+            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+        })).toBe('{"acceptance":{"eligible":true,"reason":null},"mask":' +
+            '{"counts_base64":"eNqbwKEoTyE8zw4AR2wJkA==","encoding":' +
+            '"binary_rle_varint_zlib_base64_v1","order":"row-major","size":[64,64]},' +
+            '"polygons":[[[16,16],[48,16],[48,48],[16,48]]],' +
+            '"rasterizer_revision":"integer_bresenham_half_open_v1","schema_version":2}');
+
+        const inflate = jest.fn(async (compressed: Uint8Array) =>
+            new Uint8Array(inflateSync(compressed)));
+        await expect(verifyVisualSearchMaskGeometry({
+            mask: backendMask,
+            polygons: [backendPolygon],
+            bbox: [16, 16, 49, 49],
+            width: 64,
+            height: 64,
+            geometrySha256: '0'.repeat(64),
+            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+        }, inflate)).rejects.toThrow('identity does not match its content');
+        expect(inflate).not.toHaveBeenCalled();
+    });
+
+    it('cancels streamed decompression as soon as the output cap is crossed', async () => {
+        const cancel = jest.fn();
+        const releaseLock = jest.fn();
+        const read = jest.fn()
+            .mockResolvedValueOnce({done: false, value: new Uint8Array([1, 2])})
+            .mockResolvedValueOnce({done: false, value: new Uint8Array([3, 4])});
+
+        await expect(readVisualSearchStreamWithLimit({
+            getReader: () => ({read, cancel, releaseLock}),
+        }, 3)).rejects.toThrow('expands beyond');
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(read).toHaveBeenCalledTimes(2);
+        expect(releaseLock).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects dimensions, polygon, vertex, and compressed-payload budget overflows', async () => {
+        const base = {
+            mask: mask(7, 8),
+            polygons: [polygon],
+            bbox: [1, 1, 6, 5] as const,
+            width: 8,
+            height: 7,
+            geometrySha256: 'a'.repeat(64),
+            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+        };
+        await expect(verifyVisualSearchMaskGeometry({
+            ...base,
+            mask: mask(1, VISUAL_SEARCH_MASK_LIMITS.maxDimension + 1),
+            width: VISUAL_SEARCH_MASK_LIMITS.maxDimension + 1,
+            height: 1,
+        }, jest.fn())).rejects.toThrow('dimensions exceed');
+        await expect(verifyVisualSearchMaskGeometry({
+            ...base,
+            polygons: Array.from(
+                {length: VISUAL_SEARCH_MASK_LIMITS.maxPolygons + 1},
+                () => polygon,
+            ),
+        }, jest.fn())).rejects.toThrow('polygon count');
+        await expect(verifyVisualSearchMaskGeometry({
+            ...base,
+            polygons: [Array.from(
+                {length: VISUAL_SEARCH_MASK_LIMITS.maxVerticesPerPolygon + 1},
+                () => [1, 1] as const,
+            )],
+        }, jest.fn())).rejects.toThrow('polygon exceeds');
+        await expect(verifyVisualSearchMaskGeometry({
+            ...base,
+            polygons: Array.from(
+                {length: VISUAL_SEARCH_MASK_LIMITS.maxPolygons},
+                () => Array.from({
+                    length: Math.floor(
+                        VISUAL_SEARCH_MASK_LIMITS.maxTotalVertices /
+                        VISUAL_SEARCH_MASK_LIMITS.maxPolygons,
+                    ) + 1,
+                }, () => [1, 1] as const),
+            ),
+        }, jest.fn())).rejects.toThrow('total vertex count');
+        await expect(verifyVisualSearchMaskGeometry({
+            ...base,
+            mask: {
+                ...base.mask,
+                countsBase64: 'A'.repeat(
+                    VISUAL_SEARCH_MASK_LIMITS.maxCountsBase64Length + 4,
+                ),
+            },
+        }, jest.fn(), async () => 'a'.repeat(64))).rejects.toThrow('compressed payload');
+    });
+
+    it('rejects an injected decompression bomb before parsing its runs', async () => {
+        const backendPolygon = [[16, 16], [48, 16], [48, 48], [16, 48]] as const;
+        const inflate = jest.fn((_compressed: Uint8Array, maximumBytes: number) =>
+            Promise.resolve(new Uint8Array(maximumBytes + 1)));
+        await expect(verifyVisualSearchMaskGeometry({
+            mask: {
+                encoding: 'binary_rle_varint_zlib_base64_v1',
+                order: 'row-major',
+                size: [64, 64],
+                countsBase64: 'eNqbwKEoTyE8zw4AR2wJkA==',
+            },
+            polygons: [backendPolygon],
+            bbox: [16, 16, 49, 49],
+            width: 64,
+            height: 64,
+            geometrySha256: '1ca3c978bc3c9f281e2385f87e17900d25f7b1fd74b4f1041f7d1a4c6a6ed62f',
+            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+        }, inflate)).rejects.toThrow('expands beyond');
     });
 });

@@ -4,6 +4,7 @@ import {QueueItem, QueueItemStatus, QueueItemType} from '../../store/queue/types
 import {updateProjectData} from '../../store/general/actionCreators';
 import {ProjectType} from '../../data/enums/ProjectType';
 import {store} from '../../index';
+import {VISUAL_SEARCH_MASK_RASTERIZER_REVISION} from '../../store/visualSearch/types';
 
 const jsonResponse = (body: unknown): Response => ({
     ok: true,
@@ -30,6 +31,7 @@ describe('DataBatchSyncService', () => {
 
         const metadata = DataBatchSyncService.buildMetadata([file], [image], labels);
 
+        expect(metadata.version).toBe(2);
         expect(metadata.classes).toEqual([{id: 'hot', name: 'hot'}]);
         expect(metadata.images).toEqual([{
             index: 0,
@@ -43,6 +45,111 @@ describe('DataBatchSyncService', () => {
                 },
             ],
         }]);
+    });
+
+    it('round-trips multipart visual-search mask grouping in metadata v2', () => {
+        const file = new File(['image'], 'goose.png', {type: 'image/png', lastModified: 1});
+        const labels: LabelName[] = [{id: 'goose', name: 'goose'}];
+        const geometrySha256 = 'c'.repeat(64);
+        const visualSearch = (componentIndex: number) => ({
+            schemaVersion: 1,
+            geometrySha256,
+            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+            componentIndex,
+            componentCount: 2,
+        });
+        const image = {
+            id: 'image-mask',
+            fileData: file,
+            labelRects: [],
+            labelPolygons: [
+                {
+                    labelId: 'goose',
+                    vertices: [{x: 1, y: 1}, {x: 5, y: 1}, {x: 3, y: 4}],
+                    extra: {visualSearch: visualSearch(0)},
+                },
+                {
+                    labelId: 'goose',
+                    vertices: [{x: 8, y: 2}, {x: 12, y: 2}, {x: 10, y: 6}],
+                    extra: {visualSearch: visualSearch(1)},
+                },
+            ],
+        } as ImageData;
+
+        const metadata = JSON.parse(JSON.stringify(
+            DataBatchSyncService.buildMetadata([file], [image], labels),
+        ));
+
+        expect(metadata.version).toBe(2);
+        expect(metadata.images[0].regions.map((region: {mask_group: unknown}) =>
+            region.mask_group)).toEqual([
+            {
+                schema_version: 1,
+                geometry_sha256: geometrySha256,
+                rasterizer_revision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+                component_index: 0,
+                component_count: 2,
+            },
+            {
+                schema_version: 1,
+                geometry_sha256: geometrySha256,
+                rasterizer_revision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+                component_index: 1,
+                component_count: 2,
+            },
+        ]);
+    });
+
+    it('fails closed instead of flattening malformed or incomplete mask groups', () => {
+        const file = new File(['image'], 'goose.png', {type: 'image/png', lastModified: 1});
+        const labels: LabelName[] = [{id: 'goose', name: 'goose'}];
+        const polygon = (visualSearch: unknown) => ({
+            labelId: 'goose',
+            vertices: [{x: 1, y: 1}, {x: 5, y: 1}, {x: 3, y: 4}],
+            extra: {visualSearch},
+        });
+        const image = (labelPolygons: unknown[]): ImageData => ({
+            id: 'image-mask',
+            fileData: file,
+            labelRects: [],
+            labelPolygons,
+        } as ImageData);
+        const validFirstComponent = {
+            schemaVersion: 1,
+            geometrySha256: 'd'.repeat(64),
+            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+            componentIndex: 0,
+            componentCount: 2,
+        };
+
+        expect(() => DataBatchSyncService.buildMetadata(
+            [file],
+            [image([polygon({...validFirstComponent, componentCount: undefined})])],
+            labels,
+        )).toThrow('Invalid visual-search mask group provenance');
+        expect(() => DataBatchSyncService.buildMetadata(
+            [file],
+            [image([
+                polygon(validFirstComponent),
+                {
+                    labelId: 'goose',
+                    vertices: [{x: 8, y: 2}, {x: 12, y: 2}, {x: 10, y: 6}],
+                },
+            ])],
+            labels,
+        )).toThrow('Incomplete visual-search mask group components');
+        expect(() => DataBatchSyncService.buildMetadata(
+            [file],
+            [image([{
+                labelId: 'goose',
+                vertices: [{x: 1, y: 1}, {x: 5, y: 1}, {x: 8, y: 1}],
+                extra: {visualSearch: {
+                    ...validFirstComponent,
+                    componentCount: 1,
+                }},
+            }])],
+            labels,
+        )).toThrow('Invalid visual-search mask component geometry');
     });
 
     it('persists the current project name instead of the temporary queue label', async () => {
@@ -132,7 +239,7 @@ describe('DataBatchSyncService', () => {
         expect(form.getAll('files')).toHaveLength(0);
         expect(form.get('video_filename')).toBe('炉口.mp4');
         expect(JSON.parse(String(form.get('metadata')))).toEqual({
-            version: 1,
+            version: 2,
             classes: [{id: 'hot', name: 'hot'}],
             images: [{
                 index: 0,

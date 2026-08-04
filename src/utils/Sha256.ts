@@ -88,11 +88,11 @@ export const sha256HexFallback = (input: ArrayBuffer | Uint8Array): string => {
     return bytesToHex(output);
 };
 
-export const sha256File = async (
-    file: File,
+export const sha256Bytes = async (
+    input: ArrayBuffer | Uint8Array,
     subtle: SubtleCrypto | null = globalThis.crypto?.subtle ?? null,
 ): Promise<string> => {
-    const bytes = await file.arrayBuffer();
+    const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
     if (subtle) {
         try {
             return bytesToHex(new Uint8Array(
@@ -103,4 +103,12 @@ export const sha256File = async (
         }
     }
     return sha256HexFallback(bytes);
+};
+
+export const sha256File = async (
+    file: File,
+    subtle: SubtleCrypto | null = globalThis.crypto?.subtle ?? null,
+): Promise<string> => {
+    const bytes = await file.arrayBuffer();
+    return sha256Bytes(bytes, subtle);
 };

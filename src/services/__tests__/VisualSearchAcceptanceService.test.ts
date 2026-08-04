@@ -151,6 +151,7 @@ const readyMaskStore = () => {
             polygons: MASK_POLYGONS,
             bbox: [10, 20, 55, 45],
             maskFileName: 'snapshot-mask.png',
+            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
         },
         options: {...metadata.options, idempotencyKey: 'snapshot-mask'},
     };
@@ -408,6 +409,7 @@ describe('VisualSearchAcceptanceService', () => {
                 geometrySha256: 'c'.repeat(64),
                 rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
                 componentIndex: 0,
+                componentCount: 2,
             })},
         }));
         expect(state.labels.activeLabelId).toBe(polygons[0].id);

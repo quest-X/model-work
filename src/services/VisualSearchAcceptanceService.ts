@@ -328,6 +328,7 @@ export class VisualSearchAcceptanceService {
                     backendJobId,
                     resultId: item.resultId,
                     componentIndex: index,
+                    componentCount: sourcePolygons.length,
                     assetId: item.assetId,
                     geometrySha256: item.geometrySha256,
                     rasterizerRevision: item.geometry?.rasterizerRevision,

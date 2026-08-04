@@ -33,6 +33,7 @@ const snapshot = (kind: 'image' | 'bbox' | 'mask' = 'image'): VisualSearchQueryS
                 polygons: [[[1, 2], [30, 2], [30, 40]]] as const,
                 bbox: [1, 2, 30, 40] as const,
                 maskFileName: `${snapshotId}-mask.png`,
+                rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
             } as const;
     const imageFile = new File(['pixels'], 'frame.jpg', {type: 'image/jpeg'});
     return {
@@ -142,6 +143,7 @@ describe('VisualSearchAPI', () => {
             query: expect.objectContaining({
                 kind: 'mask',
                 polygons: [[[1, 2], [30, 2], [30, 40]]],
+                rasterizer_revision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
             }),
             image: expect.objectContaining({width: 1920, height: 1080}),
         }));

@@ -12,6 +12,7 @@ import {
     VisualSearchResultGeometry,
     VisualSearchResultItem,
     VisualSearchRevision,
+    VISUAL_SEARCH_MASK_LIMITS,
 } from '../store/visualSearch/types';
 
 type JsonObject = Record<string, unknown>;
@@ -146,10 +147,14 @@ const normalizeBBox = (value: unknown): VisualSearchBBox | null => {
 
 const normalizePolygons = (value: unknown): ReadonlyArray<VisualSearchPolygon> | null => {
     if (value === undefined || value === null) return null;
-    if (!Array.isArray(value)) return null;
+    if (!Array.isArray(value) || value.length > VISUAL_SEARCH_MASK_LIMITS.maxPolygons) return null;
     const polygons: VisualSearchPolygon[] = [];
+    let totalVertices = 0;
     for (const rawPolygon of value) {
-        if (!Array.isArray(rawPolygon) || rawPolygon.length < 3) return null;
+        if (!Array.isArray(rawPolygon) || rawPolygon.length < 3 ||
+            rawPolygon.length > VISUAL_SEARCH_MASK_LIMITS.maxVerticesPerPolygon) return null;
+        totalVertices += rawPolygon.length;
+        if (totalVertices > VISUAL_SEARCH_MASK_LIMITS.maxTotalVertices) return null;
         const polygon = rawPolygon.map(rawPoint => {
             if (!Array.isArray(rawPoint) || rawPoint.length !== 2) return null;
             const x = asNumber(rawPoint[0]);
@@ -171,6 +176,13 @@ const normalizePolygons = (value: unknown): ReadonlyArray<VisualSearchPolygon> |
     return polygons.length > 0 ? polygons : null;
 };
 
+const safeMaskSize = (height: number | undefined, width: number | undefined): boolean =>
+    Number.isInteger(height) && Number.isInteger(width) &&
+    (height as number) > 0 && (width as number) > 0 &&
+    (height as number) <= VISUAL_SEARCH_MASK_LIMITS.maxDimension &&
+    (width as number) <= VISUAL_SEARCH_MASK_LIMITS.maxDimension &&
+    (height as number) * (width as number) <= VISUAL_SEARCH_MASK_LIMITS.maxPixels;
+
 const normalizeMaskRLE = (value: unknown): VisualSearchMaskRLE | null => {
     const mask = asObject(value);
     const rawSize = mask.size;
@@ -180,13 +192,14 @@ const normalizeMaskRLE = (value: unknown): VisualSearchMaskRLE | null => {
         !Array.isArray(rawSize) ||
         rawSize.length !== 2 ||
         !countsBase64 ||
+        countsBase64.length > VISUAL_SEARCH_MASK_LIMITS.maxCountsBase64Length ||
+        countsBase64.length % 4 !== 0 ||
         !/^[A-Za-z0-9+/]+={0,2}$/.test(countsBase64)) {
         return null;
     }
     const height = asNumber(rawSize[0]);
     const width = asNumber(rawSize[1]);
-    if (!Number.isInteger(height) || !Number.isInteger(width) ||
-        (height as number) <= 0 || (width as number) <= 0) return null;
+    if (!safeMaskSize(height, width)) return null;
     return {
         encoding: 'binary_rle_varint_zlib_base64_v1',
         order: 'row-major',
@@ -403,6 +416,7 @@ export const serializeVisualSearchSnapshot = (
                 bbox: snapshot.geometry.bbox,
                 polygons: snapshot.geometry.polygons,
                 mask_file_name: snapshot.geometry.maskFileName,
+                rasterizer_revision: snapshot.geometry.rasterizerRevision,
             };
     return {
         spec_version: 1,

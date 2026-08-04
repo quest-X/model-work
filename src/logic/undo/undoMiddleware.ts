@@ -254,13 +254,17 @@ store => next => (action: any) => {
         lastSnapshotTime = performance.now();
         return result;
     }
-    if (!RestoreFlag.get() && action && SNAPSHOT_ACTIONS.has(action.type) && lastSnapshot) {
+    const restoring = RestoreFlag.get();
+    if (!restoring && action && SNAPSHOT_ACTIONS.has(action.type) && lastSnapshot) {
         UndoStack.push(lastSnapshot);
     }
     const result = next(action);
     if (action && LABEL_STATE_ACTIONS.has(action.type)) {
         const now = performance.now();
-        if (now - lastSnapshotTime >= SNAPSHOT_MIN_INTERVAL_MS) {
+        // Restore actions must replace the cache immediately. Otherwise an undo
+        // followed within 300 ms by a normal edit can push the pre-undo state and
+        // resurrect the accepted visual-search result on the next undo.
+        if (restoring || now - lastSnapshotTime >= SNAPSHOT_MIN_INTERVAL_MS) {
             lastSnapshot = takeSnapshot(store.getState());
             lastSnapshotTime = now;
         }

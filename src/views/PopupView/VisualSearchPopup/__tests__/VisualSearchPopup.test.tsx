@@ -162,6 +162,7 @@ const metadata = (
                 polygons: [[[10, 20], [30, 20], [30, 40], [10, 40]]],
                 bbox: [10, 20, 30, 40],
                 maskFileName: 'snapshot-mask.png',
+                rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
             }
             : {kind: 'image'},
     image: {

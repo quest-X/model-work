@@ -13,6 +13,7 @@ import {
     VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
 } from '../store/visualSearch/types';
 import {
+    assertVisualSearchMaskDimensions,
     canonicalizeVisualSearchPolygons,
     rasterizeVisualSearchPolygons,
     visualSearchMaskPixelsBBox,
@@ -327,6 +328,7 @@ export class QuerySnapshotService {
         const emit = (phase: QuerySnapshotPhase) => dependencies.onPhase?.(phase);
         const width = requirePositiveInteger(input.width, 'width');
         const height = requirePositiveInteger(input.height, 'height');
+        assertVisualSearchMaskDimensions(width, height);
         const snapshotId = dependencies.createId?.() ?? uuidv4();
         const capturedAt = dependencies.now?.() ?? Date.now();
 

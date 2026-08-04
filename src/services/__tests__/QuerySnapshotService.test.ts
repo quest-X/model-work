@@ -3,7 +3,10 @@ import {
     QuerySnapshotPhase,
     QuerySnapshotService,
 } from '../QuerySnapshotService';
-import {VISUAL_SEARCH_MASK_RASTERIZER_REVISION} from '../../store/visualSearch/types';
+import {
+    VISUAL_SEARCH_MASK_LIMITS,
+    VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+} from '../../store/visualSearch/types';
 
 const baseInput = (overrides: Partial<QuerySnapshotInput> = {}): QuerySnapshotInput => ({
     imageBlob: new File(['pixels'], 'source.png', {type: 'image/png', lastModified: 7}),
@@ -246,5 +249,19 @@ describe('QuerySnapshotService', () => {
                 datasetId: 'dataset-without-revision',
             },
         }))).rejects.toThrow('provided together');
+    });
+
+    it('rejects an image query whose total pixel count exceeds the shared hard budget', async () => {
+        const width = 10_001;
+        const height = 10_000;
+        expect(width).toBeLessThan(VISUAL_SEARCH_MASK_LIMITS.maxDimension);
+        expect(height).toBeLessThan(VISUAL_SEARCH_MASK_LIMITS.maxDimension);
+        expect(width * height).toBeGreaterThan(VISUAL_SEARCH_MASK_LIMITS.maxPixels);
+
+        await expect(QuerySnapshotService.capture(baseInput({
+            width,
+            height,
+            geometry: {kind: 'image'},
+        }))).rejects.toThrow('pixel count exceeds the frontend safety limit');
     });
 });

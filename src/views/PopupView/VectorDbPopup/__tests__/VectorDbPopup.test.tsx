@@ -68,6 +68,7 @@ describe('VectorDbPopup', () => {
     let statusBody: typeof readyStatus;
     let collectionList: Array<typeof collection>;
     let jobList: Array<Record<string, unknown>>;
+    let datasetList: Array<{id: string; name: string; image_count: number}>;
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -82,6 +83,7 @@ describe('VectorDbPopup', () => {
         statusBody = readyStatus;
         collectionList = [collection];
         jobList = [];
+        datasetList = [{id: 'dataset-1', name: '一号产线', image_count: 24}];
         global.fetch = jest.fn((input: RequestInfo, init?: RequestInit) => {
             const url = String(input);
             if (url.endsWith('/status')) return Promise.resolve(jsonResponse(statusBody));
@@ -103,7 +105,7 @@ describe('VectorDbPopup', () => {
                 return Promise.resolve(jsonResponse({status: 'success', collections: collectionList}));
             }
             if (url.endsWith('/datasets')) {
-                return Promise.resolve(jsonResponse({datasets: [{id: 'dataset-1', name: '一号产线', image_count: 24}]}));
+                return Promise.resolve(jsonResponse({datasets: datasetList}));
             }
             if (url.includes('/jobs/job-history-1/images?')) {
                 return Promise.resolve(jsonResponse({
@@ -313,6 +315,44 @@ describe('VectorDbPopup', () => {
             expect(body.get('granularity')).toBe('mask');
             expect(body.get('dataset_id')).toBe('dataset-1');
         });
+    });
+
+    it('normalizes an upload selection when switching to a mask collection', async () => {
+        datasetList = [];
+        collectionList = [
+            collection,
+            {
+                ...collection,
+                name: 'mask_index',
+                display_name: '大鹅分割库',
+                target_id: 'target_mask',
+                target_name: '大鹅分割库',
+                granularity: 'mask',
+                mode: 'masks',
+                profile_id: 'fp_test_mask',
+                profile: {...collection.profile, profile_id: 'fp_test_mask', granularity: 'mask'},
+                count: 0,
+                data_version: 0,
+            },
+        ];
+        render(<VectorDbPopup language={Language.CHINESE}/>);
+        await screen.findAllByText('产线帧库');
+
+        fireEvent.click(screen.getByRole('tab', {name: '本地上传'}));
+        expect(screen.getByText('拖入图片或 ZIP')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', {name: /分割区域/}));
+
+        await waitFor(() => {
+            expect(screen.getByRole('tab', {name: '资源中心'})).toHaveAttribute(
+                'aria-selected',
+                'true',
+            );
+            expect(screen.getByRole('tab', {name: '本地上传'})).toBeDisabled();
+        });
+        expect(screen.queryByText('拖入图片或 ZIP')).not.toBeInTheDocument();
+        expect(screen.getByText('暂无数据批次，请先从文件队列同步包含分割标注的数据。'))
+            .toBeInTheDocument();
+        expect(screen.queryByText(/改用本地上传/)).not.toBeInTheDocument();
     });
 
     it('blocks an incompatible profile and creates a current-model physical version', async () => {

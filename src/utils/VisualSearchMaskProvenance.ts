@@ -207,3 +207,113 @@ export const allVisualSearchMaskGroups = (
     groups.forEach(group => validated.push(validateVisualSearchMaskGroup(group)));
     return validated;
 };
+
+const looseMaskGroupKey = (label: LabelPolygon): string | null => {
+    try {
+        const raw = rawVisualSearch(label);
+        if (!raw) return null;
+        return nonEmptyString(raw.backendJobId) && nonEmptyString(raw.resultId)
+            ? JSON.stringify([raw.backendJobId, raw.resultId])
+            : `invalid:${label.id}`;
+    } catch {
+        return `invalid:${label.id}`;
+    }
+};
+
+const maskGroupsByKey = (
+    labels: ReadonlyArray<LabelPolygon>,
+): Map<string, LabelPolygon[]> => {
+    const groups = new Map<string, LabelPolygon[]>();
+    labels.forEach(label => {
+        const key = looseMaskGroupKey(label);
+        if (!key) return;
+        const group = groups.get(key) ?? [];
+        group.push(label);
+        groups.set(key, group);
+    });
+    return groups;
+};
+
+const validCurrentMaskGroup = (labels: ReadonlyArray<LabelPolygon>): boolean => {
+    try {
+        const components = labels.map(label => {
+            const component = parseVisualSearchMaskComponent(label);
+            if (!component) throw new Error('Missing visual-search mask provenance');
+            return component;
+        });
+        validateVisualSearchMaskGroup(components);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+const sameVertices = (left: LabelPolygon, right: LabelPolygon): boolean =>
+    left.vertices.length === right.vertices.length && left.vertices.every((point, index) =>
+        point.x === right.vertices[index].x && point.y === right.vertices[index].y);
+
+const withoutVisualSearch = (label: LabelPolygon): LabelPolygon => {
+    if (!label.extra || !Object.prototype.hasOwnProperty.call(label.extra, 'visualSearch')) {
+        return label;
+    }
+    const extra = {...label.extra};
+    delete extra.visualSearch;
+    return {
+        ...label,
+        extra: Object.keys(extra).length > 0 ? extra : undefined,
+    };
+};
+
+/**
+ * UPDATE_IMAGE_DATA payloads may arrive after render engines mutate Redux-owned
+ * objects in place. Validate the persisted vertex signature as well as the old
+ * snapshot, then atomically turn every affected component into a manual polygon.
+ */
+export const downgradeEditedVisualSearchMaskGroups = (
+    previousLabels: ReadonlyArray<LabelPolygon>,
+    nextLabels: ReadonlyArray<LabelPolygon>,
+): LabelPolygon[] => {
+    const previousGroups = maskGroupsByKey(previousLabels);
+    const nextGroups = maskGroupsByKey(nextLabels);
+    const downgradedKeys = new Set<string>();
+    nextGroups.forEach((group, key) => {
+        if (!validCurrentMaskGroup(group)) downgradedKeys.add(key);
+    });
+
+    const nextById = new Map(nextLabels.map(label => [label.id, label]));
+    previousGroups.forEach((previousGroup, previousKey) => {
+        const nextGroup = nextGroups.get(previousKey);
+        const previousIds = new Set(previousGroup.map(label => label.id));
+        if (nextGroup && (nextGroup.length !== previousGroup.length ||
+            nextGroup.some(label => !previousIds.has(label.id)))) {
+            downgradedKeys.add(previousKey);
+        }
+        previousGroup.forEach(previousLabel => {
+            const nextLabel = nextById.get(previousLabel.id);
+            if (!nextLabel) {
+                if (nextGroup) downgradedKeys.add(previousKey);
+                return;
+            }
+            const nextKey = looseMaskGroupKey(nextLabel);
+            if (nextKey !== previousKey ||
+                nextLabel.labelId !== previousLabel.labelId ||
+                !sameVertices(previousLabel, nextLabel)) {
+                downgradedKeys.add(previousKey);
+                if (nextKey) downgradedKeys.add(nextKey);
+            }
+        });
+    });
+
+    const previousKeyById = new Map<string, string>();
+    previousGroups.forEach((group, key) => {
+        group.forEach(label => previousKeyById.set(label.id, key));
+    });
+    return nextLabels.map(label => {
+        const nextKey = looseMaskGroupKey(label);
+        const previousKey = previousKeyById.get(label.id);
+        return (nextKey && downgradedKeys.has(nextKey)) ||
+            (previousKey && downgradedKeys.has(previousKey))
+            ? withoutVisualSearch(label)
+            : label;
+    });
+};

@@ -164,6 +164,10 @@ type Translate = (zhText: string, enText: string) => string;
 const TERMINAL_JOB_STATES = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
 const HISTORY_IMAGE_PAGE_SIZE = 12;
 const NEW_SCENE_OPTION = '__new_scene__';
+const normalizeIngestSource = (
+    granularity: Granularity,
+    source: IngestSource,
+): IngestSource => granularity === 'mask' ? 'dataset' : source;
 
 const JOB_STATE_LABELS: Record<string, [string, string]> = {
     completed: ['版本更新', 'Version updated'],
@@ -303,6 +307,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
     const [imagePreview, setImagePreview] = useState<ImagePreview | null>(null);
 
     const selected = collections.find(collection => collection.name === selectedName) || null;
+    const maskDatasetOnly = selected?.granularity === 'mask';
     const hierarchy = useMemo<SceneGroup[]>(() => {
         const sceneMap = new Map<string, {
             sceneId: string;
@@ -568,6 +573,12 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
     }, [selectedName]);
 
     useEffect(() => {
+        if (!maskDatasetOnly) return;
+        setIngestSource('dataset');
+        setPendingFiles([]);
+    }, [maskDatasetOnly]);
+
+    useEffect(() => {
         if (!imagePreview) return undefined;
         const closeOnEscape = (event: KeyboardEvent) => {
             if (event.key === 'Escape') setImagePreview(null);
@@ -709,7 +720,8 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             'application/zip': ['.zip'],
             'application/x-zip-compressed': ['.zip'],
         },
-        disabled: !embedderReady || !storeReady || !selected?.compatible || activeJob || submittingIngest,
+        disabled: maskDatasetOnly || !embedderReady || !storeReady ||
+            !selected?.compatible || activeJob || submittingIngest,
         multiple: true,
         onDrop: onIngestDrop,
     });
@@ -1114,11 +1126,19 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                 </select>
             </label>
             {datasetsError && <div className='InlineError' role='alert'>
-                {t('资源中心不可用；你仍可切换到本地上传。', 'Resource Center is unavailable; local upload is still available.')}
+                {maskDatasetOnly
+                    ? t('资源中心不可用；mask 入库需要资源中心数据批次。',
+                        'Resource Center is unavailable; mask ingest requires a data batch.')
+                    : t('资源中心不可用；你仍可切换到本地上传。',
+                        'Resource Center is unavailable; local upload is still available.')}
                 <button type='button' onClick={refreshDatasets}>{t('重试', 'Retry')}</button>
             </div>}
             {!datasetsLoading && !datasetsError && datasets.length === 0 && (
-                <div className='MutedText'>{t('暂无数据批次，可从文件队列同步或改用本地上传。', 'No data batches; sync one from File Queue or use local upload.')}</div>
+                <div className='MutedText'>{maskDatasetOnly
+                    ? t('暂无数据批次，请先从文件队列同步包含分割标注的数据。',
+                        'No data batches; first sync data with segmentation annotations from File Queue.')
+                    : t('暂无数据批次，可从文件队列同步或改用本地上传。',
+                        'No data batches; sync one from File Queue or use local upload.')}</div>
             )}
         </div>
     );
@@ -1136,7 +1156,8 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
 
     const renderIngest = () => {
         if (!selected) return null;
-        const noSource = ingestSource === 'dataset' ? !datasetId : pendingFiles.length === 0;
+        const normalizedSource = normalizeIngestSource(selected.granularity, ingestSource);
+        const noSource = normalizedSource === 'dataset' ? !datasetId : pendingFiles.length === 0;
         const disabled = !embedderReady || !storeReady || !selected.compatible
             || activeJob || submittingIngest || noSource
             || (selected.granularity === 'mask' && ingestSource !== 'dataset');
@@ -1152,21 +1173,21 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                     <button
                         type='button'
                         role='tab'
-                        aria-selected={ingestSource === 'dataset'}
-                        className={ingestSource === 'dataset' ? 'active' : ''}
+                        aria-selected={normalizedSource === 'dataset'}
+                        className={normalizedSource === 'dataset' ? 'active' : ''}
                         onClick={() => { setIngestSource('dataset'); setPendingFiles([]); }}
                     >{t('资源中心', 'Resource Center')}</button>
                     <button
                         type='button'
                         role='tab'
-                        aria-selected={ingestSource === 'upload'}
-                        className={ingestSource === 'upload' ? 'active' : ''}
+                        aria-selected={normalizedSource === 'upload'}
+                        className={normalizedSource === 'upload' ? 'active' : ''}
                         disabled={selected.granularity === 'mask'}
                         onClick={() => { setIngestSource('upload'); setDatasetId(''); }}
                     >{t('本地上传', 'Local upload')}</button>
                 </div>
             </div>
-            {ingestSource === 'dataset' ? renderDatasetSource() : renderUploadSource()}
+            {normalizedSource === 'dataset' ? renderDatasetSource() : renderUploadSource()}
             {ingestError && <div className='InlineError' role='alert'>{ingestError}</div>}
             <button type='button' className='PrimaryButton' disabled={disabled} onClick={startIngest}>
                 {submittingIngest ? t('正在提交…', 'Submitting…') : t('开始生成向量', 'Start vector ingest')}

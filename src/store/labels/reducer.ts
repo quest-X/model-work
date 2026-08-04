@@ -1,6 +1,7 @@
 import {LabelsActionTypes, LabelsState, ImageData} from './types';
 import {Action} from '../Actions';
 import {LabelType} from '../../data/enums/LabelType';
+import {downgradeEditedVisualSearchMaskGroups} from '../../utils/VisualSearchMaskProvenance';
 
 const initialState: LabelsState = {
     activeImageIndex: null,
@@ -13,6 +14,17 @@ const initialState: LabelsState = {
     firstLabelCreatedFlag: false,
     labels: []
 };
+
+const sanitizeImageUpdate = (
+    previous: ImageData | undefined,
+    next: ImageData,
+): ImageData => ({
+    ...next,
+    labelPolygons: downgradeEditedVisualSearchMaskGroups(
+        previous?.labelPolygons ?? [],
+        next.labelPolygons ?? [],
+    ),
+});
 
 // This legacy reducer owns the complete label action surface.
 // eslint-disable-next-line complexity
@@ -58,10 +70,12 @@ export function labelsReducer(
             }
         }
         case Action.UPDATE_IMAGE_DATA_BY_ID: {
+            const previous = state.imagesData.find(imageData => imageData.id === action.payload.id);
+            const nextImageData = sanitizeImageUpdate(previous, action.payload.newImageData);
             return {
                 ...state,
                 imagesData: state.imagesData.map((imageData: ImageData) =>
-                    imageData.id === action.payload.id ? action.payload.newImageData : imageData
+                    imageData.id === action.payload.id ? nextImageData : imageData
                 )
             }
         }
@@ -72,9 +86,11 @@ export function labelsReducer(
             }
         }
         case Action.UPDATE_IMAGES_DATA: {
+            const previousById = new Map(state.imagesData.map(imageData => [imageData.id, imageData]));
             return {
                 ...state,
-                imagesData: action.payload.imageData
+                imagesData: action.payload.imageData.map(imageData =>
+                    sanitizeImageUpdate(previousById.get(imageData.id), imageData))
             }
         }
         case Action.UPDATE_LABEL_NAMES: {

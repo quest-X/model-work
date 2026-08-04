@@ -3,6 +3,7 @@ import {
     QuerySnapshotPhase,
     QuerySnapshotService,
 } from '../QuerySnapshotService';
+import {VISUAL_SEARCH_MASK_RASTERIZER_REVISION} from '../../store/visualSearch/types';
 
 const baseInput = (overrides: Partial<QuerySnapshotInput> = {}): QuerySnapshotInput => ({
     imageBlob: new File(['pixels'], 'source.png', {type: 'image/png', lastModified: 7}),
@@ -132,9 +133,11 @@ describe('QuerySnapshotService', () => {
             [30, 90],
             [-10, 90],
         ]];
-        const encodeMask = jest.fn().mockResolvedValue(
-            new Blob(['png-mask'], {type: 'image/png'}),
-        );
+        let encodedPixels: Uint8Array | null = null;
+        const encodeMask = jest.fn(async (pixels: Uint8Array) => {
+            encodedPixels = pixels;
+            return new Blob(['png-mask'], {type: 'image/png'});
+        });
         const snapshot = await QuerySnapshotService.capture(baseInput({
             geometry: {kind: 'mask', polygons},
         }), {
@@ -143,21 +146,89 @@ describe('QuerySnapshotService', () => {
         });
         polygons[0][0][0] = 77;
 
-        expect(encodeMask).toHaveBeenCalledWith(
-            [[[0, 5], [30, 5], [30, 80], [0, 80]]],
-            100,
-            80,
-        );
+        expect(encodeMask).toHaveBeenCalledWith(expect.any(Uint8Array), 100, 80);
+        expect(encodedPixels?.reduce((sum, value) => sum + value, 0)).toBe(2325);
         expect(snapshot.geometry).toEqual({
             kind: 'mask',
-            polygons: [[[0, 5], [30, 5], [30, 80], [0, 80]]],
-            bbox: [0, 5, 30, 80],
+            polygons: [[[0, 5], [30, 5], [30, 79], [0, 79]]],
+            bbox: [0, 5, 31, 80],
             maskFileName: 'mask-snapshot-mask.png',
+            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
         });
         expect(snapshot.maskFile).toEqual(expect.objectContaining({
             name: 'mask-snapshot-mask.png',
             type: 'image/png',
         }));
+    });
+
+    it('truncates then clamps float vertices to canonical full-image pixels', async () => {
+        let encodedPixels: Uint8Array | null = null;
+        const snapshot = await QuerySnapshotService.capture(baseInput({
+            width: 6,
+            height: 5,
+            geometry: {
+                kind: 'mask',
+                polygons: [[[-2.8, -1.2], [6.9, 1.9], [4.8, 5.7]]],
+            },
+        }), {
+            createId: () => 'canonical-boundary-mask',
+            encodeMask: async pixels => {
+                encodedPixels = pixels;
+                return new Blob(['png-mask'], {type: 'image/png'});
+            },
+        });
+
+        expect(snapshot.geometry).toEqual({
+            kind: 'mask',
+            polygons: [[[0, 0], [5, 1], [4, 4]]],
+            bbox: [0, 0, 6, 5],
+            maskFileName: 'canonical-boundary-mask-mask.png',
+            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+        });
+        expect(encodedPixels?.[0]).toBe(1);
+        expect(encodedPixels?.[4 * 6 + 4]).toBe(1);
+    });
+
+    it('rasterizes multiple polygons as a foreground union', async () => {
+        let encodedPixels: Uint8Array | null = null;
+        const snapshot = await QuerySnapshotService.capture(baseInput({
+            width: 6,
+            height: 6,
+            geometry: {
+                kind: 'mask',
+                polygons: [
+                    [[1, 1], [3, 1], [3, 3], [1, 3]],
+                    [[2, 2], [4, 2], [4, 4], [2, 4]],
+                ],
+            },
+        }), {
+            createId: () => 'union-mask',
+            encodeMask: async pixels => {
+                encodedPixels = pixels;
+                return new Blob(['png-mask'], {type: 'image/png'});
+            },
+        });
+
+        expect(snapshot.geometry).toEqual(expect.objectContaining({
+            bbox: [1, 1, 5, 5],
+            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+        }));
+        expect(encodedPixels?.reduce((sum, value) => sum + value, 0)).toBe(14);
+        expect(encodedPixels?.[2 * 6 + 2]).toBe(1);
+    });
+
+    it('fails closed instead of accepting an unverified caller mask PNG', async () => {
+        const encodeMask = jest.fn();
+        await expect(QuerySnapshotService.capture(baseInput({
+            geometry: {
+                kind: 'mask',
+                polygons: [[[1, 1], [5, 1], [5, 5], [1, 5]]],
+                maskBlob: new Blob(['unverified'], {type: 'image/png'}),
+            },
+        }), {encodeMask})).rejects.toThrow(
+            'maskBlob cannot override canonical polygon rasterization',
+        );
+        expect(encodeMask).not.toHaveBeenCalled();
     });
 
     it('rejects invalid configuration before uploading anything', async () => {

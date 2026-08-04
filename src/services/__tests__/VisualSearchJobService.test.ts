@@ -6,6 +6,7 @@ import {
 } from '../../store/visualSearch/reducer';
 import {VisualSearchActionTypes} from '../../store/visualSearch/actionCreators';
 import {
+    VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
     VisualSearchQuerySnapshot,
     VisualSearchRemoteJob,
     VisualSearchState,
@@ -44,6 +45,24 @@ const snapshot = (): VisualSearchQuerySnapshot => {
             height: 80,
         },
         imageFile,
+    };
+};
+
+const maskSnapshot = (): VisualSearchQuerySnapshot => {
+    const query = snapshot();
+    const snapshotId = 'snapshot-mask';
+    return {
+        ...query,
+        snapshotId,
+        options: {...query.options, idempotencyKey: snapshotId},
+        geometry: {
+            kind: 'mask',
+            polygons: [[[1, 2], [30, 2], [30, 40], [1, 40]]],
+            bbox: [1, 2, 31, 41],
+            maskFileName: `${snapshotId}-mask.png`,
+            rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+        },
+        maskFile: new File(['mask'], `${snapshotId}-mask.png`, {type: 'image/png'}),
     };
 };
 
@@ -97,6 +116,30 @@ const succeeded = (): VisualSearchRemoteJob => remote('succeeded', {
         }],
     },
 });
+
+const succeededMask = (): VisualSearchRemoteJob => {
+    const completed = succeeded();
+    if (!completed.result) throw new Error('test fixture is missing result');
+    const item = completed.result.items[0];
+    return {
+        ...completed,
+        result: {
+            ...completed.result,
+            queryKind: 'mask',
+            queryGeometry: {
+                kind: 'mask',
+                bbox: [1, 2, 31, 41],
+                rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+            },
+            items: [{
+                ...item,
+                bbox: [5, 6, 21, 31],
+                granularity: 'mask',
+                geometry: {kind: 'mask', bbox: [5, 6, 21, 31]},
+            }],
+        },
+    };
+};
 
 const taskRuntime = () => {
     const handle = {
@@ -355,6 +398,69 @@ describe('VisualSearchJobService', () => {
         await expect(service.start(query).done).rejects.toThrow('collection');
         expect(state.getState().jobsById['snapshot-1'].error?.message).toContain(
             'query_geometry_bbox',
+        );
+    });
+
+    it('accepts an exact canonical mask query contract', async () => {
+        const state = reducerDispatch();
+        const service = new VisualSearchJobService({
+            api: {
+                createJob: jest.fn().mockResolvedValue(succeededMask()),
+                getJob: jest.fn(),
+                cancelJob: jest.fn(),
+            },
+            dispatch: state.dispatch,
+            taskRuntime: taskRuntime().runtime,
+        });
+
+        await expect(service.start(maskSnapshot()).done).resolves.toEqual(
+            expect.objectContaining({state: 'succeeded'}),
+        );
+    });
+
+    it('accepts only the exact canonical mask bbox returned by the backend', async () => {
+        const drifted = succeededMask();
+        if (!drifted.result?.queryGeometry) throw new Error('test fixture is missing geometry');
+        drifted.result.queryGeometry = {
+            ...drifted.result.queryGeometry,
+            bbox: [1, 2, 31.0000001, 41],
+        };
+        const state = reducerDispatch();
+        const service = new VisualSearchJobService({
+            api: {
+                createJob: jest.fn().mockResolvedValue(drifted),
+                getJob: jest.fn(),
+                cancelJob: jest.fn(),
+            },
+            dispatch: state.dispatch,
+            taskRuntime: taskRuntime().runtime,
+        });
+
+        await expect(service.start(maskSnapshot()).done).rejects.toThrow(
+            'query_geometry_bbox',
+        );
+    });
+
+    it('rejects a changed canonical mask rasterizer revision', async () => {
+        const drifted = succeededMask();
+        if (!drifted.result?.queryGeometry) throw new Error('test fixture is missing geometry');
+        drifted.result.queryGeometry = {
+            ...drifted.result.queryGeometry,
+            rasterizerRevision: 'another_rasterizer_revision',
+        };
+        const state = reducerDispatch();
+        const service = new VisualSearchJobService({
+            api: {
+                createJob: jest.fn().mockResolvedValue(drifted),
+                getJob: jest.fn(),
+                cancelJob: jest.fn(),
+            },
+            dispatch: state.dispatch,
+            taskRuntime: taskRuntime().runtime,
+        });
+
+        await expect(service.start(maskSnapshot()).done).rejects.toThrow(
+            'query_geometry_rasterizer_revision',
         );
     });
 

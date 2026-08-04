@@ -181,6 +181,18 @@ const sameBBox = (
         left.every((value, index) => Math.abs(value - right[index]) <= 1e-6),
     );
 
+const sameCanonicalMaskBBox = (
+    left: readonly number[] | null | undefined,
+    right: readonly number[] | null | undefined,
+): boolean =>
+    Boolean(
+        left &&
+        right &&
+        left.length === 4 &&
+        right.length === 4 &&
+        left.every((value, index) => Number.isInteger(value) && value === right[index]),
+    );
+
 const queryContractMismatches = (
     snapshot: VisualSearchSnapshotMetadata,
     result: VisualSearchResult,
@@ -190,7 +202,15 @@ const queryContractMismatches = (
     if (result.queryGeometry?.kind !== snapshot.geometry.kind) {
         mismatches.push('query_geometry_kind');
     }
-    if (snapshot.geometry.kind !== 'image' &&
+    if (snapshot.geometry.kind === 'mask') {
+        if (!sameCanonicalMaskBBox(snapshot.geometry.bbox, result.queryGeometry?.bbox)) {
+            mismatches.push('query_geometry_bbox');
+        }
+        if (result.queryGeometry?.rasterizerRevision !==
+            snapshot.geometry.rasterizerRevision) {
+            mismatches.push('query_geometry_rasterizer_revision');
+        }
+    } else if (snapshot.geometry.kind === 'bbox' &&
         !sameBBox(snapshot.geometry.bbox, result.queryGeometry?.bbox)) {
         mismatches.push('query_geometry_bbox');
     }

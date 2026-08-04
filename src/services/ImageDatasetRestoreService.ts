@@ -61,6 +61,36 @@ type DatasetManifest = {
     format: string;
 };
 
+type SizedZipEntry = JSZip.JSZipObject & {
+    _data?: {
+        uncompressedSize?: number;
+        compressedSize?: number;
+    };
+};
+
+type WorkspaceRestoreBudget = {
+    totalRegions: number;
+    totalVertices: number;
+};
+
+/** Editing limits for restoring an image dataset into the browser workspace.
+ * They do not limit server-side vector collections or retrieval corpus size. */
+export const IMAGE_WORKSPACE_RESTORE_LIMITS = Object.freeze({
+    maxArchiveBytes: 2_147_483_648,
+    maxZipEntries: 25_000,
+    maxImages: 20_000,
+    maxImageBytes: 67_108_864,
+    maxTotalImageBytes: 4_294_967_296,
+    maxManifestBytes: 1_048_576,
+    maxWorkspaceBytes: 67_108_864,
+    maxAssetsBytes: 33_554_432,
+    maxLabels: 4_096,
+    maxRegionsPerImage: 4_096,
+    maxTotalRegions: 1_000_000,
+    maxVerticesPerImage: 262_144,
+    maxTotalVertices: 2_000_000,
+});
+
 const objectValue = (value: unknown, field: string): JsonObject => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error(`Invalid image workspace ${field}`);
@@ -91,25 +121,63 @@ const sha256Value = (value: unknown, field: string): string => {
     return digest;
 };
 
-const readJson = async (zip: JSZip, filename: string): Promise<JsonObject> => {
-    const entry = zip.file(filename);
-    if (!entry) throw new Error(`Image workspace archive is missing ${filename}`);
-    return objectValue(JSON.parse(await entry.async('text')), filename);
+const declaredEntrySize = (entry: JSZip.JSZipObject, field: string): number => {
+    const size = (entry as SizedZipEntry)._data?.uncompressedSize;
+    if (!Number.isSafeInteger(size) || (size as number) < 0) {
+        throw new Error(`Image workspace ${field} has no safe declared size`);
+    }
+    return size as number;
 };
 
-const parseManifest = (raw: JsonObject): DatasetManifest => ({
-    id: nonEmptyString(raw.id, 'manifest.id'),
-    revision: integerValue(raw.revision, 'manifest.revision'),
-    imageCount: integerValue(raw.image_count, 'manifest.image_count'),
-    format: nonEmptyString(raw.format, 'manifest.format'),
-});
+const readText = async (
+    entry: JSZip.JSZipObject,
+    field: string,
+    maxBytes: number,
+): Promise<string> => {
+    if (declaredEntrySize(entry, field) > maxBytes) {
+        throw new Error(`Image workspace ${field} exceeds the restore size limit`);
+    }
+    const value = await entry.async('text');
+    if (new Blob([value]).size > maxBytes) {
+        throw new Error(`Image workspace ${field} exceeds the restore size limit`);
+    }
+    return value;
+};
+
+const readJson = async (
+    zip: JSZip,
+    filename: string,
+    maxBytes: number,
+): Promise<JsonObject> => {
+    const entry = zip.file(filename);
+    if (!entry) throw new Error(`Image workspace archive is missing ${filename}`);
+    return objectValue(JSON.parse(await readText(entry, filename, maxBytes)), filename);
+};
+
+const parseManifest = (raw: JsonObject): DatasetManifest => {
+    const manifest = {
+        id: nonEmptyString(raw.id, 'manifest.id'),
+        revision: integerValue(raw.revision, 'manifest.revision'),
+        imageCount: integerValue(raw.image_count, 'manifest.image_count'),
+        format: nonEmptyString(raw.format, 'manifest.format'),
+    };
+    if (manifest.imageCount < 1 ||
+        manifest.imageCount > IMAGE_WORKSPACE_RESTORE_LIMITS.maxImages) {
+        throw new Error('Image workspace exceeds the editor image-count limit');
+    }
+    return manifest;
+};
 
 const parseAssets = async (zip: JSZip): Promise<WorkspaceAsset[]> => {
     const entry = zip.file('assets.jsonl');
     if (!entry) throw new Error('Image workspace archive is missing assets.jsonl');
     const assets: WorkspaceAsset[] = [];
     const seenPaths = new Set<string>();
-    (await entry.async('text')).split(/\r?\n/).filter(Boolean).forEach((line, index) => {
+    (await readText(
+        entry,
+        'assets.jsonl',
+        IMAGE_WORKSPACE_RESTORE_LIMITS.maxAssetsBytes,
+    )).split(/\r?\n/).filter(Boolean).forEach((line, index) => {
         const asset = objectValue(JSON.parse(line), `assets.jsonl:${index + 1}`);
         if (asset.role !== 'image') return;
         const relativePath = nonEmptyString(asset.relative_path, `assets[${index}].relative_path`);
@@ -119,6 +187,9 @@ const parseAssets = async (zip: JSZip): Promise<WorkspaceAsset[]> => {
         }
         seenPaths.add(relativePath);
         assets.push({assetId, relativePath});
+        if (assets.length > IMAGE_WORKSPACE_RESTORE_LIMITS.maxImages) {
+            throw new Error('Image workspace exceeds the editor image-count limit');
+        }
     });
     if (assets.length === 0) throw new Error('Image workspace archive contains no image assets');
     return assets;
@@ -136,17 +207,52 @@ const mimeTypeFor = (filename: string): string => {
     return types[extension || ''] || 'application/octet-stream';
 };
 
-const restoreFiles = async (zip: JSZip, assets: WorkspaceAsset[]): Promise<File[]> =>
-    Promise.all(assets.map(async asset => {
+const restoreFiles = async (zip: JSZip, assets: WorkspaceAsset[]): Promise<File[]> => {
+    const entries = assets.map(asset => {
         const entry = zip.file(asset.relativePath);
         if (!entry || entry.dir) throw new Error(`Image workspace is missing ${asset.relativePath}`);
-        const filename = asset.relativePath.split('/').pop() || asset.relativePath;
-        return new File([await entry.async('blob')], filename, {type: mimeTypeFor(filename)});
-    }));
+        return entry;
+    });
+    let declaredTotal = 0;
+    entries.forEach((entry, index) => {
+        const declared = declaredEntrySize(entry, assets[index].relativePath);
+        if (declared > IMAGE_WORKSPACE_RESTORE_LIMITS.maxImageBytes) {
+            throw new Error(`Image workspace image exceeds the per-image restore limit: ${entry.name}`);
+        }
+        declaredTotal += declared;
+        if (declaredTotal > IMAGE_WORKSPACE_RESTORE_LIMITS.maxTotalImageBytes) {
+            throw new Error('Image workspace images exceed the total restore limit');
+        }
+    });
+
+    const files: File[] = [];
+    let actualTotal = 0;
+    for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index];
+        // Sequential decompression prevents a valid large workspace from
+        // materializing every image buffer in memory at once.
+        // eslint-disable-next-line no-await-in-loop
+        const blob = await entry.async('blob');
+        if (blob.size > IMAGE_WORKSPACE_RESTORE_LIMITS.maxImageBytes) {
+            throw new Error(`Image workspace image exceeds the per-image restore limit: ${entry.name}`);
+        }
+        actualTotal += blob.size;
+        if (actualTotal > IMAGE_WORKSPACE_RESTORE_LIMITS.maxTotalImageBytes) {
+            throw new Error('Image workspace images exceed the total restore limit');
+        }
+        const filename = assets[index].relativePath.split('/').pop() || assets[index].relativePath;
+        files.push(new File([blob], filename, {type: mimeTypeFor(filename)}));
+    }
+    return files;
+};
 
 const parseLabels = (workspace: JsonObject): LabelName[] => {
     const ids = new Set<string>();
-    return arrayValue(workspace.classes, 'classes').map((value, index) => {
+    const values = arrayValue(workspace.classes, 'classes');
+    if (values.length > IMAGE_WORKSPACE_RESTORE_LIMITS.maxLabels) {
+        throw new Error('Image workspace exceeds the label-count limit');
+    }
+    return values.map((value, index) => {
         const raw = objectValue(value, `classes[${index}]`);
         const id = nonEmptyString(raw.id, `classes[${index}].id`);
         const name = nonEmptyString(raw.name, `classes[${index}].name`);
@@ -172,7 +278,11 @@ const parseBBox = (value: unknown, field: string): [number, number, number, numb
 };
 
 const parseVertices = (value: unknown, field: string): Array<{x: number; y: number}> => {
-    const vertices = arrayValue(value, field).map((point, index) => {
+    const values = arrayValue(value, field);
+    if (values.length > VISUAL_SEARCH_MASK_LIMITS.maxVerticesPerPolygon) {
+        throw new Error(`Image workspace ${field} exceeds the polygon vertex limit`);
+    }
+    const vertices = values.map((point, index) => {
         const raw = objectValue(point, `${field}[${index}]`);
         if (!Number.isFinite(raw.x) || !Number.isFinite(raw.y)) {
             throw new Error(`Invalid image workspace ${field}[${index}]`);
@@ -354,7 +464,16 @@ const restoreAnnotations = (
     datasetRevision: number,
     assetId: string,
     imageIndex: number,
+    budget: WorkspaceRestoreBudget,
 ): void => {
+    if (regions.length > IMAGE_WORKSPACE_RESTORE_LIMITS.maxRegionsPerImage) {
+        throw new Error(`Image workspace images[${imageIndex}] exceeds the per-image region limit`);
+    }
+    budget.totalRegions += regions.length;
+    if (budget.totalRegions > IMAGE_WORKSPACE_RESTORE_LIMITS.maxTotalRegions) {
+        throw new Error('Image workspace exceeds the total region limit');
+    }
+    let imageVertices = 0;
     const grouped = new Map<string, WorkspaceMaskComponent[]>();
     const output: Array<LabelPolygon | {group: string}> = [];
     regions.forEach((value, regionIndex) => {
@@ -375,6 +494,14 @@ const restoreAnnotations = (
         }
         if (raw.shape !== 'polygon') throw new Error(`Unsupported image workspace shape: ${String(raw.shape)}`);
         const vertices = parseVertices(raw.vertices, `${field}.vertices`);
+        imageVertices += vertices.length;
+        budget.totalVertices += vertices.length;
+        if (imageVertices > IMAGE_WORKSPACE_RESTORE_LIMITS.maxVerticesPerImage) {
+            throw new Error(`Image workspace images[${imageIndex}] exceeds the per-image vertex limit`);
+        }
+        if (budget.totalVertices > IMAGE_WORKSPACE_RESTORE_LIMITS.maxTotalVertices) {
+            throw new Error('Image workspace exceeds the total vertex limit');
+        }
         if (raw.mask_group === undefined) {
             output.push(LabelUtil.createLabelPolygon(labelId, vertices));
             return;
@@ -419,6 +546,9 @@ const restoreImages = (
     datasetRevision: number,
 ): ImageData[] => {
     const rawImages = arrayValue(workspace.images, 'images');
+    if (rawImages.length > IMAGE_WORKSPACE_RESTORE_LIMITS.maxImages) {
+        throw new Error('Image workspace exceeds the editor image-count limit');
+    }
     if (rawImages.length !== files.length) throw new Error('Image workspace image count mismatch');
     const regionsByIndex = new Map<number, unknown[]>();
     rawImages.forEach((value, position) => {
@@ -430,6 +560,7 @@ const restoreImages = (
         regionsByIndex.set(index, arrayValue(raw.regions, `images[${position}].regions`));
     });
     const validLabelIds = new Set(labels.map(label => label.id));
+    const budget: WorkspaceRestoreBudget = {totalRegions: 0, totalVertices: 0};
     return files.map((file, index) => {
         const image = ImageDataUtil.createImageDataFromFileData(file);
         restoreAnnotations(
@@ -440,6 +571,7 @@ const restoreImages = (
             datasetRevision,
             assets[index].assetId,
             index,
+            budget,
         );
         return image;
     });
@@ -448,6 +580,29 @@ const restoreImages = (
 const readError = async (response: Response): Promise<string> => {
     const body = await response.json().catch(() => ({}));
     return typeof body.detail === 'string' ? body.detail : `${response.status}`;
+};
+
+const loadWorkspaceZip = async (response: Response): Promise<JSZip> => {
+    const contentLength = response.headers.get('content-length');
+    if (contentLength !== null) {
+        const declaredArchiveBytes = Number(contentLength);
+        if (!Number.isSafeInteger(declaredArchiveBytes) || declaredArchiveBytes < 0) {
+            throw new Error('Image workspace archive has an invalid Content-Length');
+        }
+        if (declaredArchiveBytes > IMAGE_WORKSPACE_RESTORE_LIMITS.maxArchiveBytes) {
+            throw new Error('Image workspace archive exceeds the restore size limit');
+        }
+    }
+    const archive = await response.blob();
+    if (!Number.isSafeInteger(archive.size) || archive.size <= 0 ||
+        archive.size > IMAGE_WORKSPACE_RESTORE_LIMITS.maxArchiveBytes) {
+        throw new Error('Image workspace archive exceeds the restore size limit');
+    }
+    const zip = await JSZip.loadAsync(archive);
+    if (Object.keys(zip.files).length > IMAGE_WORKSPACE_RESTORE_LIMITS.maxZipEntries) {
+        throw new Error('Image workspace archive exceeds the entry-count limit');
+    }
+    return zip;
 };
 
 /** Legacy opensight-batch snapshots predate workspace.json and may safely use
@@ -475,14 +630,22 @@ export class ImageDatasetRestoreService {
             `${getEngineBaseUrl()}/datasets/${encodeURIComponent(datasetId)}/export`,
         );
         if (!response.ok) throw new Error(await readError(response));
-        const zip = await JSZip.loadAsync(await response.blob());
-        const manifest = parseManifest(await readJson(zip, 'manifest.json'));
+        const zip = await loadWorkspaceZip(response);
+        const manifest = parseManifest(await readJson(
+            zip,
+            'manifest.json',
+            IMAGE_WORKSPACE_RESTORE_LIMITS.maxManifestBytes,
+        ));
         if (manifest.id !== datasetId || manifest.revision !== datasetRevision ||
             manifest.format !== 'opensight-batch') {
             throw new Error('Image workspace dataset identity or revision mismatch');
         }
         if (!zip.file('workspace.json')) throw new ImageWorkspaceUnavailableError();
-        const workspace = await readJson(zip, 'workspace.json');
+        const workspace = await readJson(
+            zip,
+            'workspace.json',
+            IMAGE_WORKSPACE_RESTORE_LIMITS.maxWorkspaceBytes,
+        );
         const assets = await parseAssets(zip);
         if (assets.length !== manifest.imageCount) throw new Error('Image workspace manifest count mismatch');
         const files = await restoreFiles(zip, assets);

@@ -425,6 +425,33 @@ describe('VisualSearchAcceptanceService', () => {
         expect(afterAccept).toHaveBeenCalledTimes(1);
     });
 
+    it('rejects the same mask geometry returned under a different result id', async () => {
+        const {testStore} = readyMaskStore();
+        UndoStack.clear();
+        const service = new VisualSearchAcceptanceService({
+            getState: testStore.getState,
+            dispatch: testStore.dispatch,
+            digestFile: async () => DIGEST,
+            verifyMaskGeometry: jest.fn().mockResolvedValue(MASK_POLYGONS),
+            afterAccept: jest.fn(),
+        });
+
+        await service.accept('snapshot-mask', 'mask-result-1');
+        const result = testStore.getState().visualSearch.jobsById['snapshot-mask'].result;
+        if (!result) throw new Error('mask result fixture is missing');
+        result.items.push({
+            ...result.items[0],
+            resultId: 'mask-result-duplicate',
+            regionId: 'mask-region-duplicate',
+        });
+
+        await expect(service.accept('snapshot-mask', 'mask-result-duplicate')).rejects.toThrow(
+            'visual_search_acceptance_cas: already_accepted_geometry',
+        );
+        expect(testStore.getState().labels.imagesData[0].labelPolygons).toHaveLength(2);
+        expect(UndoStack.size()).toBe(1);
+    });
+
     it('rejects a preview-only mask before hashing or mutation', async () => {
         const {testStore} = readyMaskStore();
         UndoStack.clear();

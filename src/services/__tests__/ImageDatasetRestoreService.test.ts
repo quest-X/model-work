@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import {
+    IMAGE_WORKSPACE_RESTORE_LIMITS,
     ImageDatasetRestoreService,
     ImageWorkspaceUnavailableError,
 } from '../ImageDatasetRestoreService';
@@ -124,10 +125,13 @@ const archiveResponse = async (
     zip.file('images/z-frame.png', new Uint8Array([1, 2, 3]));
     zip.file('images/a-frame.png', new Uint8Array([4, 5, 6, 7]));
     const archive = await zip.generateAsync({type: 'uint8array'});
+    const archiveBlob = new Blob([archive]);
     return {
         ok: true,
         status: 200,
-        blob: jest.fn().mockResolvedValue(archive),
+        headers: {get: (name: string) =>
+            name.toLowerCase() === 'content-length' ? String(archiveBlob.size) : null},
+        blob: jest.fn().mockResolvedValue(archiveBlob),
         json: jest.fn().mockResolvedValue({}),
     } as unknown as Response;
 };
@@ -255,6 +259,101 @@ describe('ImageDatasetRestoreService', () => {
             [],
         )).rejects.toBeInstanceOf(ImageWorkspaceUnavailableError);
 
+        expect(ImageRepository.saveFileCache).not.toHaveBeenCalled();
+    });
+
+    it('rejects an oversized archive from Content-Length before reading its body', async () => {
+        const blob = jest.fn();
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            headers: {get: () => String(IMAGE_WORKSPACE_RESTORE_LIMITS.maxArchiveBytes + 1)},
+            blob,
+            json: jest.fn(),
+        } as unknown as Response);
+
+        await expect(ImageDatasetRestoreService.restore(
+            DATASET_ID,
+            'oversized-archive',
+            3,
+            null,
+            [],
+        )).rejects.toThrow('archive exceeds the restore size limit');
+        expect(blob).not.toHaveBeenCalled();
+        expect(ImageRepository.saveFileCache).not.toHaveBeenCalled();
+    });
+
+    it('rejects an oversized declared image before decompressing that entry', async () => {
+        const source = sourceWorkspace();
+        const response = await archiveResponse(JSON.parse(JSON.stringify(source.metadata)));
+        const zip = await JSZip.loadAsync(await response.blob());
+        const imageEntry = zip.file('images/z-frame.png') as JSZip.JSZipObject;
+        const guardedAsync = jest.fn();
+        const mutableEntry = imageEntry as unknown as {
+            _data: {uncompressedSize: number};
+            async: jest.Mock;
+        };
+        mutableEntry._data.uncompressedSize =
+            IMAGE_WORKSPACE_RESTORE_LIMITS.maxImageBytes + 1;
+        mutableEntry.async = guardedAsync;
+        const loadAsync = jest.spyOn(JSZip, 'loadAsync').mockResolvedValue(zip);
+        global.fetch = jest.fn().mockResolvedValue(response);
+
+        try {
+            await expect(ImageDatasetRestoreService.restore(
+                DATASET_ID,
+                'oversized-image',
+                3,
+                null,
+                [],
+            )).rejects.toThrow('per-image restore limit');
+            expect(guardedAsync).not.toHaveBeenCalled();
+            expect(ImageRepository.saveFileCache).not.toHaveBeenCalled();
+        } finally {
+            loadAsync.mockRestore();
+        }
+    });
+
+    it('rejects excessive regions before constructing restored labels', async () => {
+        const source = sourceWorkspace();
+        const workspace = JSON.parse(JSON.stringify(source.metadata));
+        workspace.images[0].regions = Array.from(
+            {length: IMAGE_WORKSPACE_RESTORE_LIMITS.maxRegionsPerImage + 1},
+            () => ({shape: 'rect', label_id: 'goose', bbox: [0, 0, 1, 1]}),
+        );
+        global.fetch = jest.fn().mockResolvedValue(await archiveResponse(workspace));
+
+        await expect(ImageDatasetRestoreService.restore(
+            DATASET_ID,
+            'too-many-regions',
+            3,
+            null,
+            [],
+        )).rejects.toThrow('per-image region limit');
+        expect(ImageRepository.saveFileCache).not.toHaveBeenCalled();
+    });
+
+    it('rejects a polygon above the canonical vertex limit', async () => {
+        const source = sourceWorkspace();
+        const workspace = JSON.parse(JSON.stringify(source.metadata));
+        workspace.images[0].regions = [{
+            shape: 'polygon',
+            label_id: 'goose',
+            bbox: [0, 0, 1, 1],
+            vertices: Array.from(
+                {length: 8_193},
+                (_, index) => ({x: index, y: index}),
+            ),
+        }];
+        global.fetch = jest.fn().mockResolvedValue(await archiveResponse(workspace));
+
+        await expect(ImageDatasetRestoreService.restore(
+            DATASET_ID,
+            'too-many-vertices',
+            3,
+            null,
+            [],
+        )).rejects.toThrow('polygon vertex limit');
         expect(ImageRepository.saveFileCache).not.toHaveBeenCalled();
     });
 });

@@ -204,6 +204,10 @@ export function labelsReducer(
             const target = state.imagesData[targetIndex];
             const acceptedIds = new Set(action.payload.labelPolygons.map(polygon => polygon.id));
             if (target.labelPolygons.some(polygon => acceptedIds.has(polygon.id))) return state;
+            if (target.labelPolygons.some(polygon =>
+                polygon.extra?.visualSearch?.geometrySha256 === action.payload.geometrySha256)) {
+                return state;
+            }
             const imagesData = [...state.imagesData];
             imagesData[targetIndex] = {
                 ...target,

@@ -225,6 +225,17 @@ const assertMaskAcceptanceCAS = (
     if (image.labelPolygons.some(polygon => acceptedIds.has(polygon.id))) {
         acceptanceCASFailure('already_accepted');
     }
+    const alreadyAcceptedGeometry = image.labelPolygons.some(polygon => {
+        try {
+            return parseVisualSearchMaskComponent(polygon)?.provenance.geometrySha256 ===
+                acceptance.geometrySha256;
+        } catch {
+            // Existing corrupt provenance is handled by the query/sync validators.
+            // It must not make an unrelated geometry look like a duplicate.
+            return false;
+        }
+    });
+    if (alreadyAcceptedGeometry) acceptanceCASFailure('already_accepted_geometry');
 };
 
 const assertVisualSearchAcceptanceCAS = (

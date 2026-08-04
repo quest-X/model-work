@@ -16,6 +16,10 @@ import {DataBatchSyncService} from '../../../services/DataBatchSyncService';
 import {TrainingDatasetSelection} from '../../../services/TrainingDatasetSelection';
 import {VideoDatasetRestoreService} from '../../../services/VideoDatasetRestoreService';
 import {
+    ImageDatasetRestoreService,
+    ImageWorkspaceUnavailableError,
+} from '../../../services/ImageDatasetRestoreService';
+import {
     DatasetActionTarget,
     DatasetEditSelection,
     DatasetExportSelection,
@@ -700,7 +704,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
         PopupActions.close();
     };
 
-    const openImageDataset = async (dataset: DatasetSummary): Promise<void> => {
+    const openLegacyImageDataset = async (dataset: DatasetSummary): Promise<void> => {
         const response = await fetch(`${baseUrl}/datasets/${dataset.id}/export`);
         if (!response.ok) throw new Error(`${response.status}`);
         const archive = await response.blob();
@@ -712,6 +716,29 @@ export const DataCenterPopup: React.FC<IProps> = ({
             }),
         ]);
         updateActivePopupTypeAction(PopupWindowType.IMPORT_ANNOTATIONS);
+    };
+
+    const openImageDataset = async (dataset: DatasetSummary): Promise<void> => {
+        if (dataset.format !== 'opensight-batch') return openLegacyImageDataset(dataset);
+        try {
+            await ImageDatasetRestoreService.restore(
+                dataset.id,
+                datasetDisplayName(dataset),
+                dataset.revision || 1,
+                dataset.source_id,
+                imagesData,
+            );
+            PopupActions.close();
+        } catch (cause) {
+            // Only snapshots created before workspace.json existed may take the
+            // lossy YOLO compatibility path. A malformed modern workspace must
+            // stay closed so mask geometry is never silently flattened.
+            if (cause instanceof ImageWorkspaceUnavailableError) {
+                await openLegacyImageDataset(dataset);
+                return;
+            }
+            throw cause;
+        }
     };
 
     const openDatasetForEditing = async (dataset: DatasetSummary) => {

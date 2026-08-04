@@ -17,6 +17,23 @@ type BatchMaskGroup = {
     rasterizer_revision: string;
     component_index: number;
     component_count: number;
+    /**
+     * Optional on legacy workspace snapshots. New snapshots persist the
+     * acceptance identity needed to recreate a queryable multipart mask after
+     * closing and reopening the dataset. The extension consumes the stable
+     * outer fields and deliberately ignores this frontend restore payload.
+     */
+    provenance?: {
+        schema_version: 1;
+        client_job_id: string;
+        backend_job_id: string;
+        result_id: string;
+        asset_id: string;
+        region_id: string | null;
+        dataset_id: string;
+        dataset_revision: string | number;
+        vertices_signature: string;
+    };
 };
 
 type BatchRegion = {
@@ -72,6 +89,17 @@ const maskGroupFrom = (
         rasterizer_revision: provenance.rasterizerRevision,
         component_index: provenance.componentIndex,
         component_count: provenance.componentCount,
+        provenance: {
+            schema_version: 1,
+            client_job_id: provenance.clientJobId,
+            backend_job_id: provenance.backendJobId,
+            result_id: provenance.resultId,
+            asset_id: provenance.assetId,
+            region_id: provenance.regionId,
+            dataset_id: provenance.datasetId,
+            dataset_revision: provenance.datasetRevision,
+            vertices_signature: provenance.verticesSignature,
+        },
     };
 };
 

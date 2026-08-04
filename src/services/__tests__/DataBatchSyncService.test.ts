@@ -103,6 +103,19 @@ describe('DataBatchSyncService', () => {
                 rasterizer_revision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
                 component_index: 0,
                 component_count: 2,
+                provenance: {
+                    schema_version: 1,
+                    client_job_id: 'client-mask',
+                    backend_job_id: 'task-mask',
+                    result_id: 'result-mask',
+                    asset_id: 'asset-mask',
+                    region_id: 'region-mask',
+                    dataset_id: 'dataset-mask',
+                    dataset_revision: 2,
+                    vertices_signature: visualSearchVerticesSignature(
+                        [{x: 1, y: 1}, {x: 5, y: 1}, {x: 3, y: 4}],
+                    ),
+                },
             },
             {
                 schema_version: 1,
@@ -110,6 +123,19 @@ describe('DataBatchSyncService', () => {
                 rasterizer_revision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
                 component_index: 1,
                 component_count: 2,
+                provenance: {
+                    schema_version: 1,
+                    client_job_id: 'client-mask',
+                    backend_job_id: 'task-mask',
+                    result_id: 'result-mask',
+                    asset_id: 'asset-mask',
+                    region_id: 'region-mask',
+                    dataset_id: 'dataset-mask',
+                    dataset_revision: 2,
+                    vertices_signature: visualSearchVerticesSignature(
+                        [{x: 8, y: 2}, {x: 12, y: 2}, {x: 10, y: 6}],
+                    ),
+                },
             },
         ]);
     });

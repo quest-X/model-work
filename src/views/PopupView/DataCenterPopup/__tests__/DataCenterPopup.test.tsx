@@ -12,6 +12,10 @@ import {
 } from '../../../../services/DatasetActionSelection';
 import {PendingImportFiles} from '../../../../utils/PendingImportFiles';
 import {VideoDatasetRestoreService} from '../../../../services/VideoDatasetRestoreService';
+import {
+    ImageDatasetRestoreService,
+    ImageWorkspaceUnavailableError,
+} from '../../../../services/ImageDatasetRestoreService';
 import {DataCenterPopup} from '../DataCenterPopup';
 
 jest.mock('../../GenericYesNoPopup/GenericYesNoPopup', () => ({
@@ -41,6 +45,11 @@ jest.mock('../../../../services/DataBatchSyncService', () => ({
 
 jest.mock('../../../../services/VideoDatasetRestoreService', () => ({
     VideoDatasetRestoreService: {restore: jest.fn().mockResolvedValue({})},
+}));
+
+jest.mock('../../../../services/ImageDatasetRestoreService', () => ({
+    ImageDatasetRestoreService: {restore: jest.fn().mockResolvedValue({})},
+    ImageWorkspaceUnavailableError: class LegacyWorkspaceError extends Error {},
 }));
 
 jest.mock('../../../../services/TrainingDatasetSelection', () => ({
@@ -471,11 +480,61 @@ describe('DataCenterPopup', () => {
         await act(async () => {
             fireEvent.click(screen.getByRole('button', {name: '使用'}));
         });
-        await waitFor(() => expect(DatasetEditSelection.set).toHaveBeenCalledWith(expect.objectContaining({
+        await waitFor(() => expect(ImageDatasetRestoreService.restore).toHaveBeenCalledWith(
+            'dataset-1',
+            'default-project',
+            2,
+            'queue-1',
+            [],
+        ));
+        expect(DatasetEditSelection.set).not.toHaveBeenCalled();
+        expect(PendingImportFiles.set).not.toHaveBeenCalled();
+    });
+
+    it('keeps ordinary YOLO datasets on the existing annotation importer path', async () => {
+        const yoloDataset = {...dataset, format: 'yolo', source_id: null};
+        (global.fetch as jest.Mock).mockImplementation((input: RequestInfo) => {
+            const url = String(input);
+            if (url.endsWith('/datasets')) return Promise.resolve(jsonResponse({datasets: [yoloDataset]}));
+            if (url.endsWith('/dataset-1/stats')) {
+                return Promise.resolve(jsonResponse({
+                    image_count: 465,
+                    annotated_count: 0,
+                    annotation_coverage: 0,
+                    class_distribution: {},
+                }));
+            }
+            return Promise.resolve(jsonResponse({status: 'success'}));
+        });
+        renderPopup();
+        fireEvent.click(await screen.findByRole('tab', {name: '持久化数据 1'}));
+        fireEvent.click(await screen.findByRole('button', {name: /default-project.*465/}));
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', {name: '使用'}));
+        });
+
+        expect(ImageDatasetRestoreService.restore).not.toHaveBeenCalled();
+        expect(DatasetEditSelection.set).toHaveBeenCalledWith(expect.objectContaining({
             id: 'dataset-1',
-            name: 'default-project',
-            projectName: 'default-project',
-        })));
+            revision: 2,
+        }));
+        expect(PendingImportFiles.set).toHaveBeenCalledWith([
+            expect.objectContaining({name: 'yolo_full_default-project_v2.zip'}),
+        ]);
+        expect(updateActivePopupTypeAction).toHaveBeenCalledWith(PopupWindowType.IMPORT_ANNOTATIONS);
+    });
+
+    it('falls back for opensight batches created before workspace persistence', async () => {
+        (ImageDatasetRestoreService.restore as jest.Mock).mockRejectedValueOnce(
+            new ImageWorkspaceUnavailableError(),
+        );
+        renderPopup();
+        fireEvent.click(await screen.findByRole('tab', {name: '持久化数据 1'}));
+        fireEvent.click(await screen.findByRole('button', {name: /default-project.*465/}));
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', {name: '使用'}));
+        });
+
         expect(PendingImportFiles.set).toHaveBeenCalledWith([
             expect.objectContaining({name: 'yolo_full_default-project_v2.zip'}),
         ]);

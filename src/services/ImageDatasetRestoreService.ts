@@ -1,4 +1,5 @@
 import JSZip from 'jszip';
+import pako from 'pako';
 import {v4 as uuidv4} from 'uuid';
 import {store} from '../index';
 import {QueueActions} from '../logic/actions/QueueActions';
@@ -15,6 +16,8 @@ import {LabelStatus} from '../data/enums/LabelStatus';
 import {updateLabelNames} from '../store/labels/actionCreators';
 import {updateProjectData} from '../store/general/actionCreators';
 import {
+    VisualSearchMaskRLE,
+    VisualSearchPolygon,
     VISUAL_SEARCH_MASK_LIMITS,
     VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
 } from '../store/visualSearch/types';
@@ -25,6 +28,14 @@ import {
     validateVisualSearchMaskGroup,
     visualSearchVerticesSignature,
 } from '../utils/VisualSearchMaskProvenance';
+import {sha256HexFallback} from '../utils/Sha256';
+import {
+    assertVisualSearchMaskDimensions,
+    canonicalizeVisualSearchPolygons,
+    canonicalVisualSearchMaskGeometryJSON,
+    rasterizeVisualSearchPolygons,
+    visualSearchMaskPixelsBBox,
+} from './VisualSearchMaskGeometry';
 
 type JsonObject = Record<string, unknown>;
 
@@ -397,11 +408,154 @@ const sameGroupProvenance = (
     left.datasetId === right.datasetId &&
     String(left.datasetRevision) === String(right.datasetRevision);
 
+type ImageDimensions = {width: number; height: number};
+
+const validImageDimensions = (width: number, height: number): ImageDimensions => {
+    assertVisualSearchMaskDimensions(width, height);
+    return {width, height};
+};
+
+const readImageDimensions = async (file: File): Promise<ImageDimensions> => {
+    if (typeof globalThis.createImageBitmap === 'function') {
+        let bitmap: ImageBitmap | undefined;
+        try {
+            // The backend reads raw encoded dimensions. Ignore EXIF display
+            // rotation here so the full-image RLE uses the identical extent.
+            bitmap = await globalThis.createImageBitmap(file, {imageOrientation: 'none'});
+            return validImageDimensions(bitmap.width, bitmap.height);
+        } catch {
+            throw new Error(`Image workspace cannot decode mask image dimensions: ${file.name}`);
+        } finally {
+            bitmap?.close();
+        }
+    }
+    if (typeof Image !== 'function' || typeof URL.createObjectURL !== 'function') {
+        throw new Error('Image workspace cannot verify mask geometry in this browser');
+    }
+    const objectUrl = URL.createObjectURL(file);
+    try {
+        return await new Promise<ImageDimensions>((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => {
+                try {
+                    resolve(validImageDimensions(
+                        image.naturalWidth || image.width,
+                        image.naturalHeight || image.height,
+                    ));
+                } catch (error) {
+                    reject(error);
+                }
+            };
+            image.onerror = () => reject(new Error(
+                `Image workspace cannot decode mask image dimensions: ${file.name}`,
+            ));
+            image.src = objectUrl;
+        });
+    } finally {
+        URL.revokeObjectURL(objectUrl);
+    }
+};
+
+const encodeMaskRuns = (pixels: Uint8Array): Uint8Array => {
+    // Alternating pixels are the worst case: one byte per run plus the
+    // canonical leading zero-length background run.
+    const output = new Uint8Array(pixels.byteLength + 1);
+    let outputIndex = 0;
+    const appendVarint = (input: number): void => {
+        let value = input;
+        while (value >= 0x80) {
+            output[outputIndex] = (value & 0x7f) | 0x80;
+            outputIndex += 1;
+            value = Math.floor(value / 0x80);
+        }
+        output[outputIndex] = value;
+        outputIndex += 1;
+    };
+    let current = 0;
+    let runLength = 0;
+    pixels.forEach(pixel => {
+        const bit = pixel ? 1 : 0;
+        if (bit === current) {
+            runLength += 1;
+        } else {
+            appendVarint(runLength);
+            current = bit;
+            runLength = 1;
+        }
+    });
+    appendVarint(runLength);
+    return output.subarray(0, outputIndex);
+};
+
+const bytesToBase64 = (bytes: Uint8Array): string => {
+    if (Math.ceil(bytes.byteLength / 3) * 4 >
+        VISUAL_SEARCH_MASK_LIMITS.maxCountsBase64Length) {
+        throw new Error('Image workspace mask RLE exceeds the frontend safety limit');
+    }
+    const chunks: string[] = [];
+    for (let offset = 0; offset < bytes.byteLength; offset += 0x8000) {
+        chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+    }
+    return globalThis.btoa(chunks.join(''));
+};
+
+const samePolygonCoordinates = (
+    raw: ReadonlyArray<VisualSearchPolygon>,
+    canonical: ReadonlyArray<VisualSearchPolygon>,
+): boolean => raw.length === canonical.length && raw.every((polygon, polygonIndex) =>
+    polygon.length === canonical[polygonIndex].length && polygon.every((point, pointIndex) =>
+        point[0] === canonical[polygonIndex][pointIndex][0] &&
+        point[1] === canonical[polygonIndex][pointIndex][1]));
+
+const hasPositivePolygonArea = (polygon: VisualSearchPolygon): boolean =>
+    polygon.reduce((sum, point, pointIndex) => {
+        const next = polygon[(pointIndex + 1) % polygon.length];
+        return sum + point[0] * next[1] - next[0] * point[1];
+    }, 0) !== 0;
+
+const canonicalMaskGeometrySha256 = (
+    components: WorkspaceMaskComponent[],
+    width: number,
+    height: number,
+): string => {
+    const rawPolygons: ReadonlyArray<VisualSearchPolygon> = components.map(component =>
+        component.vertices.map(vertex => [vertex.x, vertex.y] as const));
+    const polygons = canonicalizeVisualSearchPolygons(rawPolygons, width, height);
+    if (!samePolygonCoordinates(rawPolygons, polygons) ||
+        polygons.some(polygon => !hasPositivePolygonArea(polygon))) {
+        throw new Error('Image workspace mask polygons are not canonical image pixels');
+    }
+    const pixels = rasterizeVisualSearchPolygons(polygons, width, height);
+    if (!visualSearchMaskPixelsBBox(pixels, width, height)) {
+        throw new Error('Image workspace mask rasterization has no foreground pixels');
+    }
+    const compressed = pako.deflate(encodeMaskRuns(pixels), {level: 9});
+    if (!(compressed instanceof Uint8Array)) {
+        throw new Error('Image workspace mask RLE encoder returned invalid bytes');
+    }
+    const mask: VisualSearchMaskRLE = {
+        encoding: 'binary_rle_varint_zlib_base64_v1',
+        order: 'row-major',
+        size: [height, width],
+        countsBase64: bytesToBase64(compressed),
+    };
+    const canonical = canonicalVisualSearchMaskGeometryJSON({
+        mask,
+        polygons,
+        rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+    });
+    return sha256HexFallback(Uint8Array.from(
+        canonical,
+        character => character.charCodeAt(0),
+    ));
+};
+
 const restoreMaskGroup = (
     components: WorkspaceMaskComponent[],
     datasetId: string,
     datasetRevision: number,
     assetId: string,
+    dimensions: ImageDimensions,
 ): LabelPolygon[] => {
     const ordered = [...components].sort((left, right) => left.componentIndex - right.componentIndex);
     const reference = ordered[0];
@@ -413,6 +567,13 @@ const restoreMaskGroup = (
             component.labelId !== reference.labelId ||
             Boolean(component.provenance) !== Boolean(reference.provenance))) {
         throw new Error('Incomplete or inconsistent image workspace mask group');
+    }
+    if (canonicalMaskGeometrySha256(
+        ordered,
+        dimensions.width,
+        dimensions.height,
+    ) !== reference.geometrySha256) {
+        throw new Error('Image workspace mask canonical geometry SHA-256 mismatch');
     }
     const provenance = ordered.map(component => component.provenance || syntheticProvenance(
         component,
@@ -465,6 +626,7 @@ const restoreAnnotations = (
     assetId: string,
     imageIndex: number,
     budget: WorkspaceRestoreBudget,
+    maskDimensions: ImageDimensions | null,
 ): void => {
     if (regions.length > IMAGE_WORKSPACE_RESTORE_LIMITS.maxRegionsPerImage) {
         throw new Error(`Image workspace images[${imageIndex}] exceeds the per-image region limit`);
@@ -520,11 +682,15 @@ const restoreAnnotations = (
     });
     output.forEach(item => {
         if ('group' in item) {
+            if (!maskDimensions) {
+                throw new Error('Image workspace cannot verify mask geometry dimensions');
+            }
             image.labelPolygons.push(...restoreMaskGroup(
                 grouped.get(item.group) || [],
                 datasetId,
                 datasetRevision,
                 assetId,
+                maskDimensions,
             ));
         } else {
             image.labelPolygons.push(item);
@@ -537,14 +703,14 @@ const restoreAnnotations = (
     ));
 };
 
-const restoreImages = (
+const restoreImages = async (
     files: File[],
     assets: WorkspaceAsset[],
     workspace: JsonObject,
     labels: LabelName[],
     datasetId: string,
     datasetRevision: number,
-): ImageData[] => {
+): Promise<ImageData[]> => {
     const rawImages = arrayValue(workspace.images, 'images');
     if (rawImages.length > IMAGE_WORKSPACE_RESTORE_LIMITS.maxImages) {
         throw new Error('Image workspace exceeds the editor image-count limit');
@@ -561,20 +727,33 @@ const restoreImages = (
     });
     const validLabelIds = new Set(labels.map(label => label.id));
     const budget: WorkspaceRestoreBudget = {totalRegions: 0, totalVertices: 0};
-    return files.map((file, index) => {
+    const images: ImageData[] = [];
+    for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        const regions = regionsByIndex.get(index) || [];
+        const hasMask = regions.some(region => {
+            if (!region || typeof region !== 'object' || Array.isArray(region)) return false;
+            return Object.prototype.hasOwnProperty.call(region, 'mask_group');
+        });
+        // Decode at most one image at a time, and only when its persisted
+        // mask identity requires the real full-image dimensions.
+        // eslint-disable-next-line no-await-in-loop
+        const maskDimensions = hasMask ? await readImageDimensions(file) : null;
         const image = ImageDataUtil.createImageDataFromFileData(file);
         restoreAnnotations(
             image,
-            regionsByIndex.get(index) || [],
+            regions,
             validLabelIds,
             datasetId,
             datasetRevision,
             assets[index].assetId,
             index,
             budget,
+            maskDimensions,
         );
-        return image;
-    });
+        images.push(image);
+    }
+    return images;
 };
 
 const readError = async (response: Response): Promise<string> => {
@@ -650,7 +829,7 @@ export class ImageDatasetRestoreService {
         if (assets.length !== manifest.imageCount) throw new Error('Image workspace manifest count mismatch');
         const files = await restoreFiles(zip, assets);
         const labels = parseLabels(workspace);
-        const images = restoreImages(
+        const images = await restoreImages(
             files,
             assets,
             workspace,

@@ -29,7 +29,7 @@ jest.mock('../../logic/imageRepository/ImageRepository', () => ({
 }));
 
 const DATASET_ID = 'dataset-mask-restore';
-const GEOMETRY_SHA = 'c'.repeat(64);
+const GEOMETRY_SHA = 'ae021cc551b133fd969afedd366eba6c3757ff90281a04b9f086499f26cadfa2';
 
 const maskPolygon = (
     componentIndex: number,
@@ -146,8 +146,21 @@ const fileBytes = (file: File): Promise<number[]> => new Promise((resolve, rejec
 describe('ImageDatasetRestoreService', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        Object.defineProperty(globalThis, 'createImageBitmap', {
+            configurable: true,
+            writable: true,
+            value: jest.fn().mockResolvedValue({
+                width: 16,
+                height: 8,
+                close: jest.fn(),
+            }),
+        });
         (QueueActions.switchToQueueItem as jest.Mock).mockResolvedValue(undefined);
         (ImageRepository.getActiveFileId as jest.Mock).mockReturnValue(null);
+    });
+
+    afterEach(() => {
+        Reflect.deleteProperty(globalThis, 'createImageBitmap');
     });
 
     it('round-trips multipart mask metadata, image order and dataset binding losslessly', async () => {
@@ -193,6 +206,54 @@ describe('ImageDatasetRestoreService', () => {
         );
         expect(restoredMetadata).toEqual(source.metadata);
         expect(QueueActions.switchToQueueItem).toHaveBeenCalledWith(item, []);
+    });
+
+    it('matches the backend square geometry SHA golden with pako level-9 zlib bytes', async () => {
+        const source = sourceWorkspace();
+        const workspace = JSON.parse(JSON.stringify(source.metadata));
+        const square = [
+            {x: 16, y: 16},
+            {x: 48, y: 16},
+            {x: 48, y: 48},
+            {x: 16, y: 48},
+        ];
+        const squareSha = '1ca3c978bc3c9f281e2385f87e17900d25f7b1fd74b4f1041f7d1a4c6a6ed62f';
+        const provenance = workspace.images[0].regions[0].mask_group.provenance;
+        workspace.images[0].regions = [{
+            label_id: 'goose',
+            bbox: [16, 16, 32, 32],
+            shape: 'polygon',
+            vertices: square,
+            mask_group: {
+                schema_version: 1,
+                geometry_sha256: squareSha,
+                rasterizer_revision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+                component_index: 0,
+                component_count: 1,
+                provenance: {
+                    ...provenance,
+                    vertices_signature: visualSearchVerticesSignature(square),
+                },
+            },
+        }];
+        (globalThis.createImageBitmap as jest.Mock).mockResolvedValue({
+            width: 64,
+            height: 64,
+            close: jest.fn(),
+        });
+        global.fetch = jest.fn().mockResolvedValue(await archiveResponse(workspace));
+
+        await expect(ImageDatasetRestoreService.restore(
+            DATASET_ID,
+            'square-golden-mask',
+            3,
+            null,
+            [],
+        )).resolves.toBeDefined();
+
+        const restored = (ImageRepository.saveFileCache as jest.Mock).mock.calls[0][1] as ImageData[];
+        expect(parseVisualSearchMaskComponent(restored[0].labelPolygons[0])
+            ?.provenance.geometrySha256).toBe(squareSha);
     });
 
     it('upgrades legacy mask_group v1 without provenance to a deterministic queryable group', async () => {
@@ -243,6 +304,28 @@ describe('ImageDatasetRestoreService', () => {
             null,
             [],
         )).rejects.toThrow('vertices signature mismatch');
+
+        expect(ImageRepository.saveFileCache).not.toHaveBeenCalled();
+        expect(QueueActions.switchToQueueItem).not.toHaveBeenCalled();
+    });
+
+    it('recomputes union pixels and rejects a stale geometry SHA after coordinated vertex edits', async () => {
+        const source = sourceWorkspace();
+        const workspace = JSON.parse(JSON.stringify(source.metadata));
+        const first = workspace.images[0].regions[0];
+        first.vertices[0].x = 2;
+        first.mask_group.provenance.vertices_signature = visualSearchVerticesSignature(
+            first.vertices,
+        );
+        global.fetch = jest.fn().mockResolvedValue(await archiveResponse(workspace));
+
+        await expect(ImageDatasetRestoreService.restore(
+            DATASET_ID,
+            'stale-mask-identity',
+            3,
+            null,
+            [],
+        )).rejects.toThrow('canonical geometry SHA-256 mismatch');
 
         expect(ImageRepository.saveFileCache).not.toHaveBeenCalled();
         expect(QueueActions.switchToQueueItem).not.toHaveBeenCalled();

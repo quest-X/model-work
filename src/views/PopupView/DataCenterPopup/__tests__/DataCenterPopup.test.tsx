@@ -254,6 +254,7 @@ describe('DataCenterPopup', () => {
 
         expect(screen.getByRole('status', {name: '数据中有 1 个本地变动待处理'})).toHaveTextContent('1');
         expect(screen.getByRole('status', {name: '临时数据中有 1 个本地变动待处理'})).toHaveTextContent('1');
+        expect(screen.getByRole('tab', {name: '临时数据 1'}).querySelector(':scope > strong')).toBeNull();
     });
 
     it('filters persistent datasets by media, annotation state and search query', async () => {

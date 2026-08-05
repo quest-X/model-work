@@ -44,9 +44,7 @@
 
     // The layout picker is anchored below the toolbar. Its tool group must not
     // clip the menu at the toolbar's fixed height.
-    &.collapsible:has(.CanvasMultiViewTrigger) {
-      overflow: visible;
-    }
+    &.DrawingToolsWrapper { overflow: visible; }
   }
 
   .ImageButton {

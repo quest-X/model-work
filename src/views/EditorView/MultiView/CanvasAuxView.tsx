@@ -21,6 +21,12 @@ export const CanvasAuxViews = ({imageData, state}: Props) => {
 
     useEffect(() => {
         if (state.layout === '1x1') return undefined;
+        if (VideoSelector.isVideoPlaying()) {
+            setResult(null);
+            setLoading(false);
+            setError('暂停视频后生成当前帧模型视图');
+            return undefined;
+        }
         const controller = new AbortController();
         let owned: InspectorResult | null = null;
         setLoading(true); setError(''); setResult(null);

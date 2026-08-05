@@ -1,16 +1,4 @@
-.CanvasMultiViewTrigger { position: relative; display: inline-flex; height: 30px;
-  > button { width: 30px; height: 30px; padding: 6px; border: 0; background: transparent; cursor: pointer; }
-  > button:hover, > button.active { background: #343a40; }
-}
-.CanvasMultiViewIcon, .layout-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; width: 18px; height: 18px;
-  i { display:block; border:1px solid #f1f1f1; }
-}
-.CanvasMultiViewMenu { position:absolute; top:34px; left:0; z-index:100010; width:150px; padding:7px; background:#282828; border:1px solid #555; box-shadow:0 5px 18px #0009;
-  .title { color:#aaa; font-size:12px; padding:4px 7px 7px; }
-  > button { display:flex; align-items:center; gap:12px; width:100%; padding:8px; color:#eee; background:transparent; border:0; cursor:pointer; }
-  > button:hover, > button.selected { background:#3b5362; }
-  .layout-preview { width:22px; height:16px; }
-}
+.CanvasMultiViewSelect { height:26px; margin:0 2px; padding:0 5px; color:#eee; background:#303030; border:1px solid #555; border-radius:3px; cursor:pointer; font-size:11px; }
 .CanvasMultiViewGrid { position:absolute; inset:0; display:grid; gap:2px; background:#111; }
 .CanvasMultiViewGrid.layout-1x1 { grid-template-columns:1fr; }
 .CanvasMultiViewGrid.layout-2x2 { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }

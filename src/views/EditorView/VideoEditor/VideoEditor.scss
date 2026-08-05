@@ -89,6 +89,18 @@
             transform: translateZ(0);
         }
 
+        // The video renderer is a sibling of the annotation canvas. Keep it in
+        // the editable first pane when the main canvas is split.
+        &.canvas-layout-2x2 .VideoPlayerLayer {
+            width: calc((100% - 2px) / 2);
+            height: calc((100% - 2px) / 2);
+        }
+
+        &.canvas-layout-1x3 .VideoPlayerLayer {
+            width: calc((100% - 4px) / 3);
+            height: 100%;
+        }
+
         .AnnotationLayer {
             position: absolute;
             top: 0;
@@ -133,4 +145,3 @@
         position: relative;
     }
 }
-

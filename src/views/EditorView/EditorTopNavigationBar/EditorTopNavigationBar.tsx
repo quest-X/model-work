@@ -1122,7 +1122,7 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                     )
                 }
             </div>
-            <div className='ButtonWrapper collapsible'>
+            <div className='ButtonWrapper collapsible DrawingToolsWrapper'>
                 {
                     getButtonWithTooltip(
                         'tool-all',

@@ -22,6 +22,7 @@ import { ViewPortActions } from '../../../logic/actions/ViewPortActions';
 import { EditorModel } from '../../../staticModels/EditorModel';
 import { Language } from '../../../data/LanguageConfig';
 import {getVideoThumbnailSize} from '../../../utils/VideoThumbnailUtil';
+import {CanvasMultiViewStore, CanvasViewLayout} from '../MultiView/CanvasMultiViewStore';
 
 // Module-level stable empty array used as fallback for `frames` prop when
 // fast_ffmpeg_mode runs in on-demand mode (sessionId only, preExtractedFrames undefined).
@@ -66,7 +67,10 @@ const VideoEditor: React.FC<IProps> = ({
     const [loadedThumbnailCount, setLoadedThumbnailCount] = useState(0);
     const [totalFrameCount, setTotalFrameCount] = useState(0);
     const [isMuted, setIsMuted] = useState<boolean>(true);
+    const [canvasLayout, setCanvasLayout] = useState<CanvasViewLayout>(CanvasMultiViewStore.get().layout);
     const generationIdRef = React.useRef(0);
+
+    useEffect(() => CanvasMultiViewStore.subscribe(state => setCanvasLayout(state.layout)), []);
 
     // 使用 ref 存储最新的 imagesData，避免在 useCallback 依赖中包含它
     // 重要：必须在渲染期间同步更新（不能用 useEffect），
@@ -610,7 +614,7 @@ const VideoEditor: React.FC<IProps> = ({
     return (
         <div className="VideoEditor">
             {/* 合并的视频播放和标注区域 */}
-            <div className="VideoAnnotationSection" style={{ height: videoAndAnnotationHeight }}>
+            <div className={`VideoAnnotationSection canvas-layout-${canvasLayout}`} style={{ height: videoAndAnnotationHeight }}>
                 {/* 底层：视频播放器
                      暂停时隐藏（标注画布已绘制视频帧，避免缩放时未缩放的帧透出） */}
                 <div className="VideoPlayerLayer" style={{ visibility: isPlaying ? 'visible' : 'hidden' }}>

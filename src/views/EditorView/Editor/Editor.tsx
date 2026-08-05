@@ -76,7 +76,13 @@ export class Editor extends React.Component<IProps, IState> {
 
     public componentDidMount(): void {
         this.mounted = true;
-        this.unsubscribeMultiView = CanvasMultiViewStore.subscribe(multiView => this.setState({multiView}));
+        this.unsubscribeMultiView = CanvasMultiViewStore.subscribe(multiView => this.setState({multiView}, () => {
+            requestAnimationFrame(() => {
+                ViewPortActions.updateViewPortSize();
+                ViewPortActions.updateDefaultViewPortImageRect();
+                ViewPortActions.setDefaultZoom();
+            });
+        }));
         this.mountEventListeners();
 
         const {imageData, activeLabelType} = this.props;

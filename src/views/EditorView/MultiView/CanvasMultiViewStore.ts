@@ -9,7 +9,7 @@ export interface CanvasMultiViewState {
 const defaults: Record<CanvasViewLayout, CanvasViewKind[]> = {
     '1x1': ['original'],
     '2x2': ['original', 'heatmap', 'features', 'attention'],
-    '1x3': ['original', 'heatmap', 'features'],
+    '1x3': ['original', 'heatmap', 'features', 'attention'],
 };
 
 let current: CanvasMultiViewState = {layout: '1x1', views: defaults['1x1']};

@@ -8,7 +8,8 @@
 .CanvasMultiViewGrid { position:absolute; inset:0; display:grid; gap:2px; background:#111; }
 .CanvasMultiViewGrid.layout-1x1 { grid-template-columns:1fr; }
 .CanvasMultiViewGrid.layout-2x2 { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }
-.CanvasMultiViewGrid.layout-1x3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.CanvasMultiViewGrid.layout-1x3 { grid-template-columns:minmax(0,1fr) minmax(0,2fr); grid-template-rows:repeat(3,minmax(0,1fr)); }
+.CanvasMultiViewGrid.layout-1x3 > .CanvasViewPane.primary { grid-column:1; grid-row:1 / 4; }
 .CanvasViewPane { position:relative; min-width:0; min-height:0; overflow:hidden; background:#171717; border:1px solid #343434; }
 .CanvasViewPane.primary > div:not(.CanvasViewHeader) { width:100%!important; height:100%!important; }
 .CanvasViewHeader { position:absolute; z-index:20; top:8px; left:8px; display:flex; align-items:center; gap:8px; height:28px; padding:0 7px; color:#bbb; font-size:11px; background:#202020dd; border:1px solid #555; border-radius:3px;

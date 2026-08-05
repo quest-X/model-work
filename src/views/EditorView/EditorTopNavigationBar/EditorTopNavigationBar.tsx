@@ -50,6 +50,7 @@ const BUTTON_PADDING: number = 10;
 
 interface SimilarityVectorCollection {
     name: string;
+    display_name?: string;
     scene_id: string;
     scene_name: string;
     target_id: string;
@@ -337,8 +338,6 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
     const [similarityJobs, setSimilarityJobs] = useState<SimilarityIngestJob[]>([]);
     const [similarityOptionsLoading, setSimilarityOptionsLoading] = useState(false);
     const [similarityOptionsError, setSimilarityOptionsError] = useState<string | null>(null);
-    const [similaritySceneId, setSimilaritySceneId] = useState('');
-    const [similarityTargetId, setSimilarityTargetId] = useState('');
     const [similarityCollectionName, setSimilarityCollectionName] = useState('');
     const [similarityMode, setSimilarityMode] = useState<SimilaritySearchMode>('dino');
     const [similaritySearchConfig, setSimilaritySearchConfig] = useState<SimilaritySearchConfig | null>(null);
@@ -722,9 +721,7 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
             similaritySearchConfig.mode === 'dino'
                 ? (language === 'zh' ? '快速模式' : 'Fast Mode')
                 : (language === 'zh' ? '高精度模式' : 'High-precision Mode')
-        }-${similaritySearchConfig.sceneName}-${similaritySearchConfig.targetName}-v${
-            similaritySearchConfig.collectionVersion
-        }`
+        }-${similaritySearchConfig.targetName}`
         : '';
 
     // 当前选中项的显示文本
@@ -744,36 +741,25 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                     : `${selectedOptionCount} options selected`)
         : activeModelLabel;
 
-    const similarityScenes = useMemo(() => {
-        const scenes = new Map<string, string>();
-        similarityCollections.forEach(collection => {
-            scenes.set(collection.scene_id, collection.scene_name);
-        });
-        return [...scenes.entries()].map(([id, name]) => ({ id, name }));
-    }, [similarityCollections]);
-
-    const similarityTargets = useMemo(() => {
-        const targets = new Map<string, string>();
-        similarityCollections
-            .filter(collection => collection.scene_id === similaritySceneId)
-            .forEach(collection => targets.set(collection.target_id, collection.target_name));
-        return [...targets.entries()].map(([id, name]) => ({ id, name }));
-    }, [similarityCollections, similaritySceneId]);
-
-    const similarityVersionCollections = useMemo(
-        () => similarityCollections
-            .filter(collection =>
-                collection.scene_id === similaritySceneId
-                && collection.target_id === similarityTargetId
-            )
-            .sort((left, right) => right.version - left.version),
-        [similarityCollections, similaritySceneId, similarityTargetId]
-    );
-
-    const latestSimilarityCollection = similarityVersionCollections[0] || null;
-    const selectedSimilarityCollection = similarityVersionCollections.find(
+    const similaritySelectableCollections = useMemo(() => similarityCollections
+        .filter(collection => {
+            if (similarityMode === 'dino') {
+                return collection.compatible && collection.count > 0;
+            }
+            return similarityJobs.some(job =>
+                job.collection === collection.name
+                && job.state === 'completed'
+                && !!job.dataset_id
+            );
+        })
+        .sort((left, right) => {
+            const leftLabel = left.display_name || left.target_name || left.name;
+            const rightLabel = right.display_name || right.target_name || right.name;
+            return leftLabel.localeCompare(rightLabel) || right.version - left.version;
+        }), [similarityCollections, similarityJobs, similarityMode]);
+    const selectedSimilarityCollection = similaritySelectableCollections.find(
         collection => collection.name === similarityCollectionName
-    ) || latestSimilarityCollection;
+    ) || similaritySelectableCollections[0] || null;
 
     const selectedSimilarityDatasetJob = useMemo(() => {
         if (!selectedSimilarityCollection) return null;
@@ -793,36 +779,17 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
     }, [selectedSimilarityCollection, similarityJobs]);
 
     useEffect(() => {
-        if (similarityScenes.length === 0) return;
-        if (!similarityScenes.some(scene => scene.id === similaritySceneId)) {
-            setSimilaritySceneId(similarityScenes[0].id);
-        }
-    }, [similarityScenes, similaritySceneId]);
-
-    useEffect(() => {
-        if (similarityTargets.length === 0) {
-            setSimilarityTargetId('');
-            return;
-        }
-        if (!similarityTargets.some(target => target.id === similarityTargetId)) {
-            setSimilarityTargetId(similarityTargets[0].id);
-        }
-    }, [similarityTargets, similarityTargetId]);
-
-    useEffect(() => {
-        if (similarityVersionCollections.length === 0) {
+        if (similaritySelectableCollections.length === 0) {
             setSimilarityCollectionName('');
             return;
         }
-        if (!similarityVersionCollections.some(collection => collection.name === similarityCollectionName)) {
-            setSimilarityCollectionName(similarityVersionCollections[0].name);
+        if (!similaritySelectableCollections.some(collection => collection.name === similarityCollectionName)) {
+            setSimilarityCollectionName(similaritySelectableCollections[0].name);
         }
-    }, [similarityCollectionName, similarityVersionCollections]);
+    }, [similarityCollectionName, similaritySelectableCollections]);
 
     const openSimilarityConfig = useCallback(() => {
         if (similaritySearchConfig) {
-            setSimilaritySceneId(similaritySearchConfig.sceneId);
-            setSimilarityTargetId(similaritySearchConfig.targetId);
             setSimilarityCollectionName(similaritySearchConfig.collectionName);
             setSimilarityMode(similaritySearchConfig.mode);
         }
@@ -1404,123 +1371,53 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                                                         ))}
                                                     </div>
                                                 </div>
-                                                <label style={{ display: 'block', marginBottom: 9 }}>
-                                                    <span style={{ display: 'block', marginBottom: 4 }}>
-                                                        {language === 'zh' ? '场景' : 'Scene'}
-                                                    </span>
-                                                    <select
-                                                        value={similaritySceneId}
-                                                        onChange={event => setSimilaritySceneId(event.target.value)}
-                                                        style={{
-                                                            width: '100%',
-                                                            height: 26,
-                                                            padding: '0 6px',
-                                                            border: '1px solid #555',
-                                                            borderRadius: 3,
-                                                            background: '#202020',
-                                                            color: '#ddd',
-                                                            fontSize: 11,
-                                                        }}
-                                                    >
-                                                        {similarityScenes.length === 0 && (
-                                                            <option value=''>{language === 'zh' ? '暂无场景' : 'No scenes'}</option>
-                                                        )}
-                                                        {similarityScenes.map(scene => (
-                                                            <option key={scene.id} value={scene.id}>{scene.name}</option>
-                                                        ))}
-                                                    </select>
-                                                </label>
-                                                <label style={{ display: 'block', marginBottom: 9 }}>
-                                                    <span style={{ display: 'block', marginBottom: 4 }}>
-                                                        {language === 'zh' ? '目标' : 'Target'}
-                                                    </span>
-                                                    <select
-                                                        value={similarityTargetId}
-                                                        onChange={event => setSimilarityTargetId(event.target.value)}
-                                                        disabled={similarityTargets.length === 0}
-                                                        style={{
-                                                            width: '100%',
-                                                            height: 26,
-                                                            padding: '0 6px',
-                                                            border: '1px solid #555',
-                                                            borderRadius: 3,
-                                                            background: '#202020',
-                                                            color: '#ddd',
-                                                            fontSize: 11,
-                                                        }}
-                                                    >
-                                                        {similarityTargets.length === 0 && (
-                                                            <option value=''>{language === 'zh' ? '暂无目标' : 'No targets'}</option>
-                                                        )}
-                                                        {similarityTargets.map(target => (
-                                                            <option key={target.id} value={target.id}>{target.name}</option>
-                                                        ))}
-                                                    </select>
-                                                </label>
                                                 <label style={{
                                                     display: 'block',
                                                     marginBottom: 10,
                                                 }}>
                                                     <span style={{ display: 'block', marginBottom: 4 }}>
-                                                        {language === 'zh' ? '版本' : 'Version'}
+                                                        {language === 'zh' ? '向量数据库' : 'Vector database'}
                                                     </span>
-                                                    {selectedSimilarityCollection ? (
-                                                        <>
-                                                            <select
-                                                                value={selectedSimilarityCollection.name}
-                                                                onChange={event => setSimilarityCollectionName(event.target.value)}
-                                                                style={{
-                                                                    width: '100%',
-                                                                    height: 26,
-                                                                    padding: '0 6px',
-                                                                    border: '1px solid #555',
-                                                                    borderRadius: 3,
-                                                                    background: '#202020',
-                                                                    color: '#ddd',
-                                                                    fontSize: 11,
-                                                                }}
-                                                            >
-                                                                {similarityVersionCollections.map(collection => (
-                                                                    <option
-                                                                        key={collection.name}
-                                                                        value={collection.name}
-                                                                        disabled={!collection.compatible || collection.count === 0}
-                                                                    >
-                                                                        v{collection.version} {collection.granularity === 'bbox'
-                                                                            ? (language === 'zh' ? '(目标框)' : '(Bounding boxes)')
-                                                                            : (language === 'zh' ? '(整张图片)' : '(Whole image)')}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                            <div style={{
-                                                                marginTop: 4,
-                                                                color: selectedSimilarityCollection.name === latestSimilarityCollection?.name
-                                                                    ? '#7fcf9a'
-                                                                    : '#aaa',
-                                                            }}>
-                                                                {selectedSimilarityCollection.name === latestSimilarityCollection?.name
-                                                                    ? (language === 'zh'
-                                                                        ? `已自动选择最新版本，共 ${selectedSimilarityCollection.count} 条向量`
-                                                                        : `Latest version selected automatically, ${selectedSimilarityCollection.count} vectors total`)
-                                                                    : (language === 'zh'
-                                                                        ? `共 ${selectedSimilarityCollection.count} 条向量`
-                                                                        : `${selectedSimilarityCollection.count} vectors total`)}
-                                                            </div>
-                                                        </>
-                                                    ) : (
-                                                        <span style={{ color: '#ff8a80' }}>
-                                                            {language === 'zh' ? '该目标暂无向量版本' : 'No vector version for this target'}
-                                                        </span>
-                                                    )}
+                                                    <select
+                                                        value={selectedSimilarityCollection?.name || ''}
+                                                        onChange={event => setSimilarityCollectionName(event.target.value)}
+                                                        disabled={similaritySelectableCollections.length === 0}
+                                                        style={{
+                                                            width: '100%',
+                                                            height: 26,
+                                                            padding: '0 6px',
+                                                            border: '1px solid #555',
+                                                            borderRadius: 3,
+                                                            background: '#202020',
+                                                            color: '#ddd',
+                                                            fontSize: 11,
+                                                        }}
+                                                    >
+                                                        {similaritySelectableCollections.length === 0 && (
+                                                            <option value=''>
+                                                                {language === 'zh' ? '当前方案暂无可用向量数据库' : 'No vector database for this plan'}
+                                                            </option>
+                                                        )}
+                                                        {similaritySelectableCollections.map(collection => {
+                                                            const displayName = collection.display_name
+                                                                || collection.target_name
+                                                                || collection.name;
+                                                            return <option key={collection.name} value={collection.name}>
+                                                                {displayName}{displayName === collection.name
+                                                                    ? ''
+                                                                    : ` (${collection.name})`}
+                                                            </option>;
+                                                        })}
+                                                    </select>
+                                                    {selectedSimilarityCollection && <div style={{
+                                                        marginTop: 4,
+                                                        color: '#7fcf9a',
+                                                    }}>
+                                                        {language === 'zh'
+                                                            ? `共 ${selectedSimilarityCollection.count} 条向量`
+                                                            : `${selectedSimilarityCollection.count} vectors total`}
+                                                    </div>}
                                                 </label>
-                                                {selectedSimilarityCollection && similarityMode === 'dino' && (
-                                                    !selectedSimilarityCollection.compatible || selectedSimilarityCollection.count === 0
-                                                ) && (
-                                                    <div style={{ marginBottom: 9, color: '#ff8a80' }}>
-                                                        {selectedSimilarityCollection.compatibility_reason
-                                                            || (language === 'zh' ? '所选版本暂无可检索向量' : 'The selected version has no searchable vectors')}
-                                                    </div>
-                                                )}
                                                 {selectedSimilarityCollection && similarityMode === 'l2g' && (
                                                     <div style={{
                                                         marginBottom: 9,
@@ -1528,7 +1425,7 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                                                     }}>
                                                         {selectedSimilarityDatasetJob?.dataset_id
                                                             ? (language === 'zh' ? '高精度检索数据已就绪' : 'High-precision search dataset is ready')
-                                                            : (language === 'zh' ? '所选版本暂无高精度检索数据' : 'No high-precision search data for the selected version')}
+                                                            : (language === 'zh' ? '所选向量数据库暂无高精度检索数据' : 'No high-precision search data for the selected vector database')}
                                                     </div>
                                                 )}
                                             </>

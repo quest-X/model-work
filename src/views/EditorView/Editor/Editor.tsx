@@ -30,6 +30,8 @@ import {isEqual} from 'lodash';
 import {AIActions} from '../../../logic/actions/AIActions';
 import {VideoSelector} from '../../../store/selectors/VideoSelector';
 import {ImageActions} from '../../../logic/actions/ImageActions';
+import {CanvasMultiViewState, CanvasMultiViewStore} from '../MultiView/CanvasMultiViewStore';
+import {CanvasAuxViews} from '../MultiView/CanvasAuxView';
 
 interface IProps {
     size: ISize;
@@ -47,6 +49,7 @@ interface IState {
     viewPortSize: ISize;
     isMiddleMouseDragging: boolean;
     lastMiddleMousePosition: IPoint | null;
+    multiView: CanvasMultiViewState;
 }
 
 export class Editor extends React.Component<IProps, IState> {
@@ -62,7 +65,8 @@ export class Editor extends React.Component<IProps, IState> {
                 height: 0
             },
             isMiddleMouseDragging: false,
-            lastMiddleMousePosition: null
+            lastMiddleMousePosition: null,
+            multiView: CanvasMultiViewStore.get()
         };
     }
 
@@ -72,6 +76,7 @@ export class Editor extends React.Component<IProps, IState> {
 
     public componentDidMount(): void {
         this.mounted = true;
+        this.unsubscribeMultiView = CanvasMultiViewStore.subscribe(multiView => this.setState({multiView}));
         this.mountEventListeners();
 
         const {imageData, activeLabelType} = this.props;
@@ -91,6 +96,7 @@ export class Editor extends React.Component<IProps, IState> {
 
     public componentWillUnmount(): void {
         this.mounted = false;
+        if (this.unsubscribeMultiView) this.unsubscribeMultiView();
         this.requestGeneration++;
         EditorActions.setLoadingStatus(false);
         this.unmountEventListeners();
@@ -128,6 +134,7 @@ export class Editor extends React.Component<IProps, IState> {
     // =================================================================================================================
 
     private mountedCanvas: HTMLCanvasElement | null = null;
+    private unsubscribeMultiView: (() => void) | null = null;
 
     private mountEventListeners() {
         // 先清理可能残留的旧 listener（防止 React 18 StrictMode 双重 mount 泄漏）
@@ -400,36 +407,38 @@ export class Editor extends React.Component<IProps, IState> {
     };
 
     public render() {
+        const {multiView} = this.state;
         return (
             <div
                 className='Editor'
                 ref={ref => EditorModel.editor = ref}
                 draggable={false}
             >
-                <Scrollbars
-                    ref={ref => EditorModel.viewPortScrollbars = ref}
-                    renderTrackHorizontal={props => <div {...props} className='track-horizontal'/>}
-                    renderTrackVertical={props => <div {...props} className='track-vertical'/>}
-                    onUpdate={this.onScrollbarsUpdate}
-                >
-                    <div
-                        className='ViewPortContent'
-                    >
-                        <canvas
-                            className='ImageCanvas'
-                            ref={ref => EditorModel.canvas = ref}
-                            draggable={false}
-                            onContextMenu={(event: React.MouseEvent<HTMLCanvasElement>) => event.preventDefault()}
-                            onMouseDown={(event: React.MouseEvent<HTMLCanvasElement>) => {
-                                // 阻止中键的默认行为（如打开新标签页）
-                                if (event.button === 1) {
-                                    event.preventDefault();
-                                }
-                            }}
-                        />
-                        {this.getOptionsPanels()}
+                <div className={`CanvasMultiViewGrid layout-${multiView.layout}`}>
+                    <div className='CanvasViewPane primary'>
+                        <div className='CanvasViewHeader'>原图 · 可编辑</div>
+                        <Scrollbars
+                            ref={ref => EditorModel.viewPortScrollbars = ref}
+                            renderTrackHorizontal={props => <div {...props} className='track-horizontal'/>}
+                            renderTrackVertical={props => <div {...props} className='track-vertical'/>}
+                            onUpdate={this.onScrollbarsUpdate}
+                        >
+                            <div className='ViewPortContent'>
+                                <canvas
+                                    className='ImageCanvas'
+                                    ref={ref => EditorModel.canvas = ref}
+                                    draggable={false}
+                                    onContextMenu={(event: React.MouseEvent<HTMLCanvasElement>) => event.preventDefault()}
+                                    onMouseDown={(event: React.MouseEvent<HTMLCanvasElement>) => {
+                                        if (event.button === 1) event.preventDefault();
+                                    }}
+                                />
+                                {this.getOptionsPanels()}
+                            </div>
+                        </Scrollbars>
                     </div>
-                </Scrollbars>
+                    <CanvasAuxViews imageData={this.props.imageData} state={multiView}/>
+                </div>
                 <div
                     className='MousePositionIndicator'
                     ref={ref => EditorModel.mousePositionIndicator = ref}

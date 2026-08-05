@@ -45,6 +45,7 @@ import { NotificationUtil } from '../../../utils/NotificationUtil';
 import { inferModelTaskFromName } from '../../../utils/ModelTaskUtil';
 import {ModelInspectorTrigger} from './ModelInspectorTrigger';
 import {VisualSearchTrigger} from './VisualSearchTrigger';
+import {CanvasMultiViewTrigger} from '../MultiView/CanvasMultiViewTrigger';
 import {runDirectVisualSearch} from '../../../services/DirectVisualSearchService';
 const BUTTON_SIZE: ISize = { width: 30, height: 30 };
 const BUTTON_PADDING: number = 10;
@@ -1179,6 +1180,7 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                         () => onToolClick(LabelType.POLYGON)
                     )
                 }
+                <CanvasMultiViewTrigger />
             </div>
             <div className='ButtonWrapper'>
                 {(() => {

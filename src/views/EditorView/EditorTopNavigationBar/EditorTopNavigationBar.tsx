@@ -717,6 +717,15 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
     const selectedModelEntries = modelDropdownEntries.filter(
         entry => effectiveSelectedModelNames.includes(entry.name)
     );
+    const similarityConfigSummary = similaritySearchConfig
+        ? `${
+            similaritySearchConfig.mode === 'dino'
+                ? (language === 'zh' ? '快速模式' : 'Fast Mode')
+                : (language === 'zh' ? '高精度模式' : 'High-precision Mode')
+        }-${similaritySearchConfig.sceneName}-${similaritySearchConfig.targetName}-v${
+            similaritySearchConfig.collectionVersion
+        }`
+        : '';
 
     // 当前选中项的显示文本
     const activeModelLabel = activeModelEntry
@@ -729,7 +738,7 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
             : selectedOptionCount === 1 && selectedModelEntries.length === 1
                 ? `${selectedModelEntries[0].label} (${selectedModelEntries[0].name})`
                 : selectedOptionCount === 1
-                    ? (language === 'zh' ? '检索相似' : 'Similarity Search')
+                    ? `${language === 'zh' ? '检索相似' : 'Similarity Search'} (${similarityConfigSummary})`
                 : (language === 'zh'
                     ? `已选 ${selectedOptionCount} 项`
                     : `${selectedOptionCount} options selected`)
@@ -860,16 +869,6 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                 ? selectedSimilarityCollection.compatible && selectedSimilarityCollection.count > 0
                 : !!selectedSimilarityDatasetJob?.dataset_id
         );
-    const similarityConfigSummary = similaritySearchConfig
-        ? `${similaritySearchConfig.sceneName}-${similaritySearchConfig.targetName}-v${
-            similaritySearchConfig.collectionVersion
-        }-${
-            similaritySearchConfig.mode === 'dino'
-                ? (language === 'zh' ? '快速模式' : 'Fast Mode')
-                : (language === 'zh' ? '高精度模式' : 'High-precision Mode')
-        }`
-        : '';
-
     // 判断当前活跃模型是否为分割类型:
     // 1. 优先使用后端 model_tasks（精确，通过 model.task 属性获取）
     // 2. 回退到统一文件名 token 规则（含日期_SEG_项目_... 模型）

@@ -1,8 +1,6 @@
 @import '../../../settings/Settings';
 
 .EditorTopNavigationBar {
-  position: relative;
-  z-index: 100020;
   align-self: stretch;
   height: $editorTopNavigationBarHeight;
   box-sizing: border-box;

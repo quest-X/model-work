@@ -42,6 +42,21 @@ export const runDirectVisualSearch = async ({
 
     let query = deriveEditorVisualSearchQuery(activeImage, initial.labels.activeLabelId);
     if (query.kind === 'image') {
+        const visibleSeeds = [
+            ...activeImage.labelRects.filter(item => item.isVisible !== false && !item.isPrompt),
+            ...activeImage.labelPolygons.filter(item => item.isVisible !== false),
+        ];
+        const manualRects = activeImage.labelRects.filter(item =>
+            item.isVisible !== false && !item.isPrompt && !item.isCreatedByAI);
+        const fallbackSeed = manualRects.length === 1
+            ? manualRects[0]
+            : visibleSeeds.length === 1 ? visibleSeeds[0] : null;
+        if (fallbackSeed) {
+            store.dispatch(updateActiveLabelId(fallbackSeed.id));
+            query = deriveEditorVisualSearchQuery(activeImage, fallbackSeed.id);
+        }
+    }
+    if (query.kind === 'image') {
         const selectedPoint = activeImage.labelPoints.find(
             point => point.id === initial.labels.activeLabelId,
         );
@@ -63,7 +78,7 @@ export const runDirectVisualSearch = async ({
         }
     }
     if (query.kind === 'image') {
-        throw new Error('请先选中 bbox/mask，或用 point 生成 seed mask');
+        throw new Error('当前有多个候选标注，请先点击一个 bbox/mask；也可以用 point 生成 seed mask');
     }
 
     const collections = await loadVisualSearchCollections();

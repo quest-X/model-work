@@ -1452,9 +1452,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
                         <span>{copy.temporaryLabel}</span>
                         <small>{copy.temporaryDetail}</small>
                     </span>
-                    {(activeModule !== 'data' || localChangeCount !== temporaryCount) && (
-                        <strong>{temporaryCount}</strong>
-                    )}
+                    <strong>{temporaryCount}</strong>
                 </button>
             </div>
             <p className='DataTierSidebarHint'>{copy.hint}</p>

@@ -198,6 +198,24 @@ describe('VisualSearchAcceptanceService', () => {
         expect(UndoStack.size()).toBe(0);
     });
 
+    it('accepts an exact-hash result from an older indexed revision into a newer open revision', async () => {
+        const {testStore} = readyStore();
+        UndoStack.clear();
+        testStore.dispatch(updateQueueItem('queue-1', {datasetRevision: 8}));
+        const service = new VisualSearchAcceptanceService({
+            getState: testStore.getState,
+            dispatch: testStore.dispatch,
+            digestFile: async () => DIGEST,
+            afterAccept: jest.fn(),
+        });
+
+        await expect(service.accept('snapshot-bbox', 'result-1')).resolves.toEqual({
+            imageId: 'target-image',
+            labelRectId: 'visual-search:task-1:result-1',
+        });
+        expect(testStore.getState().labels.imagesData[0].labelRects).toHaveLength(1);
+    });
+
     it('rejects a local filename match whose SHA-256 identity differs', async () => {
         const {testStore} = readyStore();
         UndoStack.clear();

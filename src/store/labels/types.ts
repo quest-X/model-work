@@ -88,6 +88,7 @@ export interface VisualSearchBBoxAcceptance {
     backendJobId: string;
     resultId: string;
     queueItemId: string;
+    queueDatasetRevision: string | number;
     datasetId: string;
     datasetRevision: string | number;
     assetId: string;
@@ -102,6 +103,7 @@ export interface VisualSearchMaskAcceptance {
     backendJobId: string;
     resultId: string;
     queueItemId: string;
+    queueDatasetRevision: string | number;
     datasetId: string;
     datasetRevision: string | number;
     assetId: string;

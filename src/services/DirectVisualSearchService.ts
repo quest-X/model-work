@@ -76,8 +76,19 @@ export const runDirectVisualSearch = async ({
     const activeQueueItem = initial.queue.items.find(
         item => item.id === initial.queue.activeQueueItemId,
     ) ?? null;
-    const className = initial.labels.labels.find(label => label.id === query.labelId)?.name
-        ?? 'retrieved';
+    const className = initial.labels.labels.find(label => label.id === query.labelId)?.name;
+    const targetDatasetId = selectedCollection.datasetId ?? activeQueueItem?.datasetId ?? null;
+    const targetDatasetRevision = selectedCollection.datasetRevision
+        ?? (targetDatasetId ? selectedCollection.datasetRevisions[targetDatasetId] : null)
+        ?? null;
+    if (!targetDatasetId || targetDatasetRevision === null) {
+        throw new Error('所选向量数据库没有当前数据集的权威版本，请重新入库');
+    }
+    const boundCollection = {
+        ...selectedCollection,
+        datasetId: targetDatasetId,
+        datasetRevision: targetDatasetRevision,
+    };
     const source = await resolveVisualSearchSource({
         activeImage,
         activeImageIndex,
@@ -93,7 +104,7 @@ export const runDirectVisualSearch = async ({
             activeVideo: initial.video.activeVideo,
             isVideoMode: initial.video.isVideoMode,
             source,
-            selectedCollection,
+            selectedCollection: boundCollection,
             query,
             topK,
             className,
@@ -122,7 +133,10 @@ export const runDirectVisualSearch = async ({
                 failures.push(cause instanceof Error ? cause.message : String(cause));
             }
         }
-        if (items.length > 0 && accepted === 0) {
+        if (items.length === 0) {
+            throw new Error('没有检索到相似目标');
+        }
+        if (accepted === 0) {
             throw new Error(failures[0] || '检索结果没有可写回的精确 bbox 或 mask');
         }
         return {

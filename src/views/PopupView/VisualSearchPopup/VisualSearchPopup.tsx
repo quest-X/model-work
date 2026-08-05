@@ -286,7 +286,7 @@ export interface SnapshotInputContext {
     selectedCollection: VisualSearchCollection;
     query: EditorVisualSearchQuery;
     topK: number;
-    className: string;
+    className?: string;
 }
 
 export const createVisualSearchSnapshotInput = ({
@@ -335,7 +335,7 @@ export const createVisualSearchSnapshotInput = ({
     options: {
         topK,
         candidateK: Math.max(topK, Math.min(100, topK * 4)),
-        className: query.kind === 'image' ? undefined : className,
+        className: query.kind === 'image' ? undefined : className || undefined,
     },
     geometry: query.geometry,
 });

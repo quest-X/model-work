@@ -9,7 +9,6 @@ import {
     VisualSearchMaskAcceptance,
 } from '../../store/labels/types';
 import {VisualSearchResultItem} from '../../store/visualSearch/types';
-import {QueueItemType} from '../../store/queue/types';
 import {
     parseVisualSearchMaskComponent,
     validateVisualSearchMaskGroup,
@@ -119,16 +118,15 @@ const assertCommonAcceptanceCAS = (
         !sameRevision(result.datasetRevision, acceptance.datasetRevision)) {
         acceptanceCASFailure('result_asset_revision');
     }
-    if (state.video.isVideoMode) acceptanceCASFailure('video_mode');
     if (state.queue.activeQueueItemId !== acceptance.queueItemId) {
         acceptanceCASFailure('active_queue');
     }
     const queueItem = state.queue.items.find(item => item.id === acceptance.queueItemId);
-    if (!queueItem || queueItem.type === QueueItemType.VIDEO) {
+    if (!queueItem) {
         acceptanceCASFailure('queue_item');
     }
     if (queueItem.datasetId !== acceptance.datasetId ||
-        !sameRevision(queueItem.datasetRevision, acceptance.datasetRevision)) {
+        !sameRevision(queueItem.datasetRevision, acceptance.queueDatasetRevision)) {
         acceptanceCASFailure('queue_dataset_revision');
     }
     const image = state.labels.imagesData.find(item => item.id === acceptance.imageId);

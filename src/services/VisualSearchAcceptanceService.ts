@@ -95,7 +95,12 @@ const requireDatasetBinding = (
     state: AppState,
     job: VisualSearchJobState,
     item: VisualSearchResultItem,
-): {queueItemId: string; datasetId: string; datasetRevision: string | number} => {
+): {
+    queueItemId: string;
+    queueDatasetRevision: string | number;
+    datasetId: string;
+    datasetRevision: string | number;
+} => {
     const datasetId = job.snapshot.target.datasetId;
     const datasetRevision = job.snapshot.target.datasetRevision;
     if (!datasetId || datasetRevision === undefined || datasetRevision === null) {
@@ -107,12 +112,16 @@ const requireDatasetBinding = (
     }
     const queueItemId = state.queue.activeQueueItemId;
     const queueItem = state.queue.items.find(candidate => candidate.id === queueItemId);
-    if (!queueItem ||
-        queueItem.datasetId !== datasetId ||
-        !sameRevision(queueItem.datasetRevision, datasetRevision)) {
-        throw new Error('Open the exact target dataset revision in the file queue first');
+    if (!queueItem || queueItem.datasetId !== datasetId ||
+        queueItem.datasetRevision === null || queueItem.datasetRevision === undefined) {
+        throw new Error('Open the target dataset in the file queue first');
     }
-    return {queueItemId: queueItem.id, datasetId, datasetRevision};
+    return {
+        queueItemId: queueItem.id,
+        queueDatasetRevision: queueItem.datasetRevision,
+        datasetId,
+        datasetRevision,
+    };
 };
 
 const requireAssetDigest = (item: VisualSearchResultItem): string => {
@@ -284,6 +293,7 @@ export class VisualSearchAcceptanceService {
             backendJobId,
             resultId: item.resultId,
             queueItemId: binding.queueItemId,
+            queueDatasetRevision: binding.queueDatasetRevision,
             datasetId: binding.datasetId,
             datasetRevision: binding.datasetRevision,
             assetId: item.assetId as string,
@@ -345,6 +355,7 @@ export class VisualSearchAcceptanceService {
             backendJobId,
             resultId: item.resultId,
             queueItemId: binding.queueItemId,
+            queueDatasetRevision: binding.queueDatasetRevision,
             datasetId: binding.datasetId,
             datasetRevision: binding.datasetRevision,
             assetId: item.assetId as string,

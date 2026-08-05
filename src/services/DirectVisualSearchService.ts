@@ -25,6 +25,16 @@ export interface DirectVisualSearchResult {
     rejected: number;
 }
 
+const resultFileName = (item: {fileName: string; path: string}): string =>
+    item.fileName || item.path.split(/[\\/]/).pop() || '';
+
+const resultFrameIndex = (item: {fileName: string; path: string}): number | null => {
+    const match = /^frame_(\d+)\./i.exec(resultFileName(item));
+    if (!match) return null;
+    const value = Number(match[1]);
+    return Number.isSafeInteger(value) ? value : null;
+};
+
 /**
  * Runs the snapshot-based visual-search pipeline without opening its inspection
  * popup, then accepts every exact result geometry into the matching loaded asset.
@@ -104,6 +114,15 @@ export const runDirectVisualSearch = async ({
         datasetId: targetDatasetId,
         datasetRevision: targetDatasetRevision,
     };
+    const explicitlySelected = initial.labels.imagesData
+        .map((image, index) => ({image, index}))
+        .filter(entry => entry.image.isSelected);
+    const scopeEntries = explicitlySelected.length > 1
+        ? explicitlySelected
+        : [{image: activeImage, index: activeImageIndex}];
+    const scopeImageIds = new Set(scopeEntries.map(entry => entry.image.id));
+    const scopeFileNames = new Set(scopeEntries.map(entry => entry.image.fileData.name));
+    const scopeFrameIndices = new Set(scopeEntries.map(entry => entry.index));
     const source = await resolveVisualSearchSource({
         activeImage,
         activeImageIndex,
@@ -121,7 +140,7 @@ export const runDirectVisualSearch = async ({
             source,
             selectedCollection: boundCollection,
             query,
-            topK,
+            topK: initial.video.isVideoMode ? Math.max(topK, 100) : topK,
             className,
         }));
         const run = visualSearchJobService.start(snapshot, {
@@ -134,7 +153,16 @@ export const runDirectVisualSearch = async ({
         }
 
         const job = store.getState().visualSearch.jobsById[run.clientJobId];
-        const items = job?.result?.items ?? [];
+        const allItems = job?.result?.items ?? [];
+        const currentImages = store.getState().labels.imagesData;
+        const items = allItems.filter(item => {
+            if (initial.video.isVideoMode) {
+                const frameIndex = resultFrameIndex(item);
+                return frameIndex !== null && scopeFrameIndices.has(frameIndex) &&
+                    scopeImageIds.has(currentImages[frameIndex]?.id);
+            }
+            return scopeFileNames.has(resultFileName(item));
+        });
         let accepted = 0;
         const failures: string[] = [];
         for (const item of items) {
@@ -149,7 +177,9 @@ export const runDirectVisualSearch = async ({
             }
         }
         if (items.length === 0) {
-            throw new Error('没有检索到相似目标');
+            throw new Error(scopeEntries.length > 1
+                ? '所选帧中没有检索到相似目标'
+                : '当前图中没有检索到相似目标');
         }
         if (accepted === 0) {
             throw new Error(failures[0] || '检索结果没有可写回的精确 bbox 或 mask');

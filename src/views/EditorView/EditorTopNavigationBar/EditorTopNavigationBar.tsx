@@ -30,7 +30,7 @@ import { DetectionAPIDetector } from '../../../ai/DetectionAPIDetector';
 import { SegmentationAPIDetector } from '../../../ai/SegmentationAPIDetector';
 import { getEngineBaseUrl, getExtensionEngineBaseUrl } from '../../../utils/DefaultBackendUrl';
 import { ActiveModel } from '../../../ai/ActiveModel';
-import { queueSimilaritySearchPreset, SimilaritySearchMode } from '../../../ai/SimilaritySearchPresetStore';
+import { SimilaritySearchMode } from '../../../ai/SimilaritySearchPresetStore';
 import { ScriptStore } from '../../../ai/ScriptStore';
 import { PipelineStore } from '../../../ai/PipelineStore';
 import { SmartAnnotationActions } from '../../../logic/actions/SmartAnnotationActions';
@@ -45,6 +45,7 @@ import { NotificationUtil } from '../../../utils/NotificationUtil';
 import { inferModelTaskFromName } from '../../../utils/ModelTaskUtil';
 import {ModelInspectorTrigger} from './ModelInspectorTrigger';
 import {VisualSearchTrigger} from './VisualSearchTrigger';
+import {runDirectVisualSearch} from '../../../services/DirectVisualSearchService';
 const BUTTON_SIZE: ISize = { width: 30, height: 30 };
 const BUTTON_PADDING: number = 10;
 
@@ -859,15 +860,42 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
         store.dispatch({ type: 'SET_SELECTED_MODEL_TASK', payload: resolvedTask });
     }, [activeModelName, modelTasks]);
 
-    const launchConfiguredSimilaritySearch = useCallback((queryFile: File): boolean => {
+    const launchConfiguredSimilaritySearch = useCallback(async (): Promise<boolean> => {
         if (!similaritySearchConfig) return false;
-        queueSimilaritySearchPreset({
-            ...similaritySearchConfig,
-            queryFile,
-        });
-        updateActivePopupTypeAction(PopupWindowType.L2G_RETRIEVAL);
+        if (similaritySearchConfig.mode !== 'dino') {
+            const note = NotificationUtil.createErrorNotification({
+                header: language === 'zh' ? '视觉检索失败' : 'Visual search failed',
+                description: language === 'zh'
+                    ? '高精度方案暂不返回可写回的精确 bbox 或 mask，请选择快速方案。'
+                    : 'The high-precision scheme does not return exact writable bbox or mask geometry yet. Select the fast scheme.',
+            });
+            store.dispatch(submitNewNotification(note));
+            setTimeout(() => store.dispatch(deleteNotificationById(note.id)), 6000);
+            return true;
+        }
+        try {
+            const result = await runDirectVisualSearch({
+                collectionName: similaritySearchConfig.collectionName,
+                topK: 12,
+            });
+            const note = NotificationUtil.createSuccessNotification({
+                header: language === 'zh' ? '视觉检索完成' : 'Visual search completed',
+                description: language === 'zh'
+                    ? `已直接写回 ${result.accepted} 个 bbox/mask${result.rejected ? `，跳过 ${result.rejected} 个` : ''}`
+                    : `Wrote ${result.accepted} bbox/mask results directly${result.rejected ? `; skipped ${result.rejected}` : ''}`,
+            });
+            store.dispatch(submitNewNotification(note));
+            setTimeout(() => store.dispatch(deleteNotificationById(note.id)), 5000);
+        } catch (cause) {
+            const note = NotificationUtil.createErrorNotification({
+                header: language === 'zh' ? '视觉检索失败' : 'Visual search failed',
+                description: cause instanceof Error ? cause.message : String(cause),
+            });
+            store.dispatch(submitNewNotification(note));
+            setTimeout(() => store.dispatch(deleteNotificationById(note.id)), 7000);
+        }
         return true;
-    }, [similaritySearchConfig, updateActivePopupTypeAction]);
+    }, [language, similaritySearchConfig]);
 
     const runInference = useCallback(async (_mode?: string) => {
         setShowInferenceMenu(false);
@@ -966,7 +994,7 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
             }];
         if (inferencePlan.length === 0) {
             if (similaritySearchSelected) {
-                if (!launchConfiguredSimilaritySearch(activeImageData.fileData as File)) {
+                if (!await launchConfiguredSimilaritySearch()) {
                     setShowInferenceMenu(true);
                     openSimilarityConfig();
                 }
@@ -1019,7 +1047,7 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
             }
         }
         if (similaritySearchSelected && !multiInferenceCancelledRef.current) {
-            if (!launchConfiguredSimilaritySearch(activeImageData.fileData as File)) {
+            if (!await launchConfiguredSimilaritySearch()) {
                 setShowInferenceMenu(true);
                 openSimilarityConfig();
             }
@@ -1231,7 +1259,14 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                     disabled={imagesData.length === 0}
                     hasExtensionEngine={hasExtensionEngine}
                     language={language}
-                    onOpen={() => updateActivePopupTypeAction(PopupWindowType.VISUAL_SEARCH)}
+                    onOpen={() => {
+                        void (async () => {
+                            if (!await launchConfiguredSimilaritySearch()) {
+                                setShowInferenceMenu(true);
+                                openSimilarityConfig();
+                            }
+                        })();
+                    }}
                 />
                 <ModelInspectorTrigger
                     key={modelInspectorBackendKey}

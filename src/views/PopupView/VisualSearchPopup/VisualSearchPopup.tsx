@@ -276,7 +276,7 @@ const optionalDatasetBinding = (
     return {datasetId, datasetRevision};
 };
 
-interface SnapshotInputContext {
+export interface SnapshotInputContext {
     activeImage: ImageData;
     activeImageIndex: number;
     activeQueueItem: QueueItem | null;
@@ -289,7 +289,7 @@ interface SnapshotInputContext {
     className: string;
 }
 
-const createSnapshotInput = ({
+export const createVisualSearchSnapshotInput = ({
     activeImage,
     activeImageIndex,
     activeQueueItem,
@@ -552,7 +552,7 @@ export const VisualSearchPopup: React.FC<Props> = ({
         setSubmitError(null);
         setCapturePhase('resolving-source');
         try {
-            const snapshot = await snapshotCapture(createSnapshotInput({
+            const snapshot = await snapshotCapture(createVisualSearchSnapshotInput({
                 activeImage: queryImage,
                 activeImageIndex: queryImageIndex,
                 activeQueueItem: queryQueueItem,

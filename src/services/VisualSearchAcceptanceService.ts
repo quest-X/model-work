@@ -96,9 +96,6 @@ const requireDatasetBinding = (
     job: VisualSearchJobState,
     item: VisualSearchResultItem,
 ): {queueItemId: string; datasetId: string; datasetRevision: string | number} => {
-    if (state.video.isVideoMode) {
-        throw new Error('Visual-search acceptance is disabled for video frames');
-    }
     const datasetId = job.snapshot.target.datasetId;
     const datasetRevision = job.snapshot.target.datasetRevision;
     if (!datasetId || datasetRevision === undefined || datasetRevision === null) {

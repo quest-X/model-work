@@ -10,7 +10,14 @@ import {
     VisualSearchSnapshotMetadata,
     VisualSearchSourceIdentity,
     VisualSearchTargetRef,
+    VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
 } from '../store/visualSearch/types';
+import {
+    assertVisualSearchMaskDimensions,
+    canonicalizeVisualSearchPolygons,
+    rasterizeVisualSearchPolygons,
+    visualSearchMaskPixelsBBox,
+} from './VisualSearchMaskGeometry';
 
 export type QuerySnapshotPhase =
     | 'resolving-source'
@@ -25,7 +32,7 @@ export type QueryGeometryInput =
     | {
         kind: 'mask';
         polygons: ReadonlyArray<ReadonlyArray<readonly [number, number]>>;
-        /** Optional authoritative PNG mask. Otherwise polygons are rasterized. */
+        /** Legacy input retained for fail-closed compatibility; caller PNGs are rejected. */
         maskBlob?: Blob;
     };
 
@@ -52,7 +59,7 @@ export interface QuerySnapshotDependencies {
     createId?: () => string;
     now?: () => number;
     encodeMask?: (
-        polygons: ReadonlyArray<VisualSearchPolygon>,
+        pixels: Uint8Array,
         width: number,
         height: number,
     ) => Promise<Blob>;
@@ -118,46 +125,27 @@ const normalizePolygons = (
     width: number,
     height: number,
 ): ReadonlyArray<VisualSearchPolygon> => {
-    if (value.length === 0) throw new Error('mask requires at least one polygon');
-    return Object.freeze(value.map((polygon, polygonIndex) => {
-        if (polygon.length < 3) {
-            throw new Error(`mask polygon ${polygonIndex} requires at least three points`);
+    const canonical = canonicalizeVisualSearchPolygons(value, width, height);
+    return Object.freeze(canonical.map((polygon, polygonIndex) => {
+        const doubleArea = polygon.reduce((sum, point, pointIndex) => {
+            const next = polygon[(pointIndex + 1) % polygon.length];
+            return sum + point[0] * next[1] - next[0] * point[1];
+        }, 0);
+        if (doubleArea === 0) {
+            throw new Error(`mask polygon ${polygonIndex} must have a positive area`);
         }
-        return Object.freeze(polygon.map((point, pointIndex) => {
-            if (point.length !== 2 || point.some(coordinate => !Number.isFinite(coordinate))) {
-                throw new Error(`mask polygon ${polygonIndex} point ${pointIndex} is invalid`);
-            }
-            return Object.freeze([
-                clamp(point[0], width),
-                clamp(point[1], height),
-            ]) as VisualSearchPoint;
-        }));
+        return Object.freeze(polygon.map(point =>
+            Object.freeze([point[0], point[1]]) as VisualSearchPoint));
     }));
 };
 
-const polygonBounds = (polygons: ReadonlyArray<VisualSearchPolygon>): VisualSearchBBox => {
-    const points = polygons.flat();
-    const xs = points.map(point => point[0]);
-    const ys = points.map(point => point[1]);
-    const bbox: VisualSearchBBox = [
-        Math.min(...xs),
-        Math.min(...ys),
-        Math.max(...xs),
-        Math.max(...ys),
-    ];
-    if (bbox[2] <= bbox[0] || bbox[3] <= bbox[1]) {
-        throw new Error('mask must have a positive area');
-    }
-    return Object.freeze(bbox) as VisualSearchBBox;
-};
-
-const canvasMaskEncoder = async (
-    polygons: ReadonlyArray<VisualSearchPolygon>,
+const canonicalMaskEncoder = async (
+    pixels: Uint8Array,
     width: number,
     height: number,
 ): Promise<Blob> => {
     if (typeof document === 'undefined') {
-        throw new Error('maskBlob is required when canvas is unavailable');
+        throw new Error('canvas is unavailable for canonical mask PNG encoding');
     }
     const canvas = document.createElement('canvas');
     canvas.width = width;
@@ -165,16 +153,16 @@ const canvasMaskEncoder = async (
     const context = canvas.getContext('2d');
     if (!context) throw new Error('2D canvas is unavailable for mask encoding');
 
-    context.fillStyle = '#000';
-    context.fillRect(0, 0, width, height);
-    context.beginPath();
-    polygons.forEach(polygon => {
-        context.moveTo(polygon[0][0], polygon[0][1]);
-        polygon.slice(1).forEach(point => context.lineTo(point[0], point[1]));
-        context.closePath();
+    const imageData = context.createImageData(width, height);
+    pixels.forEach((value, index) => {
+        const offset = index * 4;
+        const channel = value ? 255 : 0;
+        imageData.data[offset] = channel;
+        imageData.data[offset + 1] = channel;
+        imageData.data[offset + 2] = channel;
+        imageData.data[offset + 3] = 255;
     });
-    context.fillStyle = '#fff';
-    context.fill('evenodd');
+    context.putImageData(imageData, 0, 0);
 
     return new Promise<Blob>((resolve, reject) => {
         canvas.toBlob(blob => {
@@ -200,7 +188,7 @@ const freezeGeometry = (
     maskFileName: string,
 ): {
     geometry: VisualSearchQueryGeometry;
-    polygons?: ReadonlyArray<VisualSearchPolygon>;
+    maskPixels?: Uint8Array;
 } => {
     if (input.kind === 'image') return {geometry: Object.freeze({kind: 'image'})};
     if (input.kind === 'bbox') {
@@ -212,14 +200,19 @@ const freezeGeometry = (
         };
     }
     const polygons = normalizePolygons(input.polygons, width, height);
-    return {
-        geometry: Object.freeze({
-            kind: 'mask',
-            polygons,
-            bbox: polygonBounds(polygons),
-            maskFileName,
-        }),
+    const maskPixels = rasterizeVisualSearchPolygons(polygons, width, height);
+    const bbox = visualSearchMaskPixelsBBox(maskPixels, width, height);
+    if (!bbox) throw new Error('mask rasterization produced no foreground pixels');
+    const geometry = Object.freeze({
+        kind: 'mask' as const,
         polygons,
+        bbox: Object.freeze(bbox) as VisualSearchBBox,
+        maskFileName,
+        rasterizerRevision: VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
+    });
+    return {
+        geometry,
+        maskPixels,
     };
 };
 
@@ -305,20 +298,23 @@ const freezeOptions = (
 
 const createMaskFile = async (
     input: QueryGeometryInput,
-    frozenPolygons: ReadonlyArray<VisualSearchPolygon> | undefined,
+    maskPixels: Uint8Array | undefined,
     width: number,
     height: number,
     maskFileName: string,
     dependencies: QuerySnapshotDependencies,
 ): Promise<File | undefined> => {
     if (input.kind !== 'mask') return undefined;
+    if (input.maskBlob !== undefined) {
+        throw new Error('maskBlob cannot override canonical polygon rasterization');
+    }
+    if (!maskPixels) throw new Error('canonical mask pixels are unavailable');
     dependencies.onPhase?.('encoding-mask');
-    const maskBlob = input.maskBlob ??
-        await (dependencies.encodeMask ?? canvasMaskEncoder)(
-            frozenPolygons as ReadonlyArray<VisualSearchPolygon>,
-            width,
-            height,
-        );
+    const maskBlob = await (dependencies.encodeMask ?? canonicalMaskEncoder)(
+        maskPixels.slice(),
+        width,
+        height,
+    );
     if (!maskBlob || maskBlob.size === 0) throw new Error('encoded mask is empty');
     if (maskBlob.type !== 'image/png') throw new Error('mask must be encoded as image/png');
     return cloneAsFile(maskBlob, maskFileName, 'image/png');
@@ -332,6 +328,7 @@ export class QuerySnapshotService {
         const emit = (phase: QuerySnapshotPhase) => dependencies.onPhase?.(phase);
         const width = requirePositiveInteger(input.width, 'width');
         const height = requirePositiveInteger(input.height, 'height');
+        assertVisualSearchMaskDimensions(width, height);
         const snapshotId = dependencies.createId?.() ?? uuidv4();
         const capturedAt = dependencies.now?.() ?? Date.now();
 
@@ -353,7 +350,7 @@ export class QuerySnapshotService {
 
         const maskFile = await createMaskFile(
             input.geometry,
-            frozen.polygons,
+            frozen.maskPixels,
             width,
             height,
             maskFileName,

@@ -54,6 +54,7 @@ describe('VisualSearchCatalog', () => {
         expect(collectionSupportsQuery(base, 'bbox')).toBe(true);
         expect(collectionSupportsQuery(base, 'image')).toBe(false);
         expect(collectionSupportsQuery(base, 'mask')).toBe(false);
+        expect(collectionSupportsQuery({...base, granularity: 'mask'}, 'mask')).toBe(true);
         expect(collectionSupportsQuery({...base, count: 0}, 'bbox')).toBe(false);
         expect(collectionSupportsQuery({...base, compatible: false}, 'bbox')).toBe(false);
     });

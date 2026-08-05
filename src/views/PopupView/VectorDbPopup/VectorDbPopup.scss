@@ -294,7 +294,7 @@
 
   .ModePicker {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
     margin: 0;
     border: 0;
@@ -333,6 +333,14 @@
     &.selected {
       border-color: rgba(0, 158, 253, 0.65);
       background: rgba(0, 158, 253, 0.1);
+    }
+  }
+
+  .IngestPlanPicker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    .ModeOption {
+      min-height: 58px;
     }
   }
 
@@ -590,6 +598,12 @@
       background: rgba(176, 145, 255, 0.09);
       color: #cbbaff;
     }
+
+    &.mask {
+      border-color: rgba(88, 214, 141, 0.3);
+      background: rgba(88, 214, 141, 0.09);
+      color: #9ee5bb;
+    }
   }
 
   .CollectionWorkspace {
@@ -840,6 +854,28 @@
     border-radius: 6px;
     background: rgba(255, 255, 255, 0.02);
     padding: 11px;
+  }
+
+  .DatasetCoverage {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 8px;
+    margin-top: 9px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.035);
+    padding: 7px 9px;
+    font-size: 10px;
+
+    span,
+    small {
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    strong {
+      color: #bce3fb;
+      font-size: 12px;
+    }
   }
 
   .UploadZone,

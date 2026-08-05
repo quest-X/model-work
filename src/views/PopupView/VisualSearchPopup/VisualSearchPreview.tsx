@@ -6,6 +6,7 @@ import {
     VisualSearchPolygon,
     VisualSearchResultItem,
     VisualSearchResultGeometry,
+    VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
 } from '../../../store/visualSearch/types';
 
 interface GeometryOverlayProps {
@@ -109,6 +110,10 @@ interface ResultsProps {
     acceptanceReason?: (item: VisualSearchResultItem) => string | null;
     acceptingResultId?: string | null;
     acceptedResultIds?: ReadonlySet<string>;
+    seedCandidateStatus?: (item: VisualSearchResultItem) => 'candidate' | 'accepted' | 'rejected';
+    seedDecision?: (item: VisualSearchResultItem) => 'positive' | 'negative' | null;
+    onSeedDecision?: (item: VisualSearchResultItem, decision: 'positive' | 'negative') => void;
+    seedBusy?: boolean;
 }
 
 interface ResultCardProps extends ResultsProps {
@@ -117,31 +122,34 @@ interface ResultCardProps extends ResultsProps {
 
 interface ResultMediaProps {
     item: VisualSearchResultItem;
-    bbox: VisualSearchBBox | null | undefined;
-    bboxResult: boolean;
+    resultKind: VisualSearchJobState['snapshot']['geometry']['kind'];
     chinese: boolean;
 }
 
 const VisualSearchResultMedia: React.FC<ResultMediaProps> = ({
     item,
-    bbox,
-    bboxResult,
+    resultKind,
     chinese,
-}) => <div className='vs-result-media'>
+}) => {
+    // Mask thumbnails retain the full-image coordinate space. Only bbox
+    // thumbnails are cropped; never infer a mask crop without wire metadata.
+    const maskGeometry = resultKind === 'mask' ? item.geometry : null;
+    return <div className='vs-result-media'>
     {item.thumbnail
         ? <img src={item.thumbnail} alt={item.fileName}/>
         : <div className='vs-result-placeholder'>
             {chinese ? '无缩略图' : 'No preview'}
         </div>}
-    {item.thumbnail && !bboxResult && item.width && item.height && <GeometryOverlay
-        geometry={item.geometry}
-        fallbackBbox={bbox}
+    {item.thumbnail && maskGeometry && item.width && item.height && <GeometryOverlay
+        geometry={maskGeometry}
         width={item.width}
         height={item.height}
+        testId='visual-search-result-mask-overlay'
     />}
     <span className='vs-rank'>#{item.rank}</span>
     <span className='vs-score'>{scoreLabel(item.score)}</span>
 </div>;
+};
 
 interface ResultCopyProps {
     item: VisualSearchResultItem;
@@ -154,8 +162,15 @@ interface ResultCopyProps {
     accepting: boolean;
     accepted: boolean;
     onAccept?: () => void;
+    resultKind: VisualSearchJobState['snapshot']['geometry']['kind'];
+    seedCandidateStatus?: 'candidate' | 'accepted' | 'rejected';
+    seedDecision?: 'positive' | 'negative' | null;
+    onSeedDecision?: (decision: 'positive' | 'negative') => void;
+    seedBusy?: boolean;
 }
 
+// Copy reflects terminal/identity/geometry/acceptance states without hiding a failure.
+// eslint-disable-next-line complexity
 const VisualSearchResultCopy: React.FC<ResultCopyProps> = ({
     item,
     bbox,
@@ -167,6 +182,11 @@ const VisualSearchResultCopy: React.FC<ResultCopyProps> = ({
     accepting,
     accepted,
     onAccept,
+    resultKind,
+    seedCandidateStatus,
+    seedDecision,
+    onSeedDecision,
+    seedBusy,
 }) => <div className='vs-result-copy'>
     <strong title={item.fileName || item.path}>{item.fileName || item.path}</strong>
     <span>{kindLabel}</span>
@@ -188,10 +208,36 @@ const VisualSearchResultCopy: React.FC<ResultCopyProps> = ({
             ? (chinese ? '已接受' : 'Accepted')
             : accepting
                 ? (chinese ? '校验并写入…' : 'Verifying…')
-                : (chinese ? '接受为标注框' : 'Accept bbox')}
+                : resultKind === 'mask'
+                    ? (chinese ? '接受为分割标注' : 'Accept mask')
+            : (chinese ? '接受为标注框' : 'Accept bbox')}
     </button>}
+    {resultKind !== 'image' && onSeedDecision && <div className='vs-seed-actions'>
+        <button
+            type='button'
+            className={seedDecision === 'positive' || seedCandidateStatus === 'accepted'
+                ? 'positive active'
+                : 'positive'}
+            disabled={seedBusy || seedCandidateStatus !== 'candidate'}
+            onClick={() => onSeedDecision('positive')}
+        >{seedCandidateStatus === 'accepted'
+                ? (chinese ? '已是正种子' : 'Positive seed')
+                : (chinese ? '作为正种子' : 'Use as seed')}</button>
+        <button
+            type='button'
+            className={seedDecision === 'negative' || seedCandidateStatus === 'rejected'
+                ? 'negative active'
+                : 'negative'}
+            disabled={seedBusy || seedCandidateStatus !== 'candidate'}
+            onClick={() => onSeedDecision('negative')}
+        >{seedCandidateStatus === 'rejected'
+                ? (chinese ? '已排除' : 'Rejected')
+                : (chinese ? '排除' : 'Reject')}</button>
+    </div>}
 </div>;
 
+// Same-kind image/bbox/mask cards deliberately keep their contract branches explicit.
+// eslint-disable-next-line complexity
 const VisualSearchResultCard: React.FC<ResultCardProps> = ({
     job,
     item,
@@ -200,19 +246,32 @@ const VisualSearchResultCard: React.FC<ResultCardProps> = ({
     acceptanceReason,
     acceptingResultId,
     acceptedResultIds,
+    seedCandidateStatus,
+    seedDecision,
+    onSeedDecision,
+    seedBusy,
 }) => {
-    const missingAcceptIdentity = !item.assetId || item.width === null || item.height === null;
+    const resultKind = job.snapshot.geometry.kind;
+    const missingMaskGeometry = resultKind === 'mask' && (
+        !item.geometrySha256 ||
+        !item.geometry?.mask ||
+        !item.geometry.polygons?.length ||
+        item.geometry.rasterizerRevision !== VISUAL_SEARCH_MASK_RASTERIZER_REVISION
+    );
+    const missingAcceptIdentity = !item.assetId || !item.contentSha256 ||
+        item.width === null || item.height === null || missingMaskGeometry;
     const bbox = item.geometry?.bbox ?? item.bbox;
-    const bboxResult = job.snapshot.geometry.kind === 'bbox';
-    const canAccept = bboxResult && !missingAcceptIdentity && Boolean(bbox);
-    const kindLabel = bboxResult
+    const canAccept = (resultKind === 'bbox' || resultKind === 'mask') &&
+        !missingAcceptIdentity && Boolean(bbox);
+    const kindLabel = resultKind === 'bbox'
         ? (chinese ? '框选结果 · 裁剪预览' : 'BBox result · crop preview')
-        : (chinese ? '整图结果' : 'Full-image result');
+        : resultKind === 'mask'
+            ? (chinese ? '掩码结果 · 裁剪预览' : 'Mask result · crop preview')
+            : (chinese ? '整图结果' : 'Full-image result');
     return <article className='vs-result-card'>
         <VisualSearchResultMedia
             item={item}
-            bbox={bbox}
-            bboxResult={bboxResult}
+            resultKind={resultKind}
             chinese={chinese}
         />
         <VisualSearchResultCopy
@@ -226,6 +285,13 @@ const VisualSearchResultCard: React.FC<ResultCardProps> = ({
             accepting={acceptingResultId === item.resultId}
             accepted={acceptedResultIds?.has(item.resultId) ?? false}
             onAccept={onAccept ? () => onAccept(item) : undefined}
+            resultKind={resultKind}
+            seedCandidateStatus={seedCandidateStatus?.(item)}
+            seedDecision={seedDecision?.(item)}
+            onSeedDecision={onSeedDecision
+                ? decision => onSeedDecision(item, decision)
+                : undefined}
+            seedBusy={seedBusy}
         />
     </article>;
 };
@@ -237,6 +303,10 @@ export const VisualSearchResults: React.FC<ResultsProps> = ({
     acceptanceReason,
     acceptingResultId,
     acceptedResultIds,
+    seedCandidateStatus,
+    seedDecision,
+    onSeedDecision,
+    seedBusy,
 }) => {
     const items = job.result?.items ?? [];
     if (job.status !== 'succeeded') return null;
@@ -255,6 +325,10 @@ export const VisualSearchResults: React.FC<ResultsProps> = ({
             acceptanceReason={acceptanceReason}
             acceptingResultId={acceptingResultId}
             acceptedResultIds={acceptedResultIds}
+            seedCandidateStatus={seedCandidateStatus}
+            seedDecision={seedDecision}
+            onSeedDecision={onSeedDecision}
+            seedBusy={seedBusy}
         />)}
     </div>;
 };

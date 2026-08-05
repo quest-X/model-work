@@ -23,6 +23,7 @@ import {
     VisualSearchJobState,
     VisualSearchResultItem,
     VisualSearchRevision,
+    VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
 } from '../../../store/visualSearch/types';
 import {visualSearchSetActiveJob} from '../../../store/visualSearch/actionCreators';
 import {
@@ -43,8 +44,15 @@ import {
 import {
     VisualSearchAcceptanceService,
     visualSearchAcceptanceService,
+    visualSearchAcceptedMaskPolygonId,
     visualSearchAcceptedRectId,
 } from '../../../services/VisualSearchAcceptanceService';
+import {
+    VisualSearchSeedGraph,
+    VisualSearchSeedGraphRunner,
+    visualSearchSeedGraphService,
+} from '../../../services/VisualSearchSeedGraphService';
+import {VisualSearchSeedGraphView} from './VisualSearchSeedGraphView';
 import './VisualSearchPopup.scss';
 
 export interface ResolvedVisualSearchSource {
@@ -83,6 +91,7 @@ interface StateProps {
     jobs: VisualSearchJobState[];
     activeJobId: string | null;
     acceptedRectIds: string[];
+    acceptedPolygonIds: string[];
 }
 
 interface DispatchProps {
@@ -95,6 +104,7 @@ interface OwnProps {
     snapshotCapture?: SnapshotCapture;
     jobRunner?: VisualSearchJobRunner;
     acceptanceRunner?: VisualSearchAcceptanceRunner;
+    seedGraphRunner?: VisualSearchSeedGraphRunner;
     onClose?: () => void;
 }
 
@@ -325,7 +335,7 @@ const createSnapshotInput = ({
     options: {
         topK,
         candidateK: Math.max(topK, Math.min(100, topK * 4)),
-        className: query.kind === 'bbox' ? className : undefined,
+        className: query.kind === 'image' ? undefined : className,
     },
     geometry: query.geometry,
 });
@@ -345,12 +355,14 @@ export const VisualSearchPopup: React.FC<Props> = ({
     jobs,
     activeJobId,
     acceptedRectIds = [],
+    acceptedPolygonIds = [],
     selectJob,
     collectionLoader = loadVisualSearchCollections,
     sourceResolver = resolveVisualSearchSource,
     snapshotCapture = QuerySnapshotService.capture,
     jobRunner = visualSearchJobService,
     acceptanceRunner = visualSearchAcceptanceService,
+    seedGraphRunner = visualSearchSeedGraphService,
     onClose = PopupActions.close,
 }) => {
     const chinese = language === Language.CHINESE;
@@ -397,6 +409,13 @@ export const VisualSearchPopup: React.FC<Props> = ({
     const [acceptingResultId, setAcceptingResultId] = useState<string | null>(null);
     const [acceptanceError, setAcceptanceError] = useState<string | null>(null);
     const [acceptedThisSession, setAcceptedThisSession] = useState<string[]>([]);
+    const [seedGraphs, setSeedGraphs] = useState<Record<string, VisualSearchSeedGraph>>({});
+    const [seedDecisions, setSeedDecisions] = useState<Record<
+        string,
+        'positive' | 'negative'
+    >>({});
+    const [seedBusy, setSeedBusy] = useState(false);
+    const [seedError, setSeedError] = useState<string | null>(null);
 
     useEffect(() => {
         if (!queryImage) {
@@ -476,24 +495,54 @@ export const VisualSearchPopup: React.FC<Props> = ({
         collection => collection.name === selectedCollectionName,
     ) ?? null;
     const activeJob = jobs.find(job => job.clientJobId === activeJobId) ?? jobs[0] ?? null;
+    const activeSeedGraph = activeJob?.backendJobId
+        ? seedGraphs[activeJob.backendJobId] ?? null
+        : null;
+    const seedCandidateMap = useMemo(() => new Map(
+        (activeSeedGraph?.candidates ?? []).map(candidate => [candidate.resultId, candidate]),
+    ), [activeSeedGraph]);
+    const displayedJob = useMemo<VisualSearchJobState | null>(() => {
+        if (!activeJob || !activeSeedGraph || !activeJob.result) return activeJob;
+        return {
+            ...activeJob,
+            result: {
+                ...activeJob.result,
+                total: activeSeedGraph.candidates.length,
+                items: activeSeedGraph.candidates.map(candidate => candidate.item),
+            },
+        };
+    }, [activeJob, activeSeedGraph]);
+
+    useEffect(() => {
+        setSeedDecisions({});
+        setSeedError(null);
+    }, [activeJob?.backendJobId]);
     const acceptedResultIds = useMemo(() => {
         const acceptedIds = new Set(acceptedThisSession);
         if (!activeJob?.backendJobId) return acceptedIds;
         activeJob.result?.items.forEach(item => {
-            if (acceptedRectIds.includes(
+            const acceptedBBox = acceptedRectIds.includes(
                 visualSearchAcceptedRectId(activeJob.backendJobId as string, item.resultId),
-            )) {
+            );
+            const polygonCount = item.geometry?.polygons?.length ?? 0;
+            const acceptedMask = polygonCount > 0 && Array.from(
+                {length: polygonCount},
+                (_unused, index) => visualSearchAcceptedMaskPolygonId(
+                    activeJob.backendJobId as string,
+                    item.resultId,
+                    index,
+                ),
+            ).every(id => acceptedPolygonIds.includes(id));
+            if (acceptedBBox || acceptedMask) {
                 acceptedIds.add(item.resultId);
             }
         });
         return acceptedIds;
-    }, [acceptedRectIds, acceptedThisSession, activeJob]);
-    const maskUnavailable = query.kind === 'mask';
+    }, [acceptedPolygonIds, acceptedRectIds, acceptedThisSession, activeJob]);
     const canSubmit = Boolean(
         queryImage &&
         source &&
         selectedCollection &&
-        !maskUnavailable &&
         !submitting,
     );
 
@@ -534,12 +583,24 @@ export const VisualSearchPopup: React.FC<Props> = ({
         }
     };
 
+    // Every acceptance boundary is kept explicit for an operator-readable reason.
+    // eslint-disable-next-line complexity
     const acceptanceBlockReason = (
         job: VisualSearchJobState,
         item: VisualSearchResultItem,
     ): string | null => {
-        if (job.snapshot.geometry.kind !== 'bbox' || job.result?.queryKind !== 'bbox') {
-            return t('仅 bbox → bbox 结果可接受', 'Only bbox → bbox results can be accepted');
+        const kind = job.snapshot.geometry.kind;
+        if ((kind !== 'bbox' && kind !== 'mask') || job.result?.queryKind !== kind) {
+            return t(
+                '仅同类型 bbox 或 mask 结果可接受',
+                'Only same-kind bbox or mask results can be accepted',
+            );
+        }
+        if (!job.result?.items.some(result => result.resultId === item.resultId)) {
+            return t(
+                '扩展候选不属于原始任务；可继续作为种子，但不能借原任务写入标注。',
+                'Expanded candidates are not part of the root task; they can seed another round but cannot be accepted through the root task.',
+            );
         }
         if (isVideoMode) {
             return t('视频结果接受尚未启用', 'Acceptance is disabled for video frames');
@@ -568,7 +629,24 @@ export const VisualSearchPopup: React.FC<Props> = ({
             );
         }
         if (!item.assetId || !item.contentSha256) {
-            return t('结果缺少 SHA-256 资产身份', 'The result lacks SHA-256 asset identity');
+            return t('结果缺少资产 ID 或内容 SHA-256', 'The result lacks asset or content identity');
+        }
+        if (kind === 'mask' && item.acceptanceEligible !== true) {
+            return t(
+                `掩码仅可预览：${item.acceptanceReason || 'source_polygon_unavailable'}`,
+                `Mask is preview-only: ${item.acceptanceReason || 'source_polygon_unavailable'}`,
+            );
+        }
+        if (kind === 'mask' && (
+            !item.geometrySha256 ||
+            !item.geometry?.mask ||
+            !item.geometry.polygons?.length ||
+            item.geometry.rasterizerRevision !== VISUAL_SEARCH_MASK_RASTERIZER_REVISION
+        )) {
+            return t(
+                '掩码结果缺少 canonical RLE 或源多边形',
+                'The mask result lacks canonical RLE or source polygons',
+            );
         }
         return null;
     };
@@ -584,11 +662,123 @@ export const VisualSearchPopup: React.FC<Props> = ({
         } catch (cause) {
             setAcceptanceError(errorText(
                 cause,
-                t('接受标注框失败', 'Failed to accept the bbox'),
+                t('接受检索标注失败', 'Failed to accept the search result'),
             ));
         } finally {
             setAcceptingResultId(null);
         }
+    };
+
+    const createSeedGraph = async () => {
+        if (!activeJob?.backendJobId ||
+            activeJob.snapshot.geometry.kind === 'image' ||
+            seedBusy) {
+            return;
+        }
+        setSeedBusy(true);
+        setSeedError(null);
+        try {
+            const graph = await seedGraphRunner.create(
+                activeJob.backendJobId,
+                activeJob.snapshot.options.topK,
+                activeJob.snapshot.options.candidateK,
+            );
+            setSeedGraphs(current => ({...current, [activeJob.backendJobId as string]: graph}));
+        } catch (cause) {
+            setSeedError(errorText(
+                cause,
+                t('无法建立种子图', 'Could not create the seed graph'),
+            ));
+        } finally {
+            setSeedBusy(false);
+        }
+    };
+
+    const setSeedDecision = (
+        item: VisualSearchResultItem,
+        decision: 'positive' | 'negative',
+    ) => {
+        setSeedDecisions(current => {
+            const next = {...current};
+            if (next[item.resultId] === decision) delete next[item.resultId];
+            else next[item.resultId] = decision;
+            return next;
+        });
+    };
+
+    const expandSeedGraph = async () => {
+        if (!activeJob?.backendJobId || !activeSeedGraph || seedBusy) return;
+        const decisions = Object.entries(seedDecisions);
+        if (decisions.length === 0) return;
+        setSeedBusy(true);
+        setSeedError(null);
+        try {
+            const graph = await seedGraphRunner.expand(activeSeedGraph.graphId, {
+                acceptResultIds: decisions
+                    .filter(([, decision]) => decision === 'positive')
+                    .map(([resultId]) => resultId),
+                rejectResultIds: decisions
+                    .filter(([, decision]) => decision === 'negative')
+                    .map(([resultId]) => resultId),
+                candidateK: activeSeedGraph.candidateK,
+            });
+            setSeedGraphs(current => ({...current, [activeJob.backendJobId as string]: graph}));
+            setSeedDecisions({});
+        } catch (cause) {
+            setSeedError(errorText(
+                cause,
+                t('种子扩展失败', 'Seed expansion failed'),
+            ));
+        } finally {
+            setSeedBusy(false);
+        }
+    };
+
+    const renderSeedGraphControls = () => {
+        if (activeJob?.status !== 'succeeded' ||
+            activeJob.snapshot.geometry.kind === 'image' ||
+            !activeJob.backendJobId) return null;
+        if (!activeSeedGraph) {
+            return <div className='vs-seed-graph-panel'>
+                <div>
+                    <strong>{t('多种子扩展', 'Multi-seed expansion')}</strong>
+                    <span>{t(
+                        '把可信 bbox/mask 结果升级为新种子，继续搜索全部同型区域；向量与检索证据都会复用。',
+                        'Promote trusted bbox/mask results and search every same-kind region. Both vectors and search evidence are reused.',
+                    )}</span>
+                </div>
+                <button type='button' disabled={seedBusy} onClick={() => void createSeedGraph()}>
+                    {seedBusy ? t('建立中…', 'Creating…') : t('开启种子图', 'Start seed graph')}
+                </button>
+            </div>;
+        }
+        const stagedCount = Object.keys(seedDecisions).length;
+        const positiveCount = activeSeedGraph.seeds.filter(
+            seed => seed.polarity === 'positive',
+        ).length;
+        const negativeCount = activeSeedGraph.seeds.length - positiveCount;
+        return <div className='vs-seed-graph-workspace'>
+            <div className='vs-seed-graph-panel active'>
+                <div>
+                    <strong>{t(
+                        `第 ${activeSeedGraph.generation} 代 · ${activeSeedGraph.candidates.length} 条候选`,
+                        `Generation ${activeSeedGraph.generation} · ${activeSeedGraph.candidates.length} candidates`,
+                    )}</strong>
+                    <span>{t(
+                        `正种子 ${positiveCount} · 负种子 ${negativeCount}；新结果不会自动成为种子。`,
+                        `${positiveCount} positive · ${negativeCount} negative seeds. New results never become seeds automatically.`,
+                    )}</span>
+                </div>
+                <button
+                    type='button'
+                    disabled={seedBusy || stagedCount === 0}
+                    onClick={() => void expandSeedGraph()}
+                >{seedBusy
+                        ? t('搜索中…', 'Searching…')
+                        : t(`用 ${stagedCount} 个判断扩展`, `Expand with ${stagedCount} decision(s)`)}</button>
+            </div>
+            <VisualSearchSeedGraphView graph={activeSeedGraph} chinese={chinese}/>
+        </div>;
     };
 
     const renderInputPanel = () => <section className='vs-input-panel'>
@@ -618,11 +808,11 @@ export const VisualSearchPopup: React.FC<Props> = ({
                     : t('未选中框或掩码，使用整图', 'No box or mask selected; using full image')}
             </small>
         </div>
-        {maskUnavailable && <div className='vs-notice warning' role='status'>
-            <strong>{t('掩码检索暂未启用', 'Mask search is not enabled yet')}</strong>
+        {query.kind === 'mask' && <div className='vs-notice' role='status'>
+            <strong>{t('严格掩码检索', 'Strict mask search')}</strong>
             <span>{t(
-                '当前 DINO-only geometry stage 不具备真实掩码定位器。输入会保持为 mask，绝不会降级成整图；因此本轮禁止提交。',
-                'The current DINO-only geometry stage has no real mask locator. The query remains a mask and will never silently fall back to an image, so submission is disabled.',
+                '输入会编码为全图 PNG mask，仅绑定 mask 向量版本；结果必须返回真实 mask RLE，不会降级成框或整图。',
+                'The input is encoded as a full-image PNG mask and binds only to a mask vector version. Results must contain real mask RLE and never fall back to boxes or images.',
             )}</span>
         </div>}
     </section>;
@@ -634,7 +824,7 @@ export const VisualSearchPopup: React.FC<Props> = ({
             <select
                 aria-label={t('向量版本', 'Vector version')}
                 value={selectedCollectionName}
-                disabled={collectionsLoading || maskUnavailable}
+                disabled={collectionsLoading}
                 onChange={event => setSelectedCollectionName(event.target.value)}
             >
                 {eligibleCollections.length === 0 && <option value=''>
@@ -680,7 +870,7 @@ export const VisualSearchPopup: React.FC<Props> = ({
                     ))}
                 />
             </label>
-            {query.kind === 'bbox' && <label>
+            {query.kind !== 'image' && <label>
                 {t('类别筛选（可选）', 'Class filter (optional)')}
                 <input
                     value={className}
@@ -699,7 +889,7 @@ export const VisualSearchPopup: React.FC<Props> = ({
                 ? capturePhaseLabel(capturePhase, chinese)
                 : t('冻结快照并提交', 'Freeze snapshot and submit')}
         </button>
-        {!maskUnavailable && !collectionsLoading && eligibleCollections.length === 0 && <p className='vs-help'>
+        {!collectionsLoading && eligibleCollections.length === 0 && <p className='vs-help'>
             {t(
                 `当前输入为${visualSearchKindLabel(query.kind, true)}，不会自动改用其他粒度。请先在向量数据库创建并入库同类型版本。`,
                 `The input is ${visualSearchKindLabel(query.kind, false)}. Other granularities are never substituted; create and ingest a same-kind vector version first.`,
@@ -766,14 +956,24 @@ export const VisualSearchPopup: React.FC<Props> = ({
                     )
                     : activeJob.error.message}</span>
             </div>}
-            <VisualSearchResults
-                job={activeJob}
+            {renderSeedGraphControls()}
+            {displayedJob && <VisualSearchResults
+                job={displayedJob}
                 chinese={chinese}
                 onAccept={item => void acceptResult(item)}
                 acceptanceReason={item => acceptanceBlockReason(activeJob, item)}
                 acceptingResultId={acceptingResultId}
                 acceptedResultIds={acceptedResultIds}
-            />
+                seedCandidateStatus={activeSeedGraph
+                    ? item => seedCandidateMap.get(item.resultId)?.status ?? 'candidate'
+                    : undefined}
+                seedDecision={activeSeedGraph
+                    ? item => seedDecisions[item.resultId] ?? null
+                    : undefined}
+                onSeedDecision={activeSeedGraph ? setSeedDecision : undefined}
+                seedBusy={seedBusy}
+            />}
+            {seedError && <div className='vs-notice error' role='alert'>{seedError}</div>}
             {acceptanceError && <div className='vs-notice error' role='alert'>
                 {acceptanceError}
             </div>}
@@ -783,7 +983,12 @@ export const VisualSearchPopup: React.FC<Props> = ({
                         '仅 bbox → bbox 可原子接受；提交前会校验任务、资产 SHA-256 与 dataset revision，一次接受对应一次撤销。',
                         'Only bbox → bbox can be accepted atomically. Task identity, asset SHA-256, and dataset revision are checked before one acceptance creates one undo step.',
                     )
-                    : t(
+                    : activeJob.snapshot.geometry.kind === 'mask'
+                        ? t(
+                            'mask → mask 接受会校验源多边形与 canonical RLE 完全一致，并作为一次原子撤销写入一个或多个分割标注。',
+                            'Mask acceptance verifies source polygons against canonical RLE bit-exactly, then writes one or more segmentation labels as one atomic undo step.',
+                        )
+                        : t(
                         '整图结果保持预览/定位用途，不会写入标注。',
                         'Full-image results remain preview/navigation-only and never create annotations.',
                     )}
@@ -849,6 +1054,10 @@ const mapStateToProps = (state: AppState): StateProps => {
         acceptedRectIds: state.labels.imagesData.flatMap(image =>
             image.labelRects
                 .map(rect => rect.id)
+                .filter(id => id.startsWith('visual-search:'))),
+        acceptedPolygonIds: state.labels.imagesData.flatMap(image =>
+            image.labelPolygons
+                .map(polygon => polygon.id)
                 .filter(id => id.startsWith('visual-search:'))),
     };
 };

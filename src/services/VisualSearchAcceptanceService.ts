@@ -1,27 +1,43 @@
 import {store} from '../index';
 import {EditorActions} from '../logic/actions/EditorActions';
-import {acceptVisualSearchBBox} from '../store/labels/actionCreators';
-import {LabelRect, VisualSearchBBoxAcceptance} from '../store/labels/types';
+import {acceptVisualSearchBBox, acceptVisualSearchMask} from '../store/labels/actionCreators';
+import {
+    LabelPolygon,
+    LabelRect,
+    VisualSearchBBoxAcceptance,
+    VisualSearchMaskAcceptance,
+} from '../store/labels/types';
 import {AppState} from '../store';
 import {LabelStatus} from '../data/enums/LabelStatus';
 import {sha256File} from '../utils/Sha256';
+import {visualSearchVerticesSignature} from '../utils/VisualSearchMaskProvenance';
 import {
     VisualSearchBBox,
     VisualSearchJobState,
     VisualSearchResultItem,
 } from '../store/visualSearch/types';
+import {
+    verifyVisualSearchMaskGeometry,
+    VisualSearchMaskGeometryInput,
+} from './VisualSearchMaskGeometry';
 
 export interface VisualSearchAcceptanceResult {
     imageId: string;
-    labelRectId: string;
+    labelRectId?: string;
+    labelPolygonIds?: string[];
 }
 
 interface VisualSearchAcceptanceOptions {
     getState?: () => AppState;
     dispatch?: (action: ReturnType<typeof acceptVisualSearchBBox>) => unknown;
     digestFile?: (file: File) => Promise<string>;
+    verifyMaskGeometry?: (
+        input: VisualSearchMaskGeometryInput,
+    ) => Promise<ReadonlyArray<ReadonlyArray<readonly [number, number]>>>;
     afterAccept?: () => void;
 }
+
+type VerifyMaskGeometry = NonNullable<VisualSearchAcceptanceOptions['verifyMaskGeometry']>;
 
 const normalizeSha256 = (value: string | null | undefined): string | null => {
     const normalized = value?.trim().toLowerCase() ?? '';
@@ -63,14 +79,14 @@ const requireAcceptableJob = (
     if (!job || job.status !== 'succeeded' || !job.backendJobId || !job.result) {
         throw new Error('Only a completed visual-search task can be accepted');
     }
-    if (job.snapshot.geometry.kind !== 'bbox' ||
-        job.result.queryKind !== 'bbox') {
-        throw new Error('Only bbox → bbox results can be accepted');
+    const kind = job.snapshot.geometry.kind;
+    if ((kind !== 'bbox' && kind !== 'mask') || job.result.queryKind !== kind) {
+        throw new Error('Only same-kind bbox or mask results can be accepted');
     }
     const item = job.result.items.find(candidate => candidate.resultId === resultId);
     if (!item) throw new Error('The visual-search result is no longer available');
-    if (item.geometry?.kind !== 'bbox' || !sameBBox(item.geometry.bbox, item.bbox)) {
-        throw new Error('The result does not contain one exact bbox geometry');
+    if (item.geometry?.kind !== kind || !sameBBox(item.geometry.bbox, item.bbox)) {
+        throw new Error(`The result does not contain exact ${kind} geometry`);
     }
     return {job, item};
 };
@@ -136,15 +152,40 @@ export const visualSearchAcceptedRectId = (
 ): string =>
     `visual-search:${backendJobId}:${resultId}`;
 
+export const visualSearchAcceptedMaskPolygonId = (
+    backendJobId: string,
+    resultId: string,
+    componentIndex: number,
+): string =>
+    `visual-search:${backendJobId}:${resultId}:mask:${componentIndex}`;
+
 const matchingFileName = (item: VisualSearchResultItem, file: File): boolean => {
     const pathName = item.path.split(/[\\/]/).pop();
     return file.name === item.fileName || file.name === pathName;
 };
 
+const freezeResultItem = (item: VisualSearchResultItem): VisualSearchResultItem => ({
+    ...item,
+    bbox: item.bbox ? [...item.bbox] as VisualSearchBBox : null,
+    geometry: item.geometry ? {
+        ...item.geometry,
+        bbox: item.geometry.bbox
+            ? [...item.geometry.bbox] as VisualSearchBBox
+            : item.geometry.bbox,
+        polygons: item.geometry.polygons?.map(polygon =>
+            polygon.map(point => [...point] as const)) ?? item.geometry.polygons,
+        mask: item.geometry.mask ? {
+            ...item.geometry.mask,
+            size: [...item.geometry.mask.size] as [number, number],
+        } : item.geometry.mask,
+    } : null,
+});
+
 export class VisualSearchAcceptanceService {
     private readonly getState: () => AppState;
     private readonly dispatch: (action: ReturnType<typeof acceptVisualSearchBBox>) => unknown;
     private readonly fileDigest: (file: File) => Promise<string>;
+    private readonly verifyMask: VerifyMaskGeometry;
     private readonly afterAccept: () => void;
     private readonly digestCache = new WeakMap<File, Promise<string>>();
 
@@ -152,6 +193,7 @@ export class VisualSearchAcceptanceService {
         this.getState = options.getState ?? (() => store.getState());
         this.dispatch = options.dispatch ?? (action => store.dispatch(action));
         this.fileDigest = options.digestFile ?? sha256File;
+        this.verifyMask = options.verifyMaskGeometry ?? verifyVisualSearchMaskGeometry;
         this.afterAccept = options.afterAccept ?? (() => EditorActions.fullRender());
     }
 
@@ -160,10 +202,15 @@ export class VisualSearchAcceptanceService {
         resultId: string,
     ): Promise<VisualSearchAcceptanceResult> {
         const initial = this.getState();
-        const {job, item} = requireAcceptableJob(initial, clientJobId, resultId);
+        const {job, item: currentItem} = requireAcceptableJob(initial, clientJobId, resultId);
+        const item = freezeResultItem(currentItem);
+        const backendJobId = job.backendJobId as string;
         const binding = requireDatasetBinding(initial, job, item);
         const expectedDigest = requireAssetDigest(item);
         const bbox = validateBBox(item);
+        const sourcePolygons = item.geometry?.kind === 'mask'
+            ? await this.requireMaskGeometry(item)
+            : null;
         const candidates = initial.labels.imagesData.filter(image =>
             matchingFileName(item, image.fileData));
         if (candidates.length === 0) {
@@ -183,15 +230,46 @@ export class VisualSearchAcceptanceService {
         }
         if (!target) throw new Error('The local file does not match the result asset SHA-256');
 
-        const rectId = visualSearchAcceptedRectId(job.backendJobId as string, item.resultId);
         const currentLabels = this.getState().labels.labels;
         const matchingLabel = item.className
             ? currentLabels.find(label =>
                 label.name.toLowerCase() === item.className?.toLowerCase())
             : undefined;
+        if (sourcePolygons) {
+            return this.acceptMask(
+                clientJobId,
+                backendJobId,
+                item,
+                binding,
+                target,
+                sourcePolygons,
+                matchingLabel?.id ?? null,
+            );
+        }
+        return this.acceptBBox(
+            clientJobId,
+            backendJobId,
+            item,
+            binding,
+            target,
+            bbox,
+            matchingLabel?.id ?? null,
+        );
+    }
+
+    private acceptBBox(
+        clientJobId: string,
+        backendJobId: string,
+        item: VisualSearchResultItem,
+        binding: ReturnType<typeof requireDatasetBinding>,
+        target: AppState['labels']['imagesData'][number],
+        bbox: VisualSearchBBox,
+        labelId: string | null,
+    ): VisualSearchAcceptanceResult {
+        const rectId = visualSearchAcceptedRectId(backendJobId, item.resultId);
         const labelRect: LabelRect = {
             id: rectId,
-            labelId: matchingLabel?.id ?? null,
+            labelId,
             rect: {
                 x: bbox[0],
                 y: bbox[1],
@@ -201,17 +279,18 @@ export class VisualSearchAcceptanceService {
             isVisible: true,
             isCreatedByAI: true,
             status: LabelStatus.ACCEPTED,
-            suggestedLabel: matchingLabel ? null : item.className ?? '',
+            suggestedLabel: labelId ? null : item.className ?? '',
             confidence: item.confidence ?? item.score,
         };
         const acceptance: VisualSearchBBoxAcceptance = {
             clientJobId,
-            backendJobId: job.backendJobId as string,
-            resultId,
+            backendJobId,
+            resultId: item.resultId,
             queueItemId: binding.queueItemId,
             datasetId: binding.datasetId,
             datasetRevision: binding.datasetRevision,
             assetId: item.assetId as string,
+            contentSha256: item.contentSha256 as string,
             imageId: target.id,
             expectedFile: target.fileData,
             labelRect,
@@ -223,6 +302,89 @@ export class VisualSearchAcceptanceService {
         this.dispatch(acceptVisualSearchBBox(acceptance));
         this.afterAccept();
         return {imageId: target.id, labelRectId: rectId};
+    }
+
+    private acceptMask(
+        clientJobId: string,
+        backendJobId: string,
+        item: VisualSearchResultItem,
+        binding: ReturnType<typeof requireDatasetBinding>,
+        target: AppState['labels']['imagesData'][number],
+        sourcePolygons: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
+        labelId: string | null,
+    ): VisualSearchAcceptanceResult {
+        const labelPolygons: LabelPolygon[] = sourcePolygons.map((polygon, index) => {
+            const vertices = polygon.map(point => ({x: point[0], y: point[1]}));
+            return {
+                id: visualSearchAcceptedMaskPolygonId(backendJobId, item.resultId, index),
+                labelId,
+                vertices,
+                isVisible: true,
+                isCreatedByAI: true,
+                status: LabelStatus.ACCEPTED,
+                suggestedLabel: labelId ? null : item.className ?? '',
+                confidence: item.confidence ?? item.score,
+                extra: {
+                    visualSearch: {
+                        schemaVersion: 1,
+                        clientJobId,
+                        backendJobId,
+                        resultId: item.resultId,
+                        componentIndex: index,
+                        componentCount: sourcePolygons.length,
+                        assetId: item.assetId,
+                        geometrySha256: item.geometrySha256,
+                        rasterizerRevision: item.geometry?.rasterizerRevision,
+                        regionId: item.regionId,
+                        datasetId: binding.datasetId,
+                        datasetRevision: binding.datasetRevision,
+                        verticesSignature: visualSearchVerticesSignature(vertices),
+                    },
+                },
+            };
+        });
+        const acceptance: VisualSearchMaskAcceptance = {
+            clientJobId,
+            backendJobId,
+            resultId: item.resultId,
+            queueItemId: binding.queueItemId,
+            datasetId: binding.datasetId,
+            datasetRevision: binding.datasetRevision,
+            assetId: item.assetId as string,
+            contentSha256: item.contentSha256 as string,
+            geometrySha256: item.geometrySha256 as string,
+            rasterizerRevision: item.geometry?.rasterizerRevision as string,
+            imageId: target.id,
+            expectedFile: target.fileData,
+            mask: item.geometry?.mask as VisualSearchMaskAcceptance['mask'],
+            sourcePolygons,
+            labelPolygons,
+        };
+        this.dispatch(acceptVisualSearchMask(acceptance));
+        this.afterAccept();
+        return {
+            imageId: target.id,
+            labelPolygonIds: labelPolygons.map(polygon => polygon.id),
+        };
+    }
+
+    private async requireMaskGeometry(
+        item: VisualSearchResultItem,
+    ): Promise<ReadonlyArray<ReadonlyArray<readonly [number, number]>>> {
+        if (item.acceptanceEligible !== true || item.acceptanceReason) {
+            throw new Error(
+                `The mask result is preview-only: ${item.acceptanceReason || 'not eligible'}`,
+            );
+        }
+        return this.verifyMask({
+            mask: item.geometry?.mask,
+            polygons: item.geometry?.polygons,
+            bbox: item.geometry?.bbox ?? item.bbox,
+            width: item.width,
+            height: item.height,
+            geometrySha256: item.geometrySha256,
+            rasterizerRevision: item.geometry?.rasterizerRevision,
+        });
     }
 
     private hash(file: File): Promise<string> {

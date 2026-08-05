@@ -527,12 +527,13 @@
     color: #72d993;
   }
 
-  .ModelResourceMeta {
+  .ModelResourceMeta,
+  .DatasetMeta {
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
 
-    span {
+    > span {
       border-radius: 3px;
       background: rgba(255, 255, 255, 0.04);
       padding: 3px 6px;
@@ -825,10 +826,6 @@
     }
   }
 
-  .DatasetMeta {
-    color: rgba(255, 255, 255, 0.58);
-    font-size: 10px;
-  }
 
   .DatasetSource {
     overflow: hidden;

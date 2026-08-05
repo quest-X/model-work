@@ -1,4 +1,13 @@
 export type VisualSearchQueryKind = 'image' | 'bbox' | 'mask';
+export const VISUAL_SEARCH_MASK_RASTERIZER_REVISION = 'integer_bresenham_half_open_v1';
+export const VISUAL_SEARCH_MASK_LIMITS = Object.freeze({
+    maxDimension: 16_384,
+    maxPixels: 67_108_864,
+    maxPolygons: 256,
+    maxVerticesPerPolygon: 8_192,
+    maxTotalVertices: 32_768,
+    maxCountsBase64Length: 16_777_216,
+});
 export type VisualSearchRemoteState = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 export type VisualSearchJobStatus = 'submitting' | VisualSearchRemoteState;
 export type VisualSearchRevision = string | number;
@@ -6,6 +15,14 @@ export type VisualSearchRevision = string | number;
 export type VisualSearchPoint = readonly [number, number];
 export type VisualSearchBBox = readonly [number, number, number, number];
 export type VisualSearchPolygon = ReadonlyArray<VisualSearchPoint>;
+
+export interface VisualSearchMaskRLE {
+    encoding: 'binary_rle_varint_zlib_base64_v1';
+    order: 'row-major';
+    /** Canonical full-image shape: [height, width]. */
+    size: readonly [number, number];
+    countsBase64: string;
+}
 
 export type VisualSearchQueryGeometry =
     | {kind: 'image'}
@@ -15,6 +32,7 @@ export type VisualSearchQueryGeometry =
         polygons: ReadonlyArray<VisualSearchPolygon>;
         bbox: VisualSearchBBox;
         maskFileName: string;
+        rasterizerRevision: typeof VISUAL_SEARCH_MASK_RASTERIZER_REVISION;
     };
 
 export interface VisualSearchSourceIdentity {
@@ -78,6 +96,8 @@ export interface VisualSearchResultGeometry {
     kind?: VisualSearchQueryKind | string;
     bbox?: VisualSearchBBox | null;
     polygons?: ReadonlyArray<VisualSearchPolygon> | null;
+    mask?: VisualSearchMaskRLE | null;
+    rasterizerRevision?: string | null;
     [key: string]: unknown;
 }
 
@@ -101,6 +121,9 @@ export interface VisualSearchResultItem {
     regionId: string | null;
     granularity: string | null;
     regionSource: string | null;
+    geometrySha256: string | null;
+    acceptanceEligible: boolean | null;
+    acceptanceReason: string | null;
     geometry: VisualSearchResultGeometry | null;
 }
 

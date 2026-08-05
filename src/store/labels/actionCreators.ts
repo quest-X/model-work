@@ -3,6 +3,7 @@ import {
     ImageData,
     LabelName,
     VisualSearchBBoxAcceptance,
+    VisualSearchMaskAcceptance,
 } from './types';
 import {Action} from '../Actions';
 import {LabelType} from '../../data/enums/LabelType';
@@ -154,6 +155,15 @@ export function acceptVisualSearchBBox(
 ): LabelsActionTypes {
     return {
         type: Action.ACCEPT_VISUAL_SEARCH_BBOX,
+        payload: acceptance,
+    };
+}
+
+export function acceptVisualSearchMask(
+    acceptance: VisualSearchMaskAcceptance,
+): LabelsActionTypes {
+    return {
+        type: Action.ACCEPT_VISUAL_SEARCH_MASK,
         payload: acceptance,
     };
 }

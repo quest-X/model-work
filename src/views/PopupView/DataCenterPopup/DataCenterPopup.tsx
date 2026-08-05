@@ -91,6 +91,8 @@ interface ModelAsset {
 
 type ModelCatalogSort = 'relevance' | 'recent' | 'name' | 'size';
 type CurrentModelSlot = 'detection' | 'segmentation' | null;
+type DatasetMediaFilter = 'all' | 'images' | 'video';
+type DatasetAnnotationFilter = 'all' | 'annotated' | 'unannotated';
 
 interface ModelRuntimeStatus {
     model?: string;
@@ -105,7 +107,7 @@ type ResourceModule = 'data' | 'models';
 type StorageTier = 'temporary' | 'persistent';
 
 const RESOURCE_MODULES: ResourceModule[] = ['data', 'models'];
-const STORAGE_TIERS: StorageTier[] = ['temporary', 'persistent'];
+const STORAGE_TIERS: StorageTier[] = ['persistent', 'temporary'];
 
 interface IProps {
     language: Language;
@@ -344,7 +346,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const baseUrl = getEngineBaseUrl();
 
     const [activeModule, setActiveModule] = useState<ResourceModule>('data');
-    const [activeTier, setActiveTier] = useState<StorageTier>('temporary');
+    const [activeTier, setActiveTier] = useState<StorageTier>('persistent');
     const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
     const [datasetsLoading, setDatasetsLoading] = useState(true);
     const [datasetsError, setDatasetsError] = useState<string | null>(null);
@@ -354,6 +356,12 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const [statsError, setStatsError] = useState<string | null>(null);
     const [datasetActionId, setDatasetActionId] = useState<string | null>(null);
     const [datasetActionError, setDatasetActionError] = useState<string | null>(null);
+    const [datasetQuery, setDatasetQuery] = useState('');
+    const [datasetMediaFilter, setDatasetMediaFilter] = useState<DatasetMediaFilter>('all');
+    const [datasetAnnotationFilter, setDatasetAnnotationFilter] = useState<DatasetAnnotationFilter>('all');
+    const [datasetAnnotationCounts, setDatasetAnnotationCounts] = useState<Record<string, number | null>>({});
+    const [datasetAnnotationLoading, setDatasetAnnotationLoading] = useState(false);
+    const [datasetAnnotationError, setDatasetAnnotationError] = useState<string | null>(null);
     const [models, setModels] = useState<ModelAsset[]>([]);
     const [modelRuntime, setModelRuntime] = useState<ModelRuntimeStatus>({});
     const [modelsLoading, setModelsLoading] = useState(true);
@@ -367,7 +375,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
 
     const selectModule = (module: ResourceModule) => {
         setActiveModule(module);
-        setActiveTier('temporary');
+        setActiveTier('persistent');
         document.getElementById(`resource-module-${module}`)?.focus();
     };
 
@@ -475,6 +483,8 @@ export const DataCenterPopup: React.FC<IProps> = ({
         }).then(data => {
             const nextDatasets = Array.isArray(data.datasets) ? data.datasets : [];
             setDatasets(nextDatasets);
+            setDatasetAnnotationCounts({});
+            setDatasetAnnotationError(null);
             setSelectedId(current => current && nextDatasets.some((dataset: DatasetSummary) => dataset.id === current)
                 ? current
                 : null);
@@ -534,6 +544,53 @@ export const DataCenterPopup: React.FC<IProps> = ({
         return () => window.removeEventListener('opensight:model-loaded', refreshModels);
     }, [refreshModels]);
 
+
+    useEffect(() => {
+        if (datasetAnnotationFilter === 'all' || datasets.length === 0) {
+            setDatasetAnnotationLoading(false);
+            return undefined;
+        }
+        const missingDatasets = datasets.filter(dataset => (
+            !Object.prototype.hasOwnProperty.call(datasetAnnotationCounts, dataset.id)
+        ));
+        if (missingDatasets.length === 0) {
+            setDatasetAnnotationLoading(false);
+            return undefined;
+        }
+
+        const controller = new AbortController();
+        setDatasetAnnotationLoading(true);
+        setDatasetAnnotationError(null);
+        Promise.all(missingDatasets.map(async dataset => {
+            try {
+                const response = await fetch(
+                    `${baseUrl}/datasets/${dataset.id}/stats`,
+                    {signal: controller.signal},
+                );
+                if (!response.ok) throw new Error(`${response.status}`);
+                const value = await response.json();
+                const annotatedCount = typeof value.annotated_count === 'number'
+                    ? value.annotated_count
+                    : null;
+                return [dataset.id, annotatedCount] as const;
+            } catch {
+                return [dataset.id, null] as const;
+            }
+        })).then(entries => {
+            if (controller.signal.aborted) return;
+            setDatasetAnnotationCounts(current => ({
+                ...current,
+                ...Object.fromEntries(entries),
+            }));
+            if (entries.some(([, count]) => count === null)) {
+                setDatasetAnnotationError(zh ? '部分标注统计不可用' : 'Some annotation statistics are unavailable');
+            }
+        }).finally(() => {
+            if (!controller.signal.aborted) setDatasetAnnotationLoading(false);
+        });
+        return () => controller.abort();
+    }, [baseUrl, datasetAnnotationCounts, datasetAnnotationFilter, datasets, zh]);
+
     useEffect(() => {
         const controller = new AbortController();
         setStats(null);
@@ -549,7 +606,15 @@ export const DataCenterPopup: React.FC<IProps> = ({
                 return response.json();
             })
             .then(value => {
-                if (!controller.signal.aborted) setStats(value);
+                if (!controller.signal.aborted) {
+                    setStats(value);
+                    if (typeof value.annotated_count === 'number') {
+                        setDatasetAnnotationCounts(current => ({
+                            ...current,
+                            [selectedId]: value.annotated_count,
+                        }));
+                    }
+                }
             })
             .catch(cause => {
                 if (cause instanceof Error && cause.name === 'AbortError') return;
@@ -947,9 +1012,14 @@ export const DataCenterPopup: React.FC<IProps> = ({
                             <span className='DatasetName'>{datasetName}</span>
                             <span className={`DatasetState ${status.className}`} aria-live='polite'>{status.label}</span>
                         </span>
-                        <span className='DatasetMeta'>{dataset.image_count} {dataset.media_type === 'video'
-                            ? (zh ? '帧' : 'frames')
-                            : (zh ? '张图片' : 'images')} · {dataset.classes.length} {zh ? '类' : 'classes'}</span>
+                        <span className='DatasetMeta'>
+                            <span>{dataset.media_type === 'video'
+                                ? (zh ? '视频' : 'Video') : (zh ? '图片' : 'Images')}</span>
+                            <span>{dataset.image_count} {dataset.media_type === 'video'
+                                ? (zh ? '帧' : 'frames')
+                                : (zh ? '张' : 'images')}</span>
+                            <span>{dataset.classes.length} {zh ? '类' : 'classes'}</span>
+                        </span>
                         <span className='DatasetSource'>{sourceLabel}</span>
                     </span>
                     <span className={`DatasetChevron${expanded ? ' expanded' : ''}`} aria-hidden='true' />
@@ -981,7 +1051,40 @@ export const DataCenterPopup: React.FC<IProps> = ({
         </div>
     </section>;
 
-    const renderPersistentData = () => <section className='DataTierPanel' aria-label={zh ? '持久化数据' : 'Persistent data'}>
+    // The persistent panel intentionally composes independent filter, loading and empty states.
+    // eslint-disable-next-line complexity
+    const renderPersistentData = () => {
+        const annotationStatsPending = datasetAnnotationFilter !== 'all'
+            && datasets.some(dataset => (
+                !Object.prototype.hasOwnProperty.call(datasetAnnotationCounts, dataset.id)
+            ));
+        const normalizedQuery = datasetQuery.trim().toLowerCase();
+        const filteredDatasets = datasets.filter(dataset => {
+            const mediaType = dataset.media_type || 'images';
+            if (datasetMediaFilter !== 'all' && mediaType !== datasetMediaFilter) return false;
+            const matchesQuery = !normalizedQuery || [
+                datasetDisplayName(dataset),
+                dataset.name,
+                dataset.project_name,
+                dataset.id,
+                ...dataset.classes,
+            ].some(value => value?.toLowerCase().includes(normalizedQuery));
+            if (!matchesQuery) return false;
+            if (datasetAnnotationFilter === 'all' || annotationStatsPending) return true;
+            const annotatedCount = datasetAnnotationCounts[dataset.id];
+            if (typeof annotatedCount !== 'number') return false;
+            return datasetAnnotationFilter === 'annotated' ? annotatedCount > 0 : annotatedCount === 0;
+        });
+        const resultCount = zh
+            ? `显示 ${filteredDatasets.length} / ${datasets.length}`
+            : `Showing ${filteredDatasets.length} / ${datasets.length}`;
+        let filterSummary = resultCount;
+        if (annotationStatsPending || datasetAnnotationLoading) {
+            filterSummary = `${zh ? '读取标注统计中' : 'Loading annotation statistics'} · ${resultCount}`;
+        } else if (datasetAnnotationFilter !== 'all' && datasetAnnotationError) {
+            filterSummary = `${datasetAnnotationError} · ${resultCount}`;
+        }
+        return <section className='DataTierPanel' aria-label={zh ? '持久化数据' : 'Persistent data'}>
         <div className='TierExplanation persistent'>
             <div>
                 <strong>{zh ? '后端持久化数据' : 'Persistent backend data'}</strong>
@@ -999,10 +1102,54 @@ export const DataCenterPopup: React.FC<IProps> = ({
             <strong>{zh ? '暂无持久化数据' : 'No persistent data'}</strong>
             <span>{zh ? '在“临时数据”中选择一个批次并同步至服务器。' : 'Choose a temporary batch and sync it to the server.'}</span>
         </div>}
+        {datasets.length > 0 && <div className='ModelCatalogFilter DatasetCatalogFilter'>
+            <label className='ModelCatalogSelect'>
+                <span>{zh ? '媒体' : 'Media'}</span>
+                <select
+                    value={datasetMediaFilter}
+                    aria-label={zh ? '数据媒体类型' : 'Dataset media type'}
+                    onChange={event => setDatasetMediaFilter(event.target.value as DatasetMediaFilter)}
+                >
+                    <option value='all'>{zh ? '全部媒体' : 'All media'}</option>
+                    <option value='images'>{zh ? '图片' : 'Images'}</option>
+                    <option value='video'>{zh ? '视频' : 'Video'}</option>
+                </select>
+            </label>
+            <label className='ModelCatalogSelect'>
+                <span>{zh ? '标注' : 'Annotation'}</span>
+                <select
+                    value={datasetAnnotationFilter}
+                    aria-label={zh ? '数据标注状态' : 'Dataset annotation status'}
+                    onChange={event => setDatasetAnnotationFilter(
+                        event.target.value as DatasetAnnotationFilter,
+                    )}
+                >
+                    <option value='all'>{zh ? '全部状态' : 'All states'}</option>
+                    <option value='annotated'>{zh ? '有标注' : 'Annotated'}</option>
+                    <option value='unannotated'>{zh ? '无标注' : 'Unannotated'}</option>
+                </select>
+            </label>
+            <label className='ModelCatalogSearch'>
+                <span>{zh ? '筛选数据资源' : 'Filter data resources'}</span>
+                <input
+                    type='search'
+                    value={datasetQuery}
+                    onChange={event => setDatasetQuery(event.target.value)}
+                    placeholder={zh ? '名称、项目、类别或 ID' : 'Name, project, class, or ID'}
+                />
+            </label>
+            <small aria-live='polite'>{filterSummary}</small>
+        </div>}
+        {datasets.length > 0 && filteredDatasets.length === 0 && !annotationStatsPending
+            && <div className='EmptyState'>
+                <strong>{zh ? '没有符合筛选条件的数据' : 'No datasets match these filters'}</strong>
+                <span>{zh ? '请调整媒体类型、标注状态或搜索关键词。' : 'Adjust media, annotation, or search filters.'}</span>
+            </div>}
         <div className='DatasetList'>
-            {datasets.map(renderDatasetItem)}
+            {filteredDatasets.map(renderDatasetItem)}
         </div>
-    </section>;
+        </section>;
+    };
 
     const currentModelSlot = (model: ModelAsset): CurrentModelSlot => {
         if (model.id && modelRuntime.model_asset_id === model.id) return 'detection';
@@ -1202,7 +1349,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
             className={activeModule === 'data' ? 'active data' : 'data'}
             onClick={() => {
                 setActiveModule('data');
-                setActiveTier('temporary');
+                setActiveTier('persistent');
             }}
             onKeyDown={handleModuleKeyDown}
         >
@@ -1226,7 +1373,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
             className={activeModule === 'models' ? 'active models' : 'models'}
             onClick={() => {
                 setActiveModule('models');
-                setActiveTier('temporary');
+                setActiveTier('persistent');
             }}
             onKeyDown={handleModuleKeyDown}
         >
@@ -1254,24 +1401,6 @@ export const DataCenterPopup: React.FC<IProps> = ({
                 aria-orientation='vertical'
             >
                 <button
-                    id={`resource-tier-${activeModule}-temporary`}
-                    type='button'
-                    role='tab'
-                    aria-label={`${copy.temporaryLabel} ${temporaryCount}`}
-                    aria-controls='data-tier-panel'
-                    aria-selected={activeTier === 'temporary'}
-                    tabIndex={activeTier === 'temporary' ? 0 : -1}
-                    className={activeTier === 'temporary' ? 'active temporary' : ''}
-                    onClick={() => setActiveTier('temporary')}
-                    onKeyDown={handleTierKeyDown}
-                >
-                    <span className='DataTierTabCopy'>
-                        <span>{copy.temporaryLabel}</span>
-                        <small>{copy.temporaryDetail}</small>
-                    </span>
-                    <strong>{temporaryCount}</strong>
-                </button>
-                <button
                     id={`resource-tier-${activeModule}-persistent`}
                     type='button'
                     role='tab'
@@ -1288,6 +1417,24 @@ export const DataCenterPopup: React.FC<IProps> = ({
                         <small>{copy.persistentDetail}</small>
                     </span>
                     <strong>{persistentCount}</strong>
+                </button>
+                <button
+                    id={`resource-tier-${activeModule}-temporary`}
+                    type='button'
+                    role='tab'
+                    aria-label={`${copy.temporaryLabel} ${temporaryCount}`}
+                    aria-controls='data-tier-panel'
+                    aria-selected={activeTier === 'temporary'}
+                    tabIndex={activeTier === 'temporary' ? 0 : -1}
+                    className={activeTier === 'temporary' ? 'active temporary' : ''}
+                    onClick={() => setActiveTier('temporary')}
+                    onKeyDown={handleTierKeyDown}
+                >
+                    <span className='DataTierTabCopy'>
+                        <span>{copy.temporaryLabel}</span>
+                        <small>{copy.temporaryDetail}</small>
+                    </span>
+                    <strong>{temporaryCount}</strong>
                 </button>
             </div>
             <p className='DataTierSidebarHint'>{copy.hint}</p>

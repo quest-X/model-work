@@ -217,6 +217,9 @@ describe('DataCenterPopup', () => {
         expect(screen.getByRole('tab', {name: '数据'})).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByRole('tablist', {name: '数据存储层级'})).toHaveAttribute('aria-orientation', 'vertical');
         expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'resource-module-data');
+        expect(screen.getByRole('tab', {name: '持久化数据 1'})).toHaveAttribute('aria-selected', 'true');
+
+        fireEvent.click(screen.getByRole('tab', {name: '临时数据 1'}));
         expect(screen.getByRole('region', {name: '临时数据 1'}))
             .toHaveAttribute('aria-labelledby', 'resource-tier-data-temporary');
 
@@ -234,8 +237,89 @@ describe('DataCenterPopup', () => {
         expect(screen.getByRole('region', {name: '持久化数据 1'}))
             .toHaveAttribute('aria-labelledby', 'resource-tier-data-persistent');
         expect(await screen.findByText('default-project', {selector: '.DatasetName'})).toBeInTheDocument();
+        const imageMetadataTags = document.querySelectorAll('.DatasetMeta > span');
+        expect(imageMetadataTags).toHaveLength(3);
+        expect(imageMetadataTags[0]).toHaveTextContent('图片');
+        expect(imageMetadataTags[1]).toHaveTextContent('465 张');
         expect(screen.getByText('已就绪')).toBeInTheDocument();
         expect(screen.getByText(/项目 default-project/)).toBeInTheDocument();
+    });
+
+    it('filters persistent datasets by media, annotation state and search query', async () => {
+        const imageDataset = {
+            ...dataset,
+            id: 'image-dataset',
+            name: 'image-project',
+            project_name: 'image-project',
+            image_count: 84,
+            classes: [],
+            media_type: 'images',
+        };
+        const videoDataset = {
+            ...dataset,
+            id: 'video-dataset',
+            name: 'video-project',
+            project_name: 'video-project',
+            image_count: 50,
+            classes: ['defect'],
+            media_type: 'video',
+        };
+        global.fetch = jest.fn((input: RequestInfo) => {
+            const url = String(input);
+            if (url.endsWith('/datasets')) {
+                return Promise.resolve(jsonResponse({datasets: [imageDataset, videoDataset]}));
+            }
+            if (url.endsWith('/datasets/image-dataset/stats')) {
+                return Promise.resolve(jsonResponse({
+                    image_count: 84,
+                    annotated_count: 0,
+                    annotation_coverage: 0,
+                    class_distribution: {},
+                }));
+            }
+            if (url.endsWith('/datasets/video-dataset/stats')) {
+                return Promise.resolve(jsonResponse({
+                    image_count: 50,
+                    annotated_count: 12,
+                    annotation_coverage: 0.24,
+                    class_distribution: {defect: 12},
+                }));
+            }
+            if (url.endsWith('/available-models')) {
+                return Promise.resolve(jsonResponse({models: []}));
+            }
+            return Promise.resolve(jsonResponse({status: 'success'}));
+        });
+
+        renderPopup();
+        fireEvent.click(await screen.findByRole('tab', {name: '持久化数据 2'}));
+        await screen.findByText('image-project', {selector: '.DatasetName'});
+        expect(screen.getByText('video-project', {selector: '.DatasetName'})).toBeInTheDocument();
+        expect((global.fetch as jest.Mock).mock.calls
+            .some(([input]) => String(input).endsWith('/stats'))).toBe(false);
+
+        fireEvent.change(screen.getByLabelText('数据媒体类型'), {target: {value: 'video'}});
+        expect(screen.getByText('video-project', {selector: '.DatasetName'})).toBeInTheDocument();
+        expect(screen.queryByText('image-project', {selector: '.DatasetName'})).not.toBeInTheDocument();
+
+        fireEvent.change(screen.getByLabelText('数据媒体类型'), {target: {value: 'all'}});
+        fireEvent.change(screen.getByLabelText('数据标注状态'), {target: {value: 'annotated'}});
+        await waitFor(() => {
+            expect(screen.getByText('video-project', {selector: '.DatasetName'})).toBeInTheDocument();
+            expect(screen.queryByText('image-project', {selector: '.DatasetName'})).not.toBeInTheDocument();
+        });
+
+        fireEvent.change(screen.getByLabelText('数据标注状态'), {target: {value: 'unannotated'}});
+        expect(screen.getByText('image-project', {selector: '.DatasetName'})).toBeInTheDocument();
+        expect(screen.queryByText('video-project', {selector: '.DatasetName'})).not.toBeInTheDocument();
+
+        fireEvent.change(screen.getByLabelText('数据标注状态'), {target: {value: 'all'}});
+        fireEvent.change(screen.getByRole('searchbox', {name: '筛选数据资源'}), {
+            target: {value: 'video-project'},
+        });
+        expect(screen.getByText('video-project', {selector: '.DatasetName'})).toBeInTheDocument();
+        expect(screen.queryByText('image-project', {selector: '.DatasetName'})).not.toBeInTheDocument();
+        expect(screen.getByText('显示 1 / 2')).toBeInTheDocument();
     });
 
     it('supports keyboard navigation across resource modules and storage tiers', async () => {
@@ -243,13 +327,13 @@ describe('DataCenterPopup', () => {
         const temporaryTab = await screen.findByRole('tab', {name: '临时数据 1'});
         const persistentTab = await screen.findByRole('tab', {name: '持久化数据 1'});
 
-        temporaryTab.focus();
-        fireEvent.keyDown(temporaryTab, {key: 'ArrowDown'});
+        persistentTab.focus();
+        fireEvent.keyDown(persistentTab, {key: 'ArrowDown'});
 
-        expect(persistentTab).toHaveAttribute('aria-selected', 'true');
-        expect(persistentTab).toHaveFocus();
-        expect(screen.getByRole('region', {name: '持久化数据 1'}))
-            .toHaveAttribute('aria-labelledby', 'resource-tier-data-persistent');
+        expect(temporaryTab).toHaveAttribute('aria-selected', 'true');
+        expect(temporaryTab).toHaveFocus();
+        expect(screen.getByRole('region', {name: '临时数据 1'}))
+            .toHaveAttribute('aria-labelledby', 'resource-tier-data-temporary');
 
         const dataTab = screen.getByRole('tab', {name: '数据'});
         const modelsTab = screen.getByRole('tab', {name: '模型'});
@@ -259,14 +343,16 @@ describe('DataCenterPopup', () => {
         expect(modelsTab).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'resource-module-models');
         expect(screen.getByRole('tablist', {name: '模型存储层级'})).toBeInTheDocument();
-        expect(await screen.findByRole('tab', {name: '临时模型 1'})).toHaveAttribute('aria-selected', 'true');
+        expect(await screen.findByRole('tab', {name: '持久化模型 2'})).toHaveAttribute('aria-selected', 'true');
     });
 
     it('manages callable model-file versions in the resource center', async () => {
         renderPopup();
         fireEvent.click(await screen.findByRole('tab', {name: '模型'}));
 
-        expect(await screen.findByRole('tab', {name: '临时模型 1'})).toHaveAttribute('aria-selected', 'true');
+        const temporaryModelsTab = await screen.findByRole('tab', {name: '临时模型 1'});
+        fireEvent.click(temporaryModelsTab);
+        expect(temporaryModelsTab).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByText('临时模型（运行内存）')).toBeInTheDocument();
         expect(screen.getByText('yolo26x.pt')).toBeInTheDocument();
         expect(screen.getByText('检测槽正在使用')).toBeInTheDocument();
@@ -353,6 +439,7 @@ describe('DataCenterPopup', () => {
         />);
 
         await screen.findByRole('tab', {name: '持久化数据 1'});
+        fireEvent.click(screen.getByRole('tab', {name: '临时数据 0'}));
         expect(screen.getByRole('tab', {name: '临时数据 0'})).toBeInTheDocument();
         expect(screen.getByText('暂无临时数据')).toBeInTheDocument();
         expect(screen.queryByRole('button', {name: '同步至服务器'})).not.toBeInTheDocument();
@@ -361,6 +448,7 @@ describe('DataCenterPopup', () => {
     it('syncs a temporary batch from its own card', async () => {
         renderPopup();
         await screen.findByRole('tab', {name: '持久化数据 1'});
+        fireEvent.click(screen.getByRole('tab', {name: '临时数据 1'}));
 
         await act(async () => {
             fireEvent.click(screen.getByRole('button', {name: '同步至服务器'}));
@@ -382,6 +470,7 @@ describe('DataCenterPopup', () => {
         />);
 
         await screen.findByRole('tab', {name: '持久化数据 1'});
+        fireEvent.click(screen.getByRole('tab', {name: '临时数据 1'}));
         const syncButton = await screen.findByRole('button', {name: '先打开后同步'});
         expect(syncButton).toBeDisabled();
         fireEvent.click(syncButton);
@@ -419,6 +508,7 @@ describe('DataCenterPopup', () => {
         />);
 
         await screen.findByRole('tab', {name: '持久化数据 1'});
+        fireEvent.click(screen.getByRole('tab', {name: '临时数据 1'}));
         expect(screen.queryByText('视频暂不支持持久化')).not.toBeInTheDocument();
         await act(async () => {
             fireEvent.click(screen.getByRole('button', {name: '同步至服务器'}));
@@ -527,7 +617,10 @@ describe('DataCenterPopup', () => {
 
         fireEvent.click(await screen.findByRole('tab', {name: '持久化数据 1'}));
         await screen.findByText('default-project', {selector: '.DatasetName'});
-        expect(document.querySelector('.DatasetMeta')).toHaveTextContent('50 帧');
+        const metadataTags = document.querySelectorAll('.DatasetMeta > span');
+        expect(metadataTags).toHaveLength(3);
+        expect(metadataTags[0]).toHaveTextContent('视频');
+        expect(metadataTags[1]).toHaveTextContent('50 帧');
         fireEvent.click(screen.getByRole('button', {name: /default-project.*50/}));
         await act(async () => {
             fireEvent.click(screen.getByRole('button', {name: '使用'}));

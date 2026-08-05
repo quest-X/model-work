@@ -1185,6 +1185,8 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                         () => onToolClick(LabelType.POLYGON)
                     )
                 }
+            </div>
+            <div className='ButtonWrapper'>
                 {(() => {
                     const activeImageData = LabelsSelector.getActiveImageData();
                     const hasImage = imagesData.length > 0;
@@ -1210,7 +1212,6 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                         isDisabled
                     );
                 })()}
-            </div>
             {useMemo(() => {
                 if (imagesData.length === 0) return null;
                 const activeImageData = LabelsSelector.getActiveImageData();
@@ -1219,7 +1220,7 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                     (activeImageData?.labelPolygons?.length || 0) > 0
                 );
 
-                return <div className='ButtonWrapper'>
+                return <>
                     {isSAMLoaded && getButtonWithTooltip(
                         'smart-annotation',
                         smartAnnotationActive
@@ -1256,8 +1257,9 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                         undefined,
                         eraserOnClick
                     )}
-                </div>;
+                </>;
             }, [imagesData, activeImageIndex, isSAMLoaded, smartAnnotationActive, samNegativeMode, smartAnnotationOnClick, smartAnnotationOnDoubleClick, isTrackingModelLoaded, trackingOnClick, trackingMode, trackingInProgress, currentTexts, eraserMode, eraserFineMode, eraserOnClick, language])}
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', gap: 6, height: '100%' }}>
                 <VisualSearchTrigger
                     disabled={imagesData.length === 0}
@@ -1374,6 +1376,35 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                                             </div>
                                         ) : (
                                             <>
+                                                <div style={{ marginBottom: 10 }}>
+                                                    <div style={{ marginBottom: 5 }}>
+                                                        {language === 'zh' ? '检索方案' : 'Retrieval mode'}
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: 6 }}>
+                                                        {([
+                                                            ['dino', language === 'zh' ? '快速' : 'Fast'],
+                                                            ['l2g', language === 'zh' ? '高精度' : 'High-precision'],
+                                                        ] as Array<[SimilaritySearchMode, string]>).map(([mode, label]) => (
+                                                            <button
+                                                                key={mode}
+                                                                type='button'
+                                                                onClick={() => setSimilarityMode(mode)}
+                                                                style={{
+                                                                    flex: 1,
+                                                                    height: 28,
+                                                                    border: `1px solid ${similarityMode === mode ? '#d32f2f' : '#555'}`,
+                                                                    borderRadius: 3,
+                                                                    background: similarityMode === mode ? '#c62828' : '#333',
+                                                                    color: similarityMode === mode ? '#fff' : '#ccc',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: 11,
+                                                                }}
+                                                            >
+                                                                {label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
                                                 <label style={{ display: 'block', marginBottom: 9 }}>
                                                     <span style={{ display: 'block', marginBottom: 4 }}>
                                                         {language === 'zh' ? '场景' : 'Scene'}
@@ -1483,35 +1514,6 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                                                         </span>
                                                     )}
                                                 </label>
-                                                <div style={{ marginBottom: 10 }}>
-                                                    <div style={{ marginBottom: 5 }}>
-                                                        {language === 'zh' ? '检索方案' : 'Retrieval mode'}
-                                                    </div>
-                                                    <div style={{ display: 'flex', gap: 6 }}>
-                                                        {([
-                                                            ['dino', language === 'zh' ? '快速' : 'Fast'],
-                                                            ['l2g', language === 'zh' ? '高精度' : 'High-precision'],
-                                                        ] as Array<[SimilaritySearchMode, string]>).map(([mode, label]) => (
-                                                            <button
-                                                                key={mode}
-                                                                type='button'
-                                                                onClick={() => setSimilarityMode(mode)}
-                                                                style={{
-                                                                    flex: 1,
-                                                                    height: 28,
-                                                                    border: `1px solid ${similarityMode === mode ? '#d32f2f' : '#555'}`,
-                                                                    borderRadius: 3,
-                                                                    background: similarityMode === mode ? '#c62828' : '#333',
-                                                                    color: similarityMode === mode ? '#fff' : '#ccc',
-                                                                    cursor: 'pointer',
-                                                                    fontSize: 11,
-                                                                }}
-                                                            >
-                                                                {label}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
                                                 {selectedSimilarityCollection && similarityMode === 'dino' && (
                                                     !selectedSimilarityCollection.compatible || selectedSimilarityCollection.count === 0
                                                 ) && (

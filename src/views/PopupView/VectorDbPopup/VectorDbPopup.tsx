@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useLayoutEffect, useMemo, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {useDropzone} from 'react-dropzone';
 import {connect} from 'react-redux';
@@ -9,9 +9,11 @@ import {Language} from '../../../data/LanguageConfig';
 import {getEngineBaseUrl, getExtensionEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
 import './VectorDbPopup.scss';
 
-type Granularity = 'image' | 'bbox';
+type Granularity = 'image' | 'bbox' | 'mask';
 type WorkspaceTab = 'ingest' | 'history';
 type IngestSource = 'dataset' | 'upload';
+type IngestStrategy = 'whole_image' | 'existing_bbox' | 'existing_mask' |
+    'auto_bbox' | 'sam_auto_bbox' | 'sam_auto';
 
 interface EmbedderStatus {
     state: string;
@@ -51,7 +53,7 @@ interface CollectionInfo {
     dim: number;
     embedder: string;
     granularity: Granularity;
-    mode?: 'objects' | 'images';
+    mode?: 'objects' | 'images' | 'masks';
     count: number;
     search_count?: number;
     created_at: string;
@@ -81,6 +83,8 @@ interface CollectionInfo {
         failed_images?: number;
         skipped_images?: number;
     };
+    branch_kind?: 'trunk' | 'region';
+    parent_collection?: string | null;
 }
 
 interface TargetGroup {
@@ -103,7 +107,7 @@ interface IngestJob {
     data_version?: number | null;
     collection: string;
     granularity: Granularity;
-    mode?: 'objects' | 'images';
+    mode?: 'objects' | 'images' | 'masks';
     source: string;
     dataset_id?: string | null;
     total_images: number;
@@ -153,6 +157,9 @@ interface DatasetSummary {
     id: string;
     name: string;
     image_count: number;
+    annotated_count?: number | null;
+    annotation_coverage?: number | null;
+    classes?: string[];
 }
 
 interface IProps {
@@ -164,6 +171,19 @@ type Translate = (zhText: string, enText: string) => string;
 const TERMINAL_JOB_STATES = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
 const HISTORY_IMAGE_PAGE_SIZE = 12;
 const NEW_SCENE_OPTION = '__new_scene__';
+const strategyGranularity = (strategy: IngestStrategy): Granularity => {
+    if (strategy === 'whole_image') return 'image';
+    if (strategy === 'existing_mask' || strategy === 'sam_auto') return 'mask';
+    return 'bbox';
+};
+
+const strategyRequiresDataset = (strategy: IngestStrategy): boolean =>
+    strategy === 'existing_bbox' || strategy === 'existing_mask';
+
+const normalizeIngestSource = (
+    strategy: IngestStrategy,
+    source: IngestSource,
+): IngestSource => strategyRequiresDataset(strategy) ? 'dataset' : source;
 
 const JOB_STATE_LABELS: Record<string, [string, string]> = {
     completed: ['版本更新', 'Version updated'],
@@ -181,7 +201,9 @@ const collectionTargetName = (collection: CollectionInfo) =>
     collection.target_name || collection.display_name || collection.name;
 
 const collectionGranularity = (collection: CollectionInfo): Granularity =>
-    collection.granularity || (collection.mode === 'images' ? 'image' : 'bbox');
+    collection.granularity || (collection.mode === 'images'
+        ? 'image'
+        : collection.mode === 'masks' ? 'mask' : 'bbox');
 
 const ingestJobSourceLabel = (item: IngestJob, t: Translate): string => {
     const fromDataset = Boolean(item.dataset_id)
@@ -271,7 +293,6 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
     const [newSceneName, setNewSceneName] = useState('');
     const [newSceneIsCustom, setNewSceneIsCustom] = useState(true);
     const [newTargetName, setNewTargetName] = useState('');
-    const [createGranularity, setCreateGranularity] = useState<Granularity>('bbox');
     const [creating, setCreating] = useState(false);
     const [createError, setCreateError] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -283,6 +304,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
     const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
     const [datasetsLoading, setDatasetsLoading] = useState(true);
     const [datasetsError, setDatasetsError] = useState<string | null>(null);
+    const [ingestStrategy, setIngestStrategy] = useState<IngestStrategy>('whole_image');
     const [ingestSource, setIngestSource] = useState<IngestSource>('dataset');
     const [datasetId, setDatasetId] = useState('');
     const [pendingFiles, setPendingFiles] = useState<File[]>([]);
@@ -301,6 +323,9 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
     const [imagePreview, setImagePreview] = useState<ImagePreview | null>(null);
 
     const selected = collections.find(collection => collection.name === selectedName) || null;
+    const desiredGranularity = strategyGranularity(ingestStrategy);
+    const requiresDataset = strategyRequiresDataset(ingestStrategy);
+    const selectedDataset = datasets.find(dataset => dataset.id === datasetId) || null;
     const hierarchy = useMemo<SceneGroup[]>(() => {
         const sceneMap = new Map<string, {
             sceneId: string;
@@ -345,7 +370,9 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                     .sort((left, right) => left.targetName.localeCompare(right.targetName))
                     .map(target => ({
                         ...target,
-                        versions: target.versions.sort((left, right) => left.version - right.version),
+                        versions: target.versions.sort((left, right) =>
+                            left.granularity.localeCompare(right.granularity) ||
+                            left.version - right.version),
                     })),
             }));
     }, [collections]);
@@ -553,9 +580,12 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         return () => window.clearInterval(timer);
     }, [baseUrl, job, refreshCollections, t]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         setDatasetId('');
         setPendingFiles([]);
+        setIngestStrategy(selected?.granularity === 'bbox'
+            ? 'existing_bbox'
+            : selected?.granularity === 'mask' ? 'existing_mask' : 'whole_image');
         setIngestSource('dataset');
         setIngestError(null);
         setDeleteConfirm(false);
@@ -563,7 +593,13 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         setDeleteJobConfirmId(null);
         setDeleteJobConfirmationText('');
         setJobDeleteError(null);
-    }, [selectedName]);
+    }, [selected?.granularity, selectedName]);
+
+    useEffect(() => {
+        if (!requiresDataset) return;
+        setIngestSource('dataset');
+        setPendingFiles([]);
+    }, [requiresDataset]);
 
     useEffect(() => {
         if (!imagePreview) return undefined;
@@ -622,7 +658,6 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                     scene_id: existingScene?.sceneId,
                     scene_name: sceneName,
                     target_name: targetName,
-                    granularity: createGranularity,
                 }),
             });
             const created = await readResponse<CollectionInfo>(response);
@@ -665,7 +700,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                 {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({}),
+                    body: JSON.stringify({granularity: selected.granularity}),
                 },
             );
             const created = await readResponse<CollectionInfo>(response);
@@ -707,25 +742,65 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             'application/zip': ['.zip'],
             'application/x-zip-compressed': ['.zip'],
         },
-        disabled: !embedderReady || !storeReady || !selected?.compatible || activeJob || submittingIngest,
+        disabled: requiresDataset || !embedderReady || !storeReady ||
+            activeJob || submittingIngest,
         multiple: true,
         onDrop: onIngestDrop,
     });
 
     const startIngest = async () => {
         if (!selected || activeJob || submittingIngest) return;
+        const normalizedSource = normalizeIngestSource(ingestStrategy, ingestSource);
+        if (requiresDataset && normalizedSource !== 'dataset') {
+            setIngestError(t(
+                '使用已有标注必须选择资源中心数据批次。',
+                'Existing annotations require a Resource Center data batch.',
+            ));
+            return;
+        }
         setSubmittingIngest(true);
         setIngestError(null);
-        const form = new FormData();
-        form.append('granularity', selected.granularity);
-        if (ingestSource === 'dataset') {
-            form.append('dataset_id', datasetId);
-        } else {
-            pendingFiles.forEach(file => form.append('files', file));
-        }
         try {
+            const targetId = selected.target_id || selected.library_id;
+            const branch = collections.find(collection =>
+                collectionTargetId(collection) === targetId &&
+                collection.granularity === desiredGranularity &&
+                collection.compatible &&
+                collection.active) || collections.find(collection =>
+                collectionTargetId(collection) === targetId &&
+                collection.granularity === desiredGranularity &&
+                collection.compatible);
+            let ingestCollection = branch;
+            if (!ingestCollection) {
+                const trunk = collections.find(collection =>
+                    collectionTargetId(collection) === targetId &&
+                    collection.granularity === 'image' &&
+                    collection.active);
+                const branchResponse = await fetch(
+                    `${baseUrl}/targets/${encodeURIComponent(targetId)}/branches`,
+                    {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            granularity: desiredGranularity,
+                            parent_collection: desiredGranularity === 'image'
+                                ? undefined
+                                : trunk?.name,
+                        }),
+                    },
+                );
+                ingestCollection = await readResponse<CollectionInfo>(branchResponse);
+            }
+            const form = new FormData();
+            form.append('granularity', desiredGranularity);
+            form.append('ingest_strategy', ingestStrategy);
+            if (normalizedSource === 'dataset') {
+                form.append('dataset_id', datasetId);
+            } else {
+                pendingFiles.forEach(file => form.append('files', file));
+            }
             const response = await fetch(
-                `${baseUrl}/collections/${encodeURIComponent(selected.name)}/ingest`,
+                `${baseUrl}/collections/${encodeURIComponent(ingestCollection.name)}/ingest`,
                 {method: 'POST', body: form},
             );
             const body = await readResponse<{job_id: string}>(response);
@@ -734,9 +809,9 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             const queuedJob: IngestJob = {
                 job_id: body.job_id,
                 state: 'queued',
-                collection: selected.name,
-                granularity: selected.granularity,
-                source: ingestSource,
+                collection: ingestCollection.name,
+                granularity: desiredGranularity,
+                source: normalizedSource,
                 total_images: 0,
                 processed_images: 0,
                 inserted_vectors: 0,
@@ -752,6 +827,8 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             };
             setJob(queuedJob);
             setJobs(current => [queuedJob, ...current.filter(item => item.job_id !== queuedJob.job_id)]);
+            setSelectedName(ingestCollection.name);
+            await refreshCollections();
         } catch (cause) {
             setIngestError(cause instanceof Error ? cause.message : t('入库请求失败', 'Ingest request failed'));
         } finally {
@@ -818,9 +895,29 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         }
     };
 
-    const granularityLabel = (granularity: Granularity) => granularity === 'bbox'
-        ? t('目标框', 'Bounding boxes')
-        : t('整张图片', 'Whole images');
+    const granularityLabel = (granularity: Granularity) => {
+        if (granularity === 'bbox') return t('目标框', 'Bounding boxes');
+        if (granularity === 'mask') return t('分割区域', 'Segmentation masks');
+        return t('整张图片', 'Whole images');
+    };
+
+    const ingestStrategyLabel = (strategy: IngestStrategy): [string, string] => {
+        if (strategy === 'existing_bbox') return ['使用已有标注框', 'Use existing bboxes'];
+        if (strategy === 'existing_mask') return ['使用已有分割', 'Use existing masks'];
+        if (strategy === 'sam_auto_bbox') return ['SAM 自动候选框', 'SAM automatic boxes'];
+        if (strategy === 'sam_auto') return ['SAM 自动掩码', 'SAM automatic masks'];
+        if (strategy === 'auto_bbox') return ['检测模型自动框', 'Detector-generated bboxes'];
+        return ['整图主干（推荐）', 'Whole-image trunk (recommended)'];
+    };
+
+    const ingestStrategyDescription = (strategy: IngestStrategy): [string, string] => {
+        if (strategy === 'existing_bbox') return ['读取数据批次中的合格 bbox', 'Read validated bboxes from the batch'];
+        if (strategy === 'existing_mask') return ['读取真实 polygon/mask，不从框伪造', 'Read real polygons/masks without bbox fallback'];
+        if (strategy === 'sam_auto_bbox') return ['无标注生成候选框，可直接进入 bbox 多种子检索', 'Create unlabeled box proposals for bbox multi-seed retrieval'];
+        if (strategy === 'sam_auto') return ['保留 SAM polygon，生成严格 mask 分支', 'Preserve SAM polygons in a strict mask branch'];
+        if (strategy === 'auto_bbox') return ['调用当前检测模型生成候选框', 'Use the active detector for candidate boxes'];
+        return ['每张图片生成一个共享全局向量', 'Create one reusable global vector per image'];
+    };
 
     const formatDate = (value?: string | null) => {
         if (!value) return t('尚未入库', 'Never ingested');
@@ -857,6 +954,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         if (collection.compatible) return null;
         const compatibleSibling = collections.find(candidate =>
             collectionTargetId(candidate) === collectionTargetId(collection)
+            && candidate.granularity === collection.granularity
             && candidate.compatible,
         );
         return <div className='ProfileWarning' role='alert'>
@@ -949,29 +1047,14 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                     onKeyDown={event => { if (event.key === 'Enter') createTarget(); }}
                 />
             </label>
-            <fieldset className='ModePicker'>
-                <legend>{t('向量单位（创建后不可修改）', 'Vector unit (immutable after creation)')}</legend>
-                <button
-                    type='button'
-                    className={createGranularity === 'bbox' ? 'ModeOption selected' : 'ModeOption'}
-                    role='radio'
-                    aria-checked={createGranularity === 'bbox'}
-                    onClick={() => setCreateGranularity('bbox')}
-                >
-                    <strong>{t('目标框', 'Bounding boxes')}</strong>
-                    <span>{t('数据批次读取标注框；散图上传自动检测', 'Use batch annotations; detect objects for loose uploads')}</span>
-                </button>
-                <button
-                    type='button'
-                    className={createGranularity === 'image' ? 'ModeOption selected' : 'ModeOption'}
-                    role='radio'
-                    aria-checked={createGranularity === 'image'}
-                    onClick={() => setCreateGranularity('image')}
-                >
-                    <strong>{t('整张图片', 'Whole images')}</strong>
-                    <span>{t('每张图片生成一个全局向量', 'Create one global vector per image')}</span>
-                </button>
-            </fieldset>
+            <div className='ImmutableModeNotice'>
+                <span>{t('默认索引', 'Default index')}</span>
+                <strong>{t('整图主干', 'Whole-image trunk')}</strong>
+                <small>{t(
+                    '仓库创建后先承载整图向量；目标框和分割区域在添加数据时自然生成分支。',
+                    'The repository starts with whole-image vectors; bbox and mask branches are created naturally during ingest.',
+                )}</small>
+            </div>
             {createError && <div className='InlineError' role='alert'>{createError}</div>}
             <div className='InlineActions'>
                 <button type='button' className='SecondaryButton' onClick={() => setShowCreate(false)}>{t('取消', 'Cancel')}</button>
@@ -1080,17 +1163,36 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                         : t('请选择一个数据集', 'Choose a dataset')}</option>
                     {datasets.map(dataset => (
                         <option key={dataset.id} value={dataset.id}>
-                            {dataset.name}（{dataset.image_count}）
+                            {dataset.name}（{dataset.image_count} · {dataset.annotated_count == null
+                                ? t('标注待统计', 'annotation count pending')
+                                : `${dataset.annotated_count} ${t('张有标注', 'annotated')}`}）
                         </option>
                     ))}
                 </select>
             </label>
+            {selectedDataset && <div className='DatasetCoverage' role='status'>
+                <span>{t('标注覆盖率', 'Annotation coverage')}</span>
+                <strong>{selectedDataset.annotation_coverage == null
+                    ? '—'
+                    : `${Math.round(selectedDataset.annotation_coverage * 100)}%`}</strong>
+                <small>{selectedDataset.annotated_count == null
+                    ? t('待统计', 'Pending')
+                    : `${selectedDataset.annotated_count}/${selectedDataset.image_count}`}</small>
+            </div>}
             {datasetsError && <div className='InlineError' role='alert'>
-                {t('资源中心不可用；你仍可切换到本地上传。', 'Resource Center is unavailable; local upload is still available.')}
+                {requiresDataset
+                    ? t('资源中心不可用；使用已有标注需要数据批次。',
+                        'Resource Center is unavailable; existing annotations require a data batch.')
+                    : t('资源中心不可用；你仍可切换到本地上传。',
+                        'Resource Center is unavailable; local upload is still available.')}
                 <button type='button' onClick={refreshDatasets}>{t('重试', 'Retry')}</button>
             </div>}
             {!datasetsLoading && !datasetsError && datasets.length === 0 && (
-                <div className='MutedText'>{t('暂无数据批次，可从文件队列同步或改用本地上传。', 'No data batches; sync one from File Queue or use local upload.')}</div>
+                <div className='MutedText'>{requiresDataset
+                    ? t('暂无数据批次，请先从文件队列同步包含标注的数据。',
+                        'No data batches; first sync annotated data from File Queue.')
+                    : t('暂无数据批次，可从文件队列同步或改用本地上传。',
+                        'No data batches; sync one from File Queue or use local upload.')}</div>
             )}
         </div>
     );
@@ -1106,37 +1208,91 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         </div>
     );
 
+    // Strategy/source/annotation state is intentionally rendered together so
+    // the operator sees one atomic ingest contract.
+    // eslint-disable-next-line complexity
     const renderIngest = () => {
         if (!selected) return null;
-        const noSource = ingestSource === 'dataset' ? !datasetId : pendingFiles.length === 0;
-        const disabled = !embedderReady || !storeReady || !selected.compatible
-            || activeJob || submittingIngest || noSource;
+        const normalizedSource = normalizeIngestSource(ingestStrategy, ingestSource);
+        const noSource = normalizedSource === 'dataset' ? !datasetId : pendingFiles.length === 0;
+        const existingAnnotationStrategy = ingestStrategy === 'existing_bbox'
+            || ingestStrategy === 'existing_mask';
+        const knownEmptyAnnotations = Boolean(
+            existingAnnotationStrategy &&
+            selectedDataset &&
+            selectedDataset.annotated_count === 0,
+        );
+        const targetId = collectionTargetId(selected);
+        const branch = collections.find(collection =>
+            collectionTargetId(collection) === targetId &&
+            collection.granularity === desiredGranularity &&
+            collection.compatible &&
+            collection.active) || collections.find(collection =>
+            collectionTargetId(collection) === targetId &&
+            collection.granularity === desiredGranularity &&
+            collection.compatible);
+        const disabled = !embedderReady || !storeReady
+            || activeJob || submittingIngest || noSource || knownEmptyAnnotations;
+        const strategies: IngestStrategy[] = [
+            'whole_image',
+            'existing_bbox',
+            'existing_mask',
+            'sam_auto_bbox',
+            'sam_auto',
+        ];
         return <div className='WorkspaceBody'>
             <div className='ImmutableModeNotice'>
-                <span>{t('目标向量单位', 'Target vector unit')}</span>
-                <strong>{granularityLabel(selected.granularity)}</strong>
-                <small>{t('创建时已固定，后续入库将始终使用该粒度。', 'Fixed at creation; every ingest uses this granularity.')}</small>
+                <span>{t('将写入的索引分支', 'Destination index branch')}</span>
+                <strong>{granularityLabel(desiredGranularity)}</strong>
+                <small>{branch
+                    ? t(`复用现有 ${granularityLabel(desiredGranularity)} 分支`, `Reuse the existing ${granularityLabel(desiredGranularity)} branch`)
+                    : t('首次执行时自动创建，不改变整图主干', 'Created automatically on first run without changing the image trunk')}</small>
             </div>
+            <fieldset className='ModePicker IngestPlanPicker'>
+                <legend>{t('入库策略', 'Ingest strategy')}</legend>
+                {strategies.map(strategy => {
+                    const label = ingestStrategyLabel(strategy);
+                    const description = ingestStrategyDescription(strategy);
+                    return <button
+                        type='button'
+                        key={strategy}
+                        className={ingestStrategy === strategy ? 'ModeOption selected' : 'ModeOption'}
+                        role='radio'
+                        aria-checked={ingestStrategy === strategy}
+                        onClick={() => setIngestStrategy(strategy)}
+                    >
+                        <strong>{t(label[0], label[1])}</strong>
+                        <span>{t(description[0], description[1])}</span>
+                    </button>;
+                })}
+            </fieldset>
             <div className='FormSection'>
                 <span className='FormLabel'>{t('数据来源', 'Data source')}</span>
                 <div className='SegmentedControl' role='tablist' aria-label={t('入库数据来源', 'Ingest source')}>
                     <button
                         type='button'
                         role='tab'
-                        aria-selected={ingestSource === 'dataset'}
-                        className={ingestSource === 'dataset' ? 'active' : ''}
+                        aria-selected={normalizedSource === 'dataset'}
+                        className={normalizedSource === 'dataset' ? 'active' : ''}
                         onClick={() => { setIngestSource('dataset'); setPendingFiles([]); }}
                     >{t('资源中心', 'Resource Center')}</button>
                     <button
                         type='button'
                         role='tab'
-                        aria-selected={ingestSource === 'upload'}
-                        className={ingestSource === 'upload' ? 'active' : ''}
+                        aria-selected={normalizedSource === 'upload'}
+                        className={normalizedSource === 'upload' ? 'active' : ''}
+                        disabled={requiresDataset}
                         onClick={() => { setIngestSource('upload'); setDatasetId(''); }}
                     >{t('本地上传', 'Local upload')}</button>
                 </div>
             </div>
-            {ingestSource === 'dataset' ? renderDatasetSource() : renderUploadSource()}
+            {normalizedSource === 'dataset' ? renderDatasetSource() : renderUploadSource()}
+            {knownEmptyAnnotations && <div className='InlineError' role='alert'>
+                {t(
+                    '这个批次没有已有标注；请选择整图主干或 SAM 自动候选区域。',
+                    'This batch has no annotations; use the image trunk or SAM automatic regions.',
+                )}
+            </div>}
             {ingestError && <div className='InlineError' role='alert'>{ingestError}</div>}
             <button type='button' className='PrimaryButton' disabled={disabled} onClick={startIngest}>
                 {submittingIngest ? t('正在提交…', 'Submitting…') : t('开始生成向量', 'Start vector ingest')}

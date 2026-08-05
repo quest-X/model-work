@@ -1,7 +1,7 @@
 import axios from 'axios';
 import {store} from '../index';
 import {AIModelsSelector} from '../store/selectors/AIModelsSelector';
-import {getDefaultCoreServiceUrl} from '../utils/DefaultBackendUrl';
+import {getDefaultCoreServiceUrl, getEngineBaseUrl} from '../utils/DefaultBackendUrl';
 import {PipelineStore} from './PipelineStore';
 import {ScriptStore} from './ScriptStore';
 
@@ -248,8 +248,11 @@ export class SegmentationAPIDetector {
                 if (!active.url) {
                     return { ok: false, reason: `Active model "${active.name}" has no url` };
                 }
-                const base = active.url.replace(/\/+$/, '');
-                this.config = { url: base.endsWith('/segment') ? base : `${base}/segment`, enabled: true };
+                // Keep inference on the canonical engine route. In particular, a
+                // same-host legacy :58600 registration must use the browser gateway
+                // instead of exposing its self-signed backend certificate directly.
+                const base = getEngineBaseUrl().replace(/\/+$/, '');
+                this.config = { url: `${base}/segment`, enabled: true };
                 return { ok: true };
             }
             if (this.config.enabled && this.config.url) return { ok: true };

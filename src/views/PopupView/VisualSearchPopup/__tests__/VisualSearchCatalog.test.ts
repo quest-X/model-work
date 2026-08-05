@@ -16,6 +16,7 @@ describe('VisualSearchCatalog', () => {
             count: 42,
             dataset_id: 'dataset-1',
             dataset_revision: null,
+            dataset_revisions: {'dataset-1': 7, 'dataset-2': 'rev-4'},
             collection_revision: null,
             profile: {
                 profile_id: 'dinov3-sat',
@@ -35,6 +36,7 @@ describe('VisualSearchCatalog', () => {
             collectionRevision: null,
             datasetId: 'dataset-1',
             datasetRevision: null,
+            datasetRevisions: {'dataset-1': 7, 'dataset-2': 'rev-4'},
         }));
         expect(visualSearchCollectionLabel(collection)).toBe(
             'Line A / Scratch / v3 · dinov3-sat',

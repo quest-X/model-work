@@ -42,6 +42,7 @@
     gap: 10px;
 
     > button {
+      position: relative;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -83,6 +84,27 @@
         }
       }
     }
+  }
+
+  .ResourceChangeBadge {
+    position: absolute;
+    z-index: 1;
+    top: 6px;
+    right: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    background: #ffa726;
+    padding: 0 4px;
+    color: #1b1b1b;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+    pointer-events: none;
   }
 
   .ResourceModuleCopy {
@@ -161,6 +183,7 @@
     gap: 6px;
 
     > button {
+      position: relative;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -527,12 +550,13 @@
     color: #72d993;
   }
 
-  .ModelResourceMeta {
+  .ModelResourceMeta,
+  .DatasetMeta {
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
 
-    span {
+    > span {
       border-radius: 3px;
       background: rgba(255, 255, 255, 0.04);
       padding: 3px 6px;
@@ -825,10 +849,6 @@
     }
   }
 
-  .DatasetMeta {
-    color: rgba(255, 255, 255, 0.58);
-    font-size: 10px;
-  }
 
   .DatasetSource {
     overflow: hidden;

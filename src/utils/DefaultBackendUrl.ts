@@ -9,6 +9,7 @@
  */
 
 const DEFAULT_BACKEND_PORT = 58600;
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 /** 返回不带路径的同源 gateway base，例如 `http://192.168.1.205:3001`。 */
 export const getDefaultBackendBase = (): string => {
@@ -58,6 +59,32 @@ export const getDefaultCoreServiceUrl = (path: string = ''): string => {
     return path.startsWith('/') ? `${base}${path}` : `${base}/${path}`;
 };
 
+/**
+ * Old engine registrations often point directly at the self-signed backend,
+ * for example `https://192.168.10.205:58600`. When the UI is already served
+ * by that host's gateway, keep browser traffic same-origin so certificates
+ * and CORS cannot make otherwise healthy services look unavailable.
+ */
+export const resolveEngineBaseUrl = (url: string, type: ServiceEngineType): string => {
+    const normalized = normalizeEngineBaseUrl(url, type);
+    if (typeof window === 'undefined' || !window.location) return normalized;
+
+    const {protocol, hostname} = window.location;
+    if (protocol !== 'http:' && protocol !== 'https:') return normalized;
+
+    try {
+        const registered = new URL(normalized);
+        const directBackend = registered.port === String(DEFAULT_BACKEND_PORT);
+        const sameDeployment = registered.hostname === hostname || LOOPBACK_HOSTS.has(registered.hostname);
+        if (directBackend && sameDeployment) {
+            return type === 'core' ? getDefaultCoreServiceBase() : getDefaultExtensionServiceBase();
+        }
+    } catch {
+        // Invalid custom URLs keep their existing normalized form and fail visibly at the caller.
+    }
+    return normalized;
+};
+
 // 由 index.tsx 在 store 初始化后注入,避免循环依赖 + require() 不可用的问题。
 let _storeRef: { getState: () => any } | null = null;
 
@@ -85,11 +112,11 @@ const getRegisteredEngineBaseUrl = (type: ServiceEngineType): string | null => {
             const activeId = state.aimodels?.activeModelId;
             if (activeId) {
                 const active = matchingModels.find((m: any) => m.id === activeId);
-                if (active?.url) return normalizeEngineBaseUrl(active.url, type);
+                if (active?.url) return resolveEngineBaseUrl(active.url, type);
             }
             const enabled = matchingModels.find((m: any) => m.isActive);
-            if (enabled?.url) return normalizeEngineBaseUrl(enabled.url, type);
-            if (matchingModels[0]?.url) return normalizeEngineBaseUrl(matchingModels[0].url, type);
+            if (enabled?.url) return resolveEngineBaseUrl(enabled.url, type);
+            if (matchingModels[0]?.url) return resolveEngineBaseUrl(matchingModels[0].url, type);
         }
     } catch {
         // store 访问失败

@@ -531,6 +531,168 @@
   gap: 9px;
 }
 
+.vs-seed-graph-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+  padding: 8px 9px;
+  border: 1px solid rgba(159, 134, 255, 0.28);
+  border-radius: 5px;
+  background: rgba(159, 134, 255, 0.07);
+
+  &.active {
+    border-color: rgba(98, 203, 138, 0.32);
+    background: rgba(98, 203, 138, 0.06);
+  }
+
+  > div {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+
+    strong {
+      color: rgba(255, 255, 255, 0.82);
+      font-size: 10px;
+    }
+
+    span {
+      color: rgba(255, 255, 255, 0.48);
+      font-size: 9px;
+      line-height: 1.4;
+    }
+  }
+
+  > button {
+    min-width: 108px;
+    min-height: 28px;
+    border: 1px solid rgba(159, 134, 255, 0.5);
+    border-radius: 4px;
+    color: #ded6ff;
+    background: rgba(159, 134, 255, 0.12);
+    font-size: 9px;
+    cursor: pointer;
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.vs-seed-graph-workspace {
+  margin-bottom: 9px;
+
+  .vs-seed-graph-panel {
+    margin-bottom: 6px;
+  }
+}
+
+.vs-seed-tree {
+  overflow: hidden;
+  border: 1px solid rgba(98, 203, 138, 0.2);
+  border-radius: 5px;
+  background: rgba(7, 18, 13, 0.34);
+
+  > header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 9px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+
+    > div {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    strong {
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 9px;
+    }
+
+    span,
+    small {
+      color: rgba(255, 255, 255, 0.4);
+      font-size: 8px;
+      line-height: 1.35;
+    }
+  }
+}
+
+.vs-seed-tree-list {
+  max-height: 190px;
+  padding: 5px 7px 7px;
+  overflow-y: auto;
+}
+
+.vs-seed-tree-node {
+  position: relative;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 4px 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+
+  > i {
+    width: 7px;
+    height: 7px;
+    border: 2px solid rgba(98, 203, 138, 0.75);
+    border-radius: 50%;
+    background: #16251d;
+  }
+
+  > div {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+
+    strong,
+    span,
+    small {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    strong {
+      color: rgba(255, 255, 255, 0.76);
+      font-size: 8px;
+    }
+
+    span,
+    small {
+      color: rgba(255, 255, 255, 0.38);
+      font-size: 7px;
+    }
+  }
+
+  > em {
+    color: #95d5ad;
+    font-size: 7px;
+    font-style: normal;
+    white-space: nowrap;
+  }
+
+  &.negative {
+    > i {
+      border-color: rgba(255, 117, 117, 0.78);
+      background: #2b1717;
+    }
+
+    > em {
+      color: #e7a0a0;
+    }
+  }
+}
+
 .vs-result-card {
   min-width: 0;
   overflow: hidden;
@@ -633,6 +795,40 @@
       color: rgba(255, 255, 255, 0.35);
       background: rgba(255, 255, 255, 0.03);
       cursor: not-allowed;
+    }
+  }
+}
+
+.vs-seed-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px;
+  margin-top: 3px;
+
+  button {
+    min-width: 0;
+    min-height: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 3px;
+    color: rgba(255, 255, 255, 0.58);
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 8px;
+    cursor: pointer;
+
+    &.positive.active {
+      border-color: rgba(98, 203, 138, 0.54);
+      color: #a6ecc0;
+      background: rgba(98, 203, 138, 0.1);
+    }
+
+    &.negative.active {
+      border-color: rgba(255, 117, 117, 0.5);
+      color: #ffb3b3;
+      background: rgba(255, 90, 90, 0.08);
+    }
+
+    &:disabled {
+      cursor: default;
     }
   }
 }

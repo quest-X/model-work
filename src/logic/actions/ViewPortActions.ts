@@ -19,9 +19,11 @@ import {VideoSelector} from '../../store/selectors/VideoSelector';
 export class ViewPortActions {
     public static updateViewPortSize() {
         if (!!EditorModel.editor) {
+            const primaryPane = EditorModel.editor.querySelector('.CanvasViewPane.primary') as HTMLElement | null;
+            const viewPortElement = primaryPane || EditorModel.editor;
             EditorModel.viewPortSize = {
-                width: EditorModel.editor.offsetWidth,
-                height: EditorModel.editor.offsetHeight
+                width: viewPortElement.offsetWidth,
+                height: viewPortElement.offsetHeight
             }
         }
     }

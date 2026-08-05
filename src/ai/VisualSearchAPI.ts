@@ -265,7 +265,7 @@ const assertSameKindResult = (
     sanitizeMaskGeometry(item);
 };
 
-const normalizeResultItem = (
+export const normalizeVisualSearchResultItem = (
     value: unknown,
     index: number,
 ): VisualSearchResultItem => {
@@ -334,7 +334,8 @@ const normalizeResult = (
     const normalizedKind = normalizeQueryKind(
         firstValue(result, ['query_kind', 'queryKind']) ?? queryKind,
     );
-    const items = rawItems.map((item, index) => normalizeResultItem(item, index));
+    const items = rawItems.map((item, index) =>
+        normalizeVisualSearchResultItem(item, index));
     items.forEach(item => assertSameKindResult(normalizedKind, item));
     return {
         collection: stringOrEmpty(result.collection),

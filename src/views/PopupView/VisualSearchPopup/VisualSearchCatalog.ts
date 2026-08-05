@@ -25,6 +25,7 @@ interface RawVisualSearchCollection {
     collection_revision?: VisualSearchRevision | null;
     dataset_id?: string | null;
     dataset_revision?: VisualSearchRevision | null;
+    dataset_revisions?: Record<string, VisualSearchRevision> | null;
     compatible?: boolean;
     compatibility_reason?: string | null;
 }
@@ -43,6 +44,7 @@ export interface VisualSearchCollection {
     collectionRevision: VisualSearchRevision | null;
     datasetId: string | null;
     datasetRevision: VisualSearchRevision | null;
+    datasetRevisions: Record<string, VisualSearchRevision>;
     compatible: boolean;
     compatibilityReason: string | null;
 }
@@ -88,6 +90,9 @@ export const normalizeVisualSearchCollection = (
         collectionRevision: revision(raw.collection_revision),
         datasetId: nonEmpty(raw.dataset_id),
         datasetRevision: revision(raw.dataset_revision),
+        datasetRevisions: Object.fromEntries(Object.entries(raw.dataset_revisions ?? {})
+            .map(([datasetId, value]) => [datasetId, revision(value)])
+            .filter((entry): entry is [string, VisualSearchRevision] => entry[1] !== null)),
         compatible: raw.compatible === true,
         compatibilityReason: nonEmpty(raw.compatibility_reason),
     };

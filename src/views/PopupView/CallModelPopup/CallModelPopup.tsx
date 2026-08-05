@@ -9,7 +9,7 @@ import {PopupWindowType} from '../../../data/enums/PopupWindowType';
 import {GeneralActionTypes} from '../../../store/general/types';
 import {Language, LanguageConfig} from '../../../data/LanguageConfig';
 import {AIModel} from '../../../store/aimodels/types';
-import {getDefaultCoreServiceBase, normalizeEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
+import {getDefaultCoreServiceBase, resolveEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
 import {getHostSystem, showsTensorRTPlaceholder, supportsCoreML} from '../../../utils/HostSystem';
 import PipelineCanvas from './PipelineCanvas';
 
@@ -79,7 +79,7 @@ const CallModelPopup: React.FC<IProps> = ({
         || coreEngines[0]
         || null;
     const derivedBaseUrl = activeEngine
-        ? normalizeEngineBaseUrl(activeEngine.url, 'core')
+        ? resolveEngineBaseUrl(activeEngine.url, 'core')
         : getDefaultCoreServiceBase();
 
     const refreshHealth = () => {

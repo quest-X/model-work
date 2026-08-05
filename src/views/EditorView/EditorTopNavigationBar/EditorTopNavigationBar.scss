@@ -39,6 +39,10 @@
       min-width: 0;
       overflow: hidden;
     }
+
+    // The layout picker is anchored below the toolbar. Its tool group must not
+    // clip the menu at the toolbar's fixed height.
+    &.DrawingToolsWrapper { overflow: visible; }
   }
 
   .ImageButton {

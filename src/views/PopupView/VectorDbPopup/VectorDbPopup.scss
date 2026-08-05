@@ -336,6 +336,14 @@
     }
   }
 
+  .IngestPlanPicker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    .ModeOption {
+      min-height: 58px;
+    }
+  }
+
   .CollectionState {
     display: flex;
     flex-direction: column;
@@ -846,6 +854,28 @@
     border-radius: 6px;
     background: rgba(255, 255, 255, 0.02);
     padding: 11px;
+  }
+
+  .DatasetCoverage {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 8px;
+    margin-top: 9px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.035);
+    padding: 7px 9px;
+    font-size: 10px;
+
+    span,
+    small {
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    strong {
+      color: #bce3fb;
+      font-size: 12px;
+    }
   }
 
   .UploadZone,

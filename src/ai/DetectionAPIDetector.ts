@@ -4,7 +4,7 @@ import {ImageData} from '../store/labels/types';
 import {EditorModel} from '../staticModels/EditorModel';
 import {store} from '../index';
 import {AIModelsSelector} from '../store/selectors/AIModelsSelector';
-import {getDefaultCoreServiceUrl} from '../utils/DefaultBackendUrl';
+import {getDefaultCoreServiceUrl, getEngineBaseUrl} from '../utils/DefaultBackendUrl';
 import {PipelineStore} from './PipelineStore';
 import {ScriptStore} from './ScriptStore';
 import {FrameExtractorService} from '../services/FrameExtractorService';
@@ -205,8 +205,11 @@ export class DetectionAPIDetector {
                 if (!active.url) {
                     return { ok: false, reason: `Active model "${active.name}" has no url` };
                 }
-                const base = active.url.replace(/\/+$/, '');
-                this.config = { url: base.endsWith('/detect') ? base : `${base}/detect`, enabled: true };
+                // Always resolve the registered engine through the canonical URL helper.
+                // Same-host legacy :58600 registrations must stay on the browser's
+                // same-origin gateway so self-signed TLS cannot block inference.
+                const base = getEngineBaseUrl().replace(/\/+$/, '');
+                this.config = { url: `${base}/detect`, enabled: true };
                 return { ok: true };
             }
             // 没有 activeModel 时回退到 config(由老弹窗设置的 URL)

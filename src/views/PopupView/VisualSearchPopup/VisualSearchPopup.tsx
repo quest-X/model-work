@@ -269,7 +269,7 @@ const optionalDatasetBinding = (
     return {datasetId, datasetRevision};
 };
 
-interface SnapshotInputContext {
+export interface SnapshotInputContext {
     activeImage: ImageData;
     activeImageIndex: number;
     activeQueueItem: QueueItem | null;
@@ -279,10 +279,10 @@ interface SnapshotInputContext {
     selectedCollection: VisualSearchCollection;
     query: EditorVisualSearchQuery;
     topK: number;
-    className: string;
+    className?: string;
 }
 
-const createSnapshotInput = ({
+export const createVisualSearchSnapshotInput = ({
     activeImage,
     activeImageIndex,
     activeQueueItem,
@@ -328,7 +328,7 @@ const createSnapshotInput = ({
     options: {
         topK,
         candidateK: Math.max(topK, Math.min(100, topK * 4)),
-        className: query.kind === 'image' ? undefined : className,
+        className: query.kind === 'image' ? undefined : className || undefined,
     },
     geometry: query.geometry,
 });
@@ -515,7 +515,7 @@ export const VisualSearchPopup: React.FC<Props> = ({
         setSubmitError(null);
         setCapturePhase('resolving-source');
         try {
-            const snapshot = await snapshotCapture(createSnapshotInput({
+            const snapshot = await snapshotCapture(createVisualSearchSnapshotInput({
                 activeImage: queryImage,
                 activeImageIndex: queryImageIndex,
                 activeQueueItem: queryQueueItem,

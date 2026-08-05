@@ -1,5 +1,11 @@
 import {AIModelsStorageManager} from '../AIModelsStorageManager';
-import {getDefaultCoreServiceBase, normalizeEngineBaseUrl} from '../DefaultBackendUrl';
+import {
+    getDefaultCoreServiceBase,
+    getEngineBaseUrl,
+    normalizeEngineBaseUrl,
+    registerEngineStore,
+    resolveEngineBaseUrl,
+} from '../DefaultBackendUrl';
 
 describe('engine service URL normalization', () => {
     it('uses the browser origin as the default same-origin gateway', () => {
@@ -18,6 +24,47 @@ describe('engine service URL normalization', () => {
     it('keeps extension engines on their own service boundary', () => {
         expect(normalizeEngineBaseUrl('https://engine.example.test', 'extension'))
             .toBe('https://engine.example.test/extension_service');
+    });
+
+    it('routes a same-deployment direct backend registration through the browser gateway', () => {
+        registerEngineStore({
+            getState: () => ({
+                aimodels: {
+                    activeModelId: 'core-engine',
+                    models: [{
+                        id: 'core-engine',
+                        modelType: 'core',
+                        url: 'https://localhost:58600/core_service',
+                        isActive: true,
+                    }],
+                },
+            }),
+        });
+
+        expect(getEngineBaseUrl()).toBe('http://localhost/core_service');
+    });
+
+    it('routes an explicitly selected same-deployment engine through the browser gateway', () => {
+        expect(resolveEngineBaseUrl('https://localhost:58600', 'core'))
+            .toBe('http://localhost/core_service');
+    });
+
+    it('preserves a genuinely remote registered engine', () => {
+        registerEngineStore({
+            getState: () => ({
+                aimodels: {
+                    activeModelId: 'remote-core',
+                    models: [{
+                        id: 'remote-core',
+                        modelType: 'core',
+                        url: 'https://engine.example.test:58600',
+                        isActive: true,
+                    }],
+                },
+            }),
+        });
+
+        expect(getEngineBaseUrl()).toBe('https://engine.example.test:58600/core_service');
     });
 });
 

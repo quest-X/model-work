@@ -1,0 +1,22 @@
+.CanvasMultiViewSelect { position:relative; display:flex; align-items:center; justify-content:center; box-sizing:border-box; width:30px; height:30px; margin:0 2px; border-radius:3px; cursor:pointer;
+  &:hover, &.active { background:rgba(0,0,0,.35); }
+  select { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+}
+.CanvasMultiViewIcon { display:grid; grid-template-columns:repeat(2,6px); grid-template-rows:repeat(2,6px); gap:2px; width:14px; height:14px;
+  i { box-sizing:border-box; border:1px solid #f1f1f1; }
+}
+.CanvasMultiViewGrid { position:absolute; inset:0; display:grid; gap:2px; background:#111; }
+.CanvasMultiViewGrid.layout-1x1 { grid-template-columns:1fr; }
+.CanvasMultiViewGrid.layout-2x2 { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }
+.CanvasMultiViewGrid.layout-1x3 { grid-template-columns:minmax(0,1fr) minmax(0,2fr); grid-template-rows:repeat(3,minmax(0,1fr)); }
+.CanvasMultiViewGrid.layout-1x3 > .CanvasViewPane.primary { grid-column:1; grid-row:1 / 4; }
+.CanvasViewPane { position:relative; min-width:0; min-height:0; overflow:hidden; background:#171717; border:1px solid #343434; }
+.CanvasViewPane.primary > div:not(.CanvasViewHeader) { width:100%!important; height:100%!important; }
+.CanvasViewHeader { position:absolute; z-index:20; top:8px; left:8px; display:flex; align-items:center; gap:8px; height:28px; padding:0 7px; color:#bbb; font-size:11px; background:#202020dd; border:1px solid #555; border-radius:3px;
+  select { color:#fff; background:transparent; border:0; outline:0; }
+}
+.CanvasViewPane.primary .CanvasViewHeader { pointer-events:none; color:#fff; }
+.CanvasViewBody { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+.CanvasViewBody img { position:absolute; width:100%; height:100%; object-fit:contain; }
+.CanvasViewBody .overlay { opacity:.72; mix-blend-mode:screen; }
+.CanvasViewMessage { z-index:2; max-width:75%; padding:10px 14px; color:#bbb; background:#222d; text-align:center; }

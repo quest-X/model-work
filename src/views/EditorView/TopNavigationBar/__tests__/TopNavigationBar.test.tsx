@@ -1,5 +1,5 @@
 import React from 'react';
-import {render, screen} from '@testing-library/react';
+import {fireEvent, render, screen} from '@testing-library/react';
 import {Language} from '../../../../data/LanguageConfig';
 import {ProjectType} from '../../../../data/enums/ProjectType';
 import {
@@ -58,6 +58,11 @@ describe('TopNavigationBar core-engine change badge', () => {
         ]);
 
         expect(screen.getByRole('status', {name: '2 个本地变动待处理'})).toHaveTextContent('2');
+
+        fireEvent.click(screen.getByText('核心引擎'));
+        expect(screen.getAllByRole('status', {name: '2 个本地变动待处理'})).toHaveLength(2);
+        expect(screen.getByText('资源中心').parentElement)
+            .toHaveTextContent('2');
     });
 
     it('hides the badge when there are no local changes', () => {

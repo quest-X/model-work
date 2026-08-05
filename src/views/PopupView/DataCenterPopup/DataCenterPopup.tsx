@@ -1018,7 +1018,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
                             <span>{dataset.image_count} {dataset.media_type === 'video'
                                 ? (zh ? '帧' : 'frames')
                                 : (zh ? '张' : 'images')}</span>
-                            <span>{dataset.classes.length} {zh ? '类' : 'classes'}</span>
+                            <span>{dataset.classes.length} {zh ? '类别' : 'classes'}</span>
                         </span>
                         <span className='DatasetSource'>{sourceLabel}</span>
                     </span>

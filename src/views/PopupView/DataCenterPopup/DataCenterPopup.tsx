@@ -428,6 +428,10 @@ export const DataCenterPopup: React.FC<IProps> = ({
         () => queueItems.filter(item => item.dataSyncStatus !== QueueDataSyncStatus.SYNCED),
         [queueItems],
     );
+    const localChangeCount = useMemo(
+        () => queueItems.filter(item => item.dataSyncStatus === QueueDataSyncStatus.DIRTY).length,
+        [queueItems],
+    );
     const runtimeModels = useMemo(() => {
         const seen = new Set<string>();
         return [
@@ -1353,6 +1357,13 @@ export const DataCenterPopup: React.FC<IProps> = ({
             }}
             onKeyDown={handleModuleKeyDown}
         >
+            {localChangeCount > 0 && <span
+                className='ResourceChangeBadge'
+                role='status'
+                aria-label={zh
+                    ? `数据中有 ${localChangeCount} 个本地变动待处理`
+                    : `${localChangeCount} local ${localChangeCount === 1 ? 'change' : 'changes'} pending in data`}
+            >{localChangeCount}</span>}
             <span className='ResourceModuleCopy'>
                 <strong>{zh ? '数据' : 'Data'}</strong>
                 <small>{zh ? '工作副本与版本快照' : 'Work copies and version snapshots'}</small>
@@ -1430,6 +1441,13 @@ export const DataCenterPopup: React.FC<IProps> = ({
                     onClick={() => setActiveTier('temporary')}
                     onKeyDown={handleTierKeyDown}
                 >
+                    {activeModule === 'data' && localChangeCount > 0 && <span
+                        className='ResourceChangeBadge'
+                        role='status'
+                        aria-label={zh
+                            ? `临时数据中有 ${localChangeCount} 个本地变动待处理`
+                            : `${localChangeCount} local ${localChangeCount === 1 ? 'change' : 'changes'} pending in temporary data`}
+                    >{localChangeCount}</span>}
                     <span className='DataTierTabCopy'>
                         <span>{copy.temporaryLabel}</span>
                         <small>{copy.temporaryDetail}</small>

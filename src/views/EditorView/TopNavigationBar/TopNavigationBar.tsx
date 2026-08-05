@@ -229,7 +229,19 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                                         onClick={openDataCenter}>
                                         <div className='Marker'/>
                                         <img src='ico/api.png' alt='data-center'/>
-                                        {currentTexts.modelManagement.dataCenter}
+                                        <span className='ServicesOptionLabel'>
+                                            {currentTexts.modelManagement.dataCenter}
+                                        </span>
+                                        {localChangeCount > 0 && (
+                                            <span
+                                                className='ServicesOptionChangeBadge'
+                                                role='status'
+                                                aria-label={localChangeDescription}
+                                                title={localChangeDescription}
+                                            >
+                                                {localChangeCount}
+                                            </span>
+                                        )}
                                     </div>
                                     <div className='DropDownMenuContentOption active'
                                         onClick={openLocalModelManager}>

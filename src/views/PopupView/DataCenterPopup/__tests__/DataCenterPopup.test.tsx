@@ -197,10 +197,10 @@ describe('DataCenterPopup', () => {
         }) as jest.Mock;
     });
 
-    const renderPopup = () => render(<DataCenterPopup
+    const renderPopup = (queueItems = [localItem]) => render(<DataCenterPopup
         language={Language.CHINESE}
         projectName='default-project'
-        queueItems={[localItem]}
+        queueItems={queueItems}
         activeQueueItemId='queue-1'
         imagesData={[]}
         labels={[]}
@@ -243,6 +243,17 @@ describe('DataCenterPopup', () => {
         expect(imageMetadataTags[1]).toHaveTextContent('465 张');
         expect(screen.getByText('已就绪')).toBeInTheDocument();
         expect(screen.getByText(/项目 default-project/)).toBeInTheDocument();
+    });
+
+    it('routes local-change badges through data to temporary data', async () => {
+        renderPopup([{
+            ...localItem,
+            dataSyncStatus: QueueDataSyncStatus.DIRTY,
+        }]);
+        await screen.findByRole('tab', {name: '持久化数据 1'});
+
+        expect(screen.getByRole('status', {name: '数据中有 1 个本地变动待处理'})).toHaveTextContent('1');
+        expect(screen.getByRole('status', {name: '临时数据中有 1 个本地变动待处理'})).toHaveTextContent('1');
     });
 
     it('filters persistent datasets by media, annotation state and search query', async () => {

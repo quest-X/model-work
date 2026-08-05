@@ -1,6 +1,8 @@
 @import '../../../settings/Settings';
 
 .EditorTopNavigationBar {
+  position: relative;
+  z-index: 100020;
   align-self: stretch;
   height: $editorTopNavigationBarHeight;
   box-sizing: border-box;
@@ -38,6 +40,12 @@
       flex-shrink: 1;
       min-width: 0;
       overflow: hidden;
+    }
+
+    // The layout picker is anchored below the toolbar. Its tool group must not
+    // clip the menu at the toolbar's fixed height.
+    &.collapsible:has(.CanvasMultiViewTrigger) {
+      overflow: visible;
     }
   }
 

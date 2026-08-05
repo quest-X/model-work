@@ -9,6 +9,7 @@ import {
     VisualSearchMaskAcceptance,
 } from '../../store/labels/types';
 import {VisualSearchResultItem} from '../../store/visualSearch/types';
+import {QueueItemType} from '../../store/queue/types';
 import {
     parseVisualSearchMaskComponent,
     validateVisualSearchMaskGroup,
@@ -132,6 +133,20 @@ const assertCommonAcceptanceCAS = (
     const image = state.labels.imagesData.find(item => item.id === acceptance.imageId);
     if (!image || image.fileData !== acceptance.expectedFile) {
         acceptanceCASFailure('image_identity');
+    }
+    if (acceptance.videoFrameIndex !== undefined) {
+        const activeVideo = state.video.activeVideo;
+        if (!state.video.isVideoMode || !activeVideo ||
+            queueItem.type !== QueueItemType.VIDEO ||
+            acceptance.videoFrameIndex < 0 ||
+            acceptance.videoFrameIndex >= activeVideo.totalFrames ||
+            state.labels.imagesData[acceptance.videoFrameIndex]?.id !== image.id ||
+            (queueItem.videoSessionId && activeVideo.sessionId &&
+                queueItem.videoSessionId !== activeVideo.sessionId) ||
+            result.width !== activeVideo.videoSize.width ||
+            result.height !== activeVideo.videoSize.height) {
+            acceptanceCASFailure('video_frame_identity');
+        }
     }
     return {result, image};
 };

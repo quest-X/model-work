@@ -20,6 +20,7 @@ import {
     verifyVisualSearchMaskGeometry,
     VisualSearchMaskGeometryInput,
 } from './VisualSearchMaskGeometry';
+import {QueueItemType} from '../store/queue/types';
 
 export interface VisualSearchAcceptanceResult {
     imageId: string;
@@ -170,6 +171,34 @@ const matchingFileName = (item: VisualSearchResultItem, file: File): boolean => 
     return file.name === item.fileName || file.name === pathName;
 };
 
+const resultVideoFrameIndex = (item: VisualSearchResultItem): number | null => {
+    const name = item.fileName || item.path.split(/[\\/]/).pop() || '';
+    const match = /^frame_(\d+)\.(?:avif|bmp|jpe?g|png|tiff?|webp)$/i.exec(name);
+    if (!match) return null;
+    const frameIndex = Number(match[1]);
+    return Number.isSafeInteger(frameIndex) ? frameIndex : null;
+};
+
+const trustedVideoFrameCandidate = (
+    state: AppState,
+    item: VisualSearchResultItem,
+): {image: AppState['labels']['imagesData'][number]; frameIndex: number} | null => {
+    if (!state.video.isVideoMode || !state.video.activeVideo) return null;
+    const queueItem = state.queue.items.find(
+        candidate => candidate.id === state.queue.activeQueueItemId,
+    );
+    if (!queueItem || queueItem.type !== QueueItemType.VIDEO) return null;
+    if (queueItem.videoSessionId && state.video.activeVideo.sessionId &&
+        queueItem.videoSessionId !== state.video.activeVideo.sessionId) return null;
+    const frameIndex = resultVideoFrameIndex(item);
+    if (frameIndex === null || frameIndex >= state.video.activeVideo.totalFrames) return null;
+    const image = state.labels.imagesData[frameIndex];
+    if (!image || !matchingFileName(item, image.fileData)) return null;
+    const size = state.video.activeVideo.videoSize;
+    if (item.width !== size.width || item.height !== size.height) return null;
+    return {image, frameIndex};
+};
+
 const freezeResultItem = (item: VisualSearchResultItem): VisualSearchResultItem => ({
     ...item,
     bbox: item.bbox ? [...item.bbox] as VisualSearchBBox : null,
@@ -217,14 +246,16 @@ export class VisualSearchAcceptanceService {
         const sourcePolygons = item.geometry?.kind === 'mask'
             ? await this.requireMaskGeometry(item)
             : null;
+        const trustedVideoFrame = trustedVideoFrameCandidate(initial, item);
+        const trustedVideoFrameIndex = trustedVideoFrame?.frameIndex;
         const candidates = initial.labels.imagesData.filter(image =>
             matchingFileName(item, image.fileData));
         if (candidates.length === 0) {
             throw new Error('The exact result asset is not loaded in the active queue');
         }
 
-        let target = null as typeof candidates[number] | null;
-        for (const candidate of candidates) {
+        let target = trustedVideoFrame?.image ?? null as typeof candidates[number] | null;
+        for (const candidate of target ? [] : candidates) {
             // Deliberately sequential: a duplicate filename normally resolves on
             // the first hash and we avoid retaining multiple full image buffers.
             // eslint-disable-next-line no-await-in-loop
@@ -250,6 +281,7 @@ export class VisualSearchAcceptanceService {
                 target,
                 sourcePolygons,
                 matchingLabel?.id ?? null,
+                trustedVideoFrameIndex,
             );
         }
         return this.acceptBBox(
@@ -260,6 +292,7 @@ export class VisualSearchAcceptanceService {
             target,
             bbox,
             matchingLabel?.id ?? null,
+            trustedVideoFrameIndex,
         );
     }
 
@@ -271,6 +304,7 @@ export class VisualSearchAcceptanceService {
         target: AppState['labels']['imagesData'][number],
         bbox: VisualSearchBBox,
         labelId: string | null,
+        trustedVideoFrameIndex?: number,
     ): VisualSearchAcceptanceResult {
         const rectId = visualSearchAcceptedRectId(backendJobId, item.resultId);
         const labelRect: LabelRect = {
@@ -294,6 +328,7 @@ export class VisualSearchAcceptanceService {
             resultId: item.resultId,
             queueItemId: binding.queueItemId,
             queueDatasetRevision: binding.queueDatasetRevision,
+            videoFrameIndex: trustedVideoFrameIndex,
             datasetId: binding.datasetId,
             datasetRevision: binding.datasetRevision,
             assetId: item.assetId as string,
@@ -319,6 +354,7 @@ export class VisualSearchAcceptanceService {
         target: AppState['labels']['imagesData'][number],
         sourcePolygons: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
         labelId: string | null,
+        trustedVideoFrameIndex?: number,
     ): VisualSearchAcceptanceResult {
         const labelPolygons: LabelPolygon[] = sourcePolygons.map((polygon, index) => {
             const vertices = polygon.map(point => ({x: point[0], y: point[1]}));
@@ -356,6 +392,7 @@ export class VisualSearchAcceptanceService {
             resultId: item.resultId,
             queueItemId: binding.queueItemId,
             queueDatasetRevision: binding.queueDatasetRevision,
+            videoFrameIndex: trustedVideoFrameIndex,
             datasetId: binding.datasetId,
             datasetRevision: binding.datasetRevision,
             assetId: item.assetId as string,

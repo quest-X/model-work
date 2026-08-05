@@ -89,6 +89,7 @@ export interface VisualSearchBBoxAcceptance {
     resultId: string;
     queueItemId: string;
     queueDatasetRevision: string | number;
+    videoFrameIndex?: number;
     datasetId: string;
     datasetRevision: string | number;
     assetId: string;
@@ -104,6 +105,7 @@ export interface VisualSearchMaskAcceptance {
     resultId: string;
     queueItemId: string;
     queueDatasetRevision: string | number;
+    videoFrameIndex?: number;
     datasetId: string;
     datasetRevision: string | number;
     assetId: string;

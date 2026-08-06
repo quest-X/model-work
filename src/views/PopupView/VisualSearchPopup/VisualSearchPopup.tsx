@@ -47,6 +47,12 @@ import {
     visualSearchAcceptedMaskPolygonId,
     visualSearchAcceptedRectId,
 } from '../../../services/VisualSearchAcceptanceService';
+import {
+    VisualSearchSeedGraph,
+    VisualSearchSeedGraphRunner,
+    visualSearchSeedGraphService,
+} from '../../../services/VisualSearchSeedGraphService';
+import {VisualSearchSeedGraphView} from './VisualSearchSeedGraphView';
 import './VisualSearchPopup.scss';
 
 export interface ResolvedVisualSearchSource {
@@ -98,6 +104,7 @@ interface OwnProps {
     snapshotCapture?: SnapshotCapture;
     jobRunner?: VisualSearchJobRunner;
     acceptanceRunner?: VisualSearchAcceptanceRunner;
+    seedGraphRunner?: VisualSearchSeedGraphRunner;
     onClose?: () => void;
 }
 
@@ -355,6 +362,7 @@ export const VisualSearchPopup: React.FC<Props> = ({
     snapshotCapture = QuerySnapshotService.capture,
     jobRunner = visualSearchJobService,
     acceptanceRunner = visualSearchAcceptanceService,
+    seedGraphRunner = visualSearchSeedGraphService,
     onClose = PopupActions.close,
 }) => {
     const chinese = language === Language.CHINESE;
@@ -401,6 +409,13 @@ export const VisualSearchPopup: React.FC<Props> = ({
     const [acceptingResultId, setAcceptingResultId] = useState<string | null>(null);
     const [acceptanceError, setAcceptanceError] = useState<string | null>(null);
     const [acceptedThisSession, setAcceptedThisSession] = useState<string[]>([]);
+    const [seedGraphs, setSeedGraphs] = useState<Record<string, VisualSearchSeedGraph>>({});
+    const [seedDecisions, setSeedDecisions] = useState<Record<
+        string,
+        'positive' | 'negative'
+    >>({});
+    const [seedBusy, setSeedBusy] = useState(false);
+    const [seedError, setSeedError] = useState<string | null>(null);
 
     useEffect(() => {
         if (!queryImage) {
@@ -480,6 +495,28 @@ export const VisualSearchPopup: React.FC<Props> = ({
         collection => collection.name === selectedCollectionName,
     ) ?? null;
     const activeJob = jobs.find(job => job.clientJobId === activeJobId) ?? jobs[0] ?? null;
+    const activeSeedGraph = activeJob?.backendJobId
+        ? seedGraphs[activeJob.backendJobId] ?? null
+        : null;
+    const seedCandidateMap = useMemo(() => new Map(
+        (activeSeedGraph?.candidates ?? []).map(candidate => [candidate.resultId, candidate]),
+    ), [activeSeedGraph]);
+    const displayedJob = useMemo<VisualSearchJobState | null>(() => {
+        if (!activeJob || !activeSeedGraph || !activeJob.result) return activeJob;
+        return {
+            ...activeJob,
+            result: {
+                ...activeJob.result,
+                total: activeSeedGraph.candidates.length,
+                items: activeSeedGraph.candidates.map(candidate => candidate.item),
+            },
+        };
+    }, [activeJob, activeSeedGraph]);
+
+    useEffect(() => {
+        setSeedDecisions({});
+        setSeedError(null);
+    }, [activeJob?.backendJobId]);
     const acceptedResultIds = useMemo(() => {
         const acceptedIds = new Set(acceptedThisSession);
         if (!activeJob?.backendJobId) return acceptedIds;
@@ -559,6 +596,12 @@ export const VisualSearchPopup: React.FC<Props> = ({
                 'Only same-kind bbox or mask results can be accepted',
             );
         }
+        if (!job.result?.items.some(result => result.resultId === item.resultId)) {
+            return t(
+                '扩展候选不属于原始任务；可继续作为种子，但不能借原任务写入标注。',
+                'Expanded candidates are not part of the root task; they can seed another round but cannot be accepted through the root task.',
+            );
+        }
         if (isVideoMode) {
             return t('视频结果接受尚未启用', 'Acceptance is disabled for video frames');
         }
@@ -624,6 +667,118 @@ export const VisualSearchPopup: React.FC<Props> = ({
         } finally {
             setAcceptingResultId(null);
         }
+    };
+
+    const createSeedGraph = async () => {
+        if (!activeJob?.backendJobId ||
+            activeJob.snapshot.geometry.kind === 'image' ||
+            seedBusy) {
+            return;
+        }
+        setSeedBusy(true);
+        setSeedError(null);
+        try {
+            const graph = await seedGraphRunner.create(
+                activeJob.backendJobId,
+                activeJob.snapshot.options.topK,
+                activeJob.snapshot.options.candidateK,
+            );
+            setSeedGraphs(current => ({...current, [activeJob.backendJobId as string]: graph}));
+        } catch (cause) {
+            setSeedError(errorText(
+                cause,
+                t('无法建立种子图', 'Could not create the seed graph'),
+            ));
+        } finally {
+            setSeedBusy(false);
+        }
+    };
+
+    const setSeedDecision = (
+        item: VisualSearchResultItem,
+        decision: 'positive' | 'negative',
+    ) => {
+        setSeedDecisions(current => {
+            const next = {...current};
+            if (next[item.resultId] === decision) delete next[item.resultId];
+            else next[item.resultId] = decision;
+            return next;
+        });
+    };
+
+    const expandSeedGraph = async () => {
+        if (!activeJob?.backendJobId || !activeSeedGraph || seedBusy) return;
+        const decisions = Object.entries(seedDecisions);
+        if (decisions.length === 0) return;
+        setSeedBusy(true);
+        setSeedError(null);
+        try {
+            const graph = await seedGraphRunner.expand(activeSeedGraph.graphId, {
+                acceptResultIds: decisions
+                    .filter(([, decision]) => decision === 'positive')
+                    .map(([resultId]) => resultId),
+                rejectResultIds: decisions
+                    .filter(([, decision]) => decision === 'negative')
+                    .map(([resultId]) => resultId),
+                candidateK: activeSeedGraph.candidateK,
+            });
+            setSeedGraphs(current => ({...current, [activeJob.backendJobId as string]: graph}));
+            setSeedDecisions({});
+        } catch (cause) {
+            setSeedError(errorText(
+                cause,
+                t('种子扩展失败', 'Seed expansion failed'),
+            ));
+        } finally {
+            setSeedBusy(false);
+        }
+    };
+
+    const renderSeedGraphControls = () => {
+        if (activeJob?.status !== 'succeeded' ||
+            activeJob.snapshot.geometry.kind === 'image' ||
+            !activeJob.backendJobId) return null;
+        if (!activeSeedGraph) {
+            return <div className='vs-seed-graph-panel'>
+                <div>
+                    <strong>{t('多种子扩展', 'Multi-seed expansion')}</strong>
+                    <span>{t(
+                        '把可信 bbox/mask 结果升级为新种子，继续搜索全部同型区域；向量与检索证据都会复用。',
+                        'Promote trusted bbox/mask results and search every same-kind region. Both vectors and search evidence are reused.',
+                    )}</span>
+                </div>
+                <button type='button' disabled={seedBusy} onClick={() => void createSeedGraph()}>
+                    {seedBusy ? t('建立中…', 'Creating…') : t('开启种子图', 'Start seed graph')}
+                </button>
+            </div>;
+        }
+        const stagedCount = Object.keys(seedDecisions).length;
+        const positiveCount = activeSeedGraph.seeds.filter(
+            seed => seed.polarity === 'positive',
+        ).length;
+        const negativeCount = activeSeedGraph.seeds.length - positiveCount;
+        return <div className='vs-seed-graph-workspace'>
+            <div className='vs-seed-graph-panel active'>
+                <div>
+                    <strong>{t(
+                        `第 ${activeSeedGraph.generation} 代 · ${activeSeedGraph.candidates.length} 条候选`,
+                        `Generation ${activeSeedGraph.generation} · ${activeSeedGraph.candidates.length} candidates`,
+                    )}</strong>
+                    <span>{t(
+                        `正种子 ${positiveCount} · 负种子 ${negativeCount}；新结果不会自动成为种子。`,
+                        `${positiveCount} positive · ${negativeCount} negative seeds. New results never become seeds automatically.`,
+                    )}</span>
+                </div>
+                <button
+                    type='button'
+                    disabled={seedBusy || stagedCount === 0}
+                    onClick={() => void expandSeedGraph()}
+                >{seedBusy
+                        ? t('搜索中…', 'Searching…')
+                        : t(`用 ${stagedCount} 个判断扩展`, `Expand with ${stagedCount} decision(s)`)}</button>
+            </div>
+            <VisualSearchSeedGraphView graph={activeSeedGraph} chinese={chinese}/>
+        </div>;
     };
 
     const renderInputPanel = () => <section className='vs-input-panel'>
@@ -801,14 +956,24 @@ export const VisualSearchPopup: React.FC<Props> = ({
                     )
                     : activeJob.error.message}</span>
             </div>}
-            <VisualSearchResults
-                job={activeJob}
+            {renderSeedGraphControls()}
+            {displayedJob && <VisualSearchResults
+                job={displayedJob}
                 chinese={chinese}
                 onAccept={item => void acceptResult(item)}
                 acceptanceReason={item => acceptanceBlockReason(activeJob, item)}
                 acceptingResultId={acceptingResultId}
                 acceptedResultIds={acceptedResultIds}
-            />
+                seedCandidateStatus={activeSeedGraph
+                    ? item => seedCandidateMap.get(item.resultId)?.status ?? 'candidate'
+                    : undefined}
+                seedDecision={activeSeedGraph
+                    ? item => seedDecisions[item.resultId] ?? null
+                    : undefined}
+                onSeedDecision={activeSeedGraph ? setSeedDecision : undefined}
+                seedBusy={seedBusy}
+            />}
+            {seedError && <div className='vs-notice error' role='alert'>{seedError}</div>}
             {acceptanceError && <div className='vs-notice error' role='alert'>
                 {acceptanceError}
             </div>}

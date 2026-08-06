@@ -11,6 +11,7 @@ import {ImageData} from '../../../../store/labels/types';
 import {
     VISUAL_SEARCH_MASK_RASTERIZER_REVISION,
     VisualSearchJobState,
+    VisualSearchResultItem,
     VisualSearchSnapshotMetadata,
 } from '../../../../store/visualSearch/types';
 import {VideoData} from '../../../../store/video/types';
@@ -174,6 +175,64 @@ const metadata = (
     },
 });
 
+const bboxResult = (
+    resultId: string,
+    fileName: string,
+    score: number,
+): VisualSearchResultItem => ({
+    resultId,
+    assetId: `asset-${resultId}`,
+    datasetId: 'dataset-1',
+    datasetRevision: 7,
+    rank: 1,
+    path: `/dataset/${fileName}`,
+    fileName,
+    width: 100,
+    height: 80,
+    className: 'goose',
+    confidence: 0.8,
+    score,
+    dinoScore: score,
+    bbox: [2, 3, 20, 30],
+    thumbnail: null,
+    contentSha256: 'a'.repeat(64),
+    regionId: `region-${resultId}`,
+    granularity: 'bbox',
+    regionSource: 'dataset',
+    geometrySha256: null,
+    acceptanceEligible: null,
+    acceptanceReason: null,
+    geometry: {kind: 'bbox', bbox: [2, 3, 20, 30]},
+});
+
+const completedBBoxJob = (): VisualSearchJobState => ({
+    clientJobId: 'completed-bbox-job',
+    backendJobId: 'task-bbox',
+    snapshot: metadata('bbox'),
+    status: 'succeeded',
+    phase: 'succeeded',
+    createdAt: 100,
+    updatedAt: 120,
+    finishedAt: 120,
+    recoveryCount: 0,
+    cancelRequested: false,
+    idempotentReplay: false,
+    selectedResultIds: [],
+    result: {
+        collection: 'scene/bbox/v1',
+        queryKind: 'bbox',
+        queryGeometry: {kind: 'bbox', bbox: [2, 3, 20, 30]},
+        profileId: 'profile-bbox',
+        modelRevision: 'model-bbox-1',
+        collectionRevision: 'collection-bbox-1',
+        executedStages: ['dino'],
+        stageStatus: {dino: 'succeeded'},
+        total: 1,
+        elapsedMs: 9,
+        items: [bboxResult('result-1', 'first.jpg', 0.91)],
+    },
+});
+
 const baseProps = () => ({
     language: Language.ENGLISH,
     activeImage: activeImage(),
@@ -214,10 +273,100 @@ const baseProps = () => ({
         imageId: 'target-image',
         labelRectId: 'visual-search:task-1:result-1',
     })},
+    seedGraphRunner: {
+        create: jest.fn(),
+        expand: jest.fn(),
+    },
     onClose: jest.fn(),
 });
 
 describe('VisualSearchPopup', () => {
+    it('promotes trusted bbox results and renders newly discovered evidence', async () => {
+        const props = baseProps();
+        props.activeImage = activeImage('rect');
+        props.activeLabelId = 'rect-1';
+        props.collectionLoader.mockResolvedValue([collection('bbox')]);
+        props.jobs = [completedBBoxJob()];
+        props.activeJobId = 'completed-bbox-job';
+        const initialGraph = {
+            graphId: 'seedgraph-one',
+            rootTaskId: 'task-bbox',
+            collection: 'scene/bbox/v1',
+            queryKind: 'bbox' as const,
+            profileId: 'profile-bbox',
+            collectionRevision: 'collection-bbox-1',
+            topK: 12,
+            candidateK: 48,
+            generation: 0,
+            seeds: [{
+                seedId: 'seed_root',
+                parentSeedId: null,
+                resultId: null,
+                polarity: 'positive' as const,
+                trust: 1,
+                generation: 0,
+            }],
+            candidates: [{
+                resultId: 'result-1',
+                item: bboxResult('result-1', 'first.jpg', 0.91),
+                positiveScore: 0.91,
+                negativeScore: 0,
+                fusedScore: 0.91,
+                discoveredBy: ['seed_root'],
+                firstGeneration: 0,
+                status: 'candidate' as const,
+            }],
+            createdAt: '2026-08-04T00:00:00Z',
+            updatedAt: '2026-08-04T00:00:00Z',
+        };
+        props.seedGraphRunner.create.mockResolvedValue(initialGraph);
+        props.seedGraphRunner.expand.mockResolvedValue({
+            ...initialGraph,
+            generation: 1,
+            seeds: [
+                ...initialGraph.seeds,
+                {
+                    seedId: 'seed-positive-1',
+                    parentSeedId: 'seed_root',
+                    resultId: 'result-1',
+                    polarity: 'positive' as const,
+                    trust: 0.9,
+                    generation: 1,
+                },
+            ],
+            candidates: [
+                {...initialGraph.candidates[0], status: 'accepted' as const},
+                {
+                    resultId: 'result-2',
+                    item: bboxResult('result-2', 'discovered.jpg', 0.86),
+                    positiveScore: 0.774,
+                    negativeScore: 0,
+                    fusedScore: 0.774,
+                    discoveredBy: ['seed-positive-1'],
+                    firstGeneration: 1,
+                    status: 'candidate' as const,
+                },
+            ],
+        });
+
+        render(<VisualSearchPopup {...props}/>);
+        fireEvent.click(await screen.findByRole('button', {name: 'Start seed graph'}));
+        fireEvent.click(await screen.findByRole('button', {name: 'Use as seed'}));
+        fireEvent.click(screen.getByRole('button', {name: 'Expand with 1 decision(s)'}));
+
+        await waitFor(() => expect(props.seedGraphRunner.expand).toHaveBeenCalledWith(
+            'seedgraph-one',
+            {
+                acceptResultIds: ['result-1'],
+                rejectResultIds: [],
+                candidateK: 48,
+            },
+        ));
+        expect(await screen.findByText('discovered.jpg')).toBeInTheDocument();
+        expect(screen.getByText('Generation 1 · 2 candidates')).toBeInTheDocument();
+        expect(screen.getByRole('tree', {name: 'Seed propagation tree'})).toBeInTheDocument();
+    });
+
     it('refuses to mix a moving raw-video frame with frozen frame metadata', async () => {
         await expect(resolveVisualSearchSource({
             activeImage: activeImage(),
@@ -614,6 +763,7 @@ describe('VisualSearchPopup', () => {
             'points',
             '10,20 30,20 30,40 10,40',
         );
+        expect(screen.getByRole('button', {name: 'Start seed graph'})).toBeEnabled();
         fireEvent.click(screen.getByRole('button', {name: 'Accept mask'}));
         await waitFor(() => expect(props.acceptanceRunner.accept).toHaveBeenCalledWith(
             'completed-mask-job',

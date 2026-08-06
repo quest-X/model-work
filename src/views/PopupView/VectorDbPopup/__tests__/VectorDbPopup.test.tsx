@@ -68,7 +68,13 @@ describe('VectorDbPopup', () => {
     let statusBody: typeof readyStatus;
     let collectionList: Array<typeof collection>;
     let jobList: Array<Record<string, unknown>>;
-    let datasetList: Array<{id: string; name: string; image_count: number}>;
+    let datasetList: Array<{
+        id: string;
+        name: string;
+        image_count: number;
+        annotated_count?: number;
+        annotation_coverage?: number;
+    }>;
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -83,7 +89,14 @@ describe('VectorDbPopup', () => {
         statusBody = readyStatus;
         collectionList = [collection];
         jobList = [];
-        datasetList = [{id: 'dataset-1', name: '一号产线', image_count: 24}];
+        datasetList = [{
+            id: 'dataset-1',
+            name: '一号产线',
+            image_count: 24,
+            annotated_count: 12,
+            annotation_coverage: 0.5,
+        }];
+        // eslint-disable-next-line complexity
         global.fetch = jest.fn((input: RequestInfo, init?: RequestInit) => {
             const url = String(input);
             if (url.endsWith('/status')) return Promise.resolve(jsonResponse(statusBody));
@@ -98,7 +111,19 @@ describe('VectorDbPopup', () => {
                     display_name: request.target_name,
                     target_name: request.target_name,
                     scene_name: request.scene_name,
+                    granularity: request.granularity || 'image',
+                }, 201));
+            }
+            if (url.endsWith('/branches') && init?.method === 'POST') {
+                const request = JSON.parse(String(init.body));
+                return Promise.resolve(jsonResponse({
+                    ...collection,
+                    name: `${request.granularity}_branch`,
                     granularity: request.granularity,
+                    branch_kind: request.granularity === 'image' ? 'trunk' : 'region',
+                    parent_collection: request.parent_collection || null,
+                    count: 0,
+                    data_version: 0,
                 }, 201));
             }
             if (url.endsWith('/collections')) {
@@ -185,12 +210,13 @@ describe('VectorDbPopup', () => {
             String(url).endsWith('/warmup') && init?.method === 'POST')).toBe(true));
     });
 
-    it('creates a target in a scene with the explicitly selected immutable vector unit', async () => {
+    it('creates a target with an implicit whole-image trunk', async () => {
         render(<VectorDbPopup language={Language.CHINESE}/>);
         await screen.findAllByText('产线帧库');
 
         fireEvent.click(screen.getByRole('button', {name: /新建目标/}));
-        fireEvent.click(screen.getByRole('radio', {name: /整张图片/}));
+        expect(screen.getByText('整图主干')).toBeInTheDocument();
+        expect(screen.queryByRole('radio', {name: /目标框|分割区域/})).not.toBeInTheDocument();
         fireEvent.change(screen.getByRole('combobox', {name: '场景名称'}), {
             target: {value: '__new_scene__'},
         });
@@ -206,31 +232,59 @@ describe('VectorDbPopup', () => {
             expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
                 scene_name: '二号产线',
                 target_name: '缺陷整图库',
-                granularity: 'image',
             });
         });
     });
 
-    it('creates a strict mask target from the vector-unit picker', async () => {
+    it('naturally creates a bbox branch when ingesting existing annotations', async () => {
         render(<VectorDbPopup language={Language.CHINESE}/>);
         await screen.findAllByText('产线帧库');
-
-        fireEvent.click(screen.getByRole('button', {name: /新建目标/}));
-        fireEvent.click(screen.getByRole('radio', {name: /分割区域/}));
-        fireEvent.change(screen.getByPlaceholderText('例如：划痕'), {target: {value: '大鹅分割库'}});
+        fireEvent.click(screen.getByRole('radio', {name: /使用已有标注框/}));
+        const datasetSelect = screen.getByRole('combobox', {name: '选择数据批次'});
+        fireEvent.change(datasetSelect, {target: {value: 'dataset-1'}});
         await act(async () => {
-            fireEvent.click(screen.getByRole('button', {name: '创建目标'}));
+            fireEvent.click(screen.getByRole('button', {name: '开始生成向量'}));
         });
 
         await waitFor(() => {
-            const createCall = (global.fetch as jest.Mock).mock.calls.find(([url, init]) =>
-                String(url).endsWith('/targets') && init?.method === 'POST');
-            expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
-                scene_id: 'scene_line_1',
-                scene_name: '一号产线',
-                target_name: '大鹅分割库',
-                granularity: 'mask',
+            const branchCall = (global.fetch as jest.Mock).mock.calls.find(([url, init]) =>
+                String(url).endsWith('/branches') && init?.method === 'POST');
+            expect(JSON.parse(String(branchCall?.[1]?.body))).toEqual({
+                granularity: 'bbox',
+                parent_collection: 'frame_index',
             });
+            const ingestCall = (global.fetch as jest.Mock).mock.calls.find(([url]) =>
+                String(url).includes('/bbox_branch/ingest'));
+            const body = ingestCall?.[1]?.body as FormData;
+            expect(body.get('ingest_strategy')).toBe('existing_bbox');
+            expect(body.get('dataset_id')).toBe('dataset-1');
+        });
+    });
+
+    it('creates an unlabeled bbox proposal branch with SAM', async () => {
+        datasetList = [{
+            id: 'dataset-raw',
+            name: '无标注批次',
+            image_count: 9,
+            annotated_count: 0,
+            annotation_coverage: 0,
+        }];
+        render(<VectorDbPopup language={Language.CHINESE}/>);
+        await screen.findAllByText('产线帧库');
+        fireEvent.click(screen.getByRole('radio', {name: /SAM 自动候选框/}));
+        const datasetSelect = screen.getByRole('combobox', {name: '选择数据批次'});
+        fireEvent.change(datasetSelect, {target: {value: 'dataset-raw'}});
+        const ingestButton = screen.getByRole('button', {name: '开始生成向量'});
+        await waitFor(() => expect(ingestButton).toBeEnabled());
+        fireEvent.click(ingestButton);
+
+        await waitFor(() => {
+            const ingestCall = (global.fetch as jest.Mock).mock.calls.find(([url]) =>
+                String(url).includes('/bbox_branch/ingest'));
+            const body = ingestCall?.[1]?.body as FormData;
+            expect(body.get('granularity')).toBe('bbox');
+            expect(body.get('ingest_strategy')).toBe('sam_auto_bbox');
+            expect(body.get('dataset_id')).toBe('dataset-raw');
         });
     });
 
@@ -254,7 +308,6 @@ describe('VectorDbPopup', () => {
                 scene_id: 'scene_line_1',
                 scene_name: '一号产线',
                 target_name: '划痕目标',
-                granularity: 'bbox',
             });
         });
     });
@@ -262,7 +315,7 @@ describe('VectorDbPopup', () => {
     it('always ingests with the selected collection mode', async () => {
         render(<VectorDbPopup language={Language.CHINESE}/>);
         await screen.findAllByText('产线帧库');
-        await screen.findByRole('option', {name: '一号产线（24）'});
+        await screen.findByRole('option', {name: '一号产线（24 · 12 张有标注）'});
         await screen.findByText('向量存储就绪');
         await act(async () => {
             await new Promise(resolve => window.setTimeout(resolve, 0));
@@ -281,6 +334,7 @@ describe('VectorDbPopup', () => {
             const ingestCall = (global.fetch as jest.Mock).mock.calls.find(([url]) => String(url).includes('/ingest'));
             const body = ingestCall?.[1]?.body as FormData;
             expect(body.get('granularity')).toBe('image');
+            expect(body.get('ingest_strategy')).toBe('whole_image');
             expect(body.get('dataset_id')).toBe('dataset-1');
         });
     });
@@ -296,10 +350,10 @@ describe('VectorDbPopup', () => {
         render(<VectorDbPopup language={Language.CHINESE}/>);
 
         expect((await screen.findAllByText('分割区域')).length).toBeGreaterThan(0);
-        expect(screen.getByText(/入库和检索严格保持 mask→mask/)).toBeInTheDocument();
+        expect(screen.getByRole('radio', {name: /使用已有分割/})).toHaveAttribute('aria-checked', 'true');
         expect(screen.getByRole('tab', {name: '本地上传'})).toBeDisabled();
         const datasetSelect = await screen.findByRole('combobox');
-        await screen.findByRole('option', {name: '一号产线（24）'});
+        await screen.findByRole('option', {name: '一号产线（24 · 12 张有标注）'});
         await screen.findByText('向量存储就绪');
         fireEvent.change(datasetSelect, {target: {value: 'dataset-1'}});
         const ingestButton = screen.getByRole('button', {name: '开始生成向量'});
@@ -313,6 +367,7 @@ describe('VectorDbPopup', () => {
                 String(url).includes('/ingest'));
             const body = ingestCall?.[1]?.body as FormData;
             expect(body.get('granularity')).toBe('mask');
+            expect(body.get('ingest_strategy')).toBe('existing_mask');
             expect(body.get('dataset_id')).toBe('dataset-1');
         });
     });
@@ -350,7 +405,7 @@ describe('VectorDbPopup', () => {
             expect(screen.getByRole('tab', {name: '本地上传'})).toBeDisabled();
         });
         expect(screen.queryByText('拖入图片或 ZIP')).not.toBeInTheDocument();
-        expect(screen.getByText('暂无数据批次，请先从文件队列同步包含分割标注的数据。'))
+        expect(screen.getByText('暂无数据批次，请先从文件队列同步包含标注的数据。'))
             .toBeInTheDocument();
         expect(screen.queryByText(/改用本地上传/)).not.toBeInTheDocument();
     });

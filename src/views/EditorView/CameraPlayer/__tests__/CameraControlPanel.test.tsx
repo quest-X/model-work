@@ -152,6 +152,24 @@ describe('CameraControlPanel', () => {
         expect(screen.getByRole('button', {name: '撤销全部试调'})).toBeInTheDocument();
     });
 
+    it('shows professional abbreviations and camera parameters for all four controls', async () => {
+        render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
+
+        await screen.findByText('1800');
+        expect(screen.getByText('AEC')).toBeInTheDocument();
+        expect(screen.getByText('AF')).toBeInTheDocument();
+        expect(screen.getByText('WDR')).toBeInTheDocument();
+        expect(screen.getByText('D/N')).toBeInTheDocument();
+        expect(screen.getByText('快门')).toBeInTheDocument();
+        expect(screen.getByText('1/100s')).toBeInTheDocument();
+        expect(screen.getByText('增益')).toBeInTheDocument();
+        expect(screen.getByText('镜头位置')).toBeInTheDocument();
+        expect(screen.getByText('速度级别')).toBeInTheDocument();
+        expect(screen.getByText('强度')).toBeInTheDocument();
+        expect(screen.getByText('控制来源')).toBeInTheDocument();
+        expect(screen.getByText('相机原设')).toBeInTheDocument();
+    });
+
     it('reverts an unconfirmed trial before closing the panel', async () => {
         const onClose = jest.fn();
         service.controls.mockResolvedValue({

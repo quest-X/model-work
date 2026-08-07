@@ -37,6 +37,14 @@ const IDLE_TRIAL: CameraTrialStatus = {
 };
 
 const percent = (value: number): string => `${Math.round(value * 100)}%`;
+const formatShutter = (microseconds: number | undefined): string => {
+    if (!microseconds || microseconds <= 0) return '—';
+    if (microseconds < 1_000_000) return `1/${Math.max(1, Math.round(1_000_000 / microseconds))}s`;
+    const seconds = microseconds / 1_000_000;
+    return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`;
+};
+const formatParameter = (value: number | null | undefined): string =>
+    value === null || value === undefined ? '—' : String(value);
 
 const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, onBeforeAction}) => {
     const chinese = language === Language.CHINESE;
@@ -181,6 +189,31 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
                             : (chinese ? '正在读取相机能力…' : 'Reading camera controls…');
     const active = controls?.active ?? INACTIVE;
     const trial = controls?.trial ?? IDLE_TRIAL;
+    const modeLabel = (mode: string | undefined): string => {
+        if (!mode) return '—';
+        const labels: Record<string, string> = chinese ? {
+            auto: '自动',
+            manual: '手动',
+            semi_auto: '半自动',
+            open: '开启',
+            close: '关闭',
+            day: '白天',
+            night: '夜间',
+            schedule: '定时',
+            unknown: '未知',
+        } : {
+            auto: 'Auto',
+            manual: 'Manual',
+            semi_auto: 'Semi-auto',
+            open: 'Open',
+            close: 'Closed',
+            day: 'Day',
+            night: 'Night',
+            schedule: 'Schedule',
+            unknown: 'Unknown',
+        };
+        return labels[mode] ?? mode;
+    };
     const cards: Array<{
         key: string;
         label: string;
@@ -189,7 +222,8 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
         capability: boolean | undefined;
         enable: ToggleAction;
         disable: ToggleAction;
-        detail: string;
+        description: string;
+        parameters: Array<{label: string; value: string}>;
     }> = [
         {
             key: 'exposure',
@@ -199,7 +233,12 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
             capability: controls?.capabilities.auto_exposure,
             enable: 'exposure',
             disable: 'restoreExposure',
-            detail: chinese ? `当前增益 ${controls?.state.exposure.gain_level ?? '—'}` : `Gain ${controls?.state.exposure.gain_level ?? '—'}`,
+            description: chinese ? '根据画面亮度自动计算快门与增益。' : 'Calculates shutter and gain from scene brightness.',
+            parameters: [
+                {label: chinese ? '模式' : 'Mode', value: modeLabel(controls?.state.exposure.mode)},
+                {label: chinese ? '快门' : 'Shutter', value: formatShutter(controls?.state.exposure.shutter_us)},
+                {label: chinese ? '增益' : 'Gain', value: formatParameter(controls?.state.exposure.gain_level)},
+            ],
         },
         {
             key: 'focus',
@@ -209,7 +248,12 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
             capability: controls?.capabilities.auto_focus,
             enable: 'focus',
             disable: 'restoreFocus',
-            detail: chinese ? `当前模式 ${controls?.state.focus.mode ?? '—'}` : `Mode ${controls?.state.focus.mode ?? '—'}`,
+            description: chinese ? '自动搜索清晰位置，并用清晰度指标验证结果。' : 'Searches for a sharp lens position and verifies the result.',
+            parameters: [
+                {label: chinese ? '模式' : 'Mode', value: modeLabel(controls?.state.focus.mode)},
+                {label: chinese ? '镜头位置' : 'Position', value: formatParameter(controls?.state.focus.position)},
+                {label: chinese ? '速度级别' : 'Speed', value: formatParameter(controls?.state.focus.speed_level)},
+            ],
         },
         {
             key: 'wdr',
@@ -219,7 +263,11 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
             capability: controls?.capabilities.auto_wdr,
             enable: 'wdr',
             disable: 'restoreWdr',
-            detail: chinese ? `当前模式 ${controls?.state.wdr?.mode ?? '—'}` : `Mode ${controls?.state.wdr?.mode ?? '—'}`,
+            description: chinese ? '自动平衡高亮与暗部细节，适合逆光场景。' : 'Balances highlights and shadows for backlit scenes.',
+            parameters: [
+                {label: chinese ? '模式' : 'Mode', value: modeLabel(controls?.state.wdr?.mode)},
+                {label: chinese ? '强度' : 'Level', value: formatParameter(controls?.state.wdr?.level)},
+            ],
         },
         {
             key: 'day-night',
@@ -229,7 +277,16 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
             capability: controls?.capabilities.auto_day_night,
             enable: 'dayNight',
             disable: 'restoreDayNight',
-            detail: chinese ? `当前模式 ${controls?.state.day_night?.mode ?? '—'}` : `Mode ${controls?.state.day_night?.mode ?? '—'}`,
+            description: chinese ? '根据环境光线自动切换日间与夜间成像。' : 'Switches day and night imaging from ambient light.',
+            parameters: [
+                {label: chinese ? '模式' : 'Mode', value: modeLabel(controls?.state.day_night?.mode)},
+                {
+                    label: chinese ? '控制来源' : 'Control',
+                    value: active.auto_day_night
+                        ? (chinese ? '平台试调' : 'Platform trial')
+                        : (chinese ? '相机原设' : 'Camera default'),
+                },
+            ],
         },
     ];
 
@@ -274,20 +331,37 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
             <div><span>{chinese ? '控制画面' : 'Control frame'}</span><strong>{metrics.width}×{metrics.height}</strong></div>
         </div>}
 
-        <div className='CameraAutoControlGrid'>
-            {cards.map(card => <button
-                type='button'
-                className={`CameraAutoControlCard${card.active ? ' active' : ''}`}
-                aria-label={card.label}
-                aria-pressed={card.active}
-                disabled={!controls || !!running || (!card.active && card.capability === false)}
-                onClick={() => execute(card.active ? card.disable : card.enable)}
+        <div className='CameraAutoControlList'>
+            {cards.map(card => <section
+                className={`CameraAutoControlSection${card.active ? ' active' : ''}`}
                 key={card.key}
             >
-                <span><strong>{card.label}</strong><i>{card.badge}</i></span>
-                <em>{card.active ? (chinese ? '已激活' : 'Active') : (chinese ? '未激活' : 'Inactive')}</em>
-                <small>{card.detail}</small>
-            </button>)}
+                <div className='CameraAutoControlHeading'>
+                    <span><strong>{card.label}</strong><i>{card.badge}</i></span>
+                    <em>{card.capability === false
+                        ? (chinese ? '设备不支持' : 'Unsupported')
+                        : card.active
+                            ? (chinese ? '已激活' : 'Active')
+                            : (chinese ? '未激活' : 'Inactive')}</em>
+                </div>
+                <p>{card.description}</p>
+                <div className='CameraAutoControlParameters'>
+                    {card.parameters.map(parameter => <span key={parameter.label}>
+                        <small>{parameter.label}</small>
+                        <b>{parameter.value}</b>
+                    </span>)}
+                </div>
+                <button
+                    type='button'
+                    className={card.active ? 'active' : ''}
+                    aria-label={card.label}
+                    aria-pressed={card.active}
+                    disabled={!controls || !!running || (!card.active && card.capability === false)}
+                    onClick={() => execute(card.active ? card.disable : card.enable)}
+                >
+                    {card.label}
+                </button>
+            </section>)}
         </div>
 
         <div className='CameraTrialActions single'>

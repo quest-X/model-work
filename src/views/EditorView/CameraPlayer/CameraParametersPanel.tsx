@@ -20,7 +20,6 @@ const AUTO_REFRESH_INTERVAL_MS = 5000;
 const SHUTTER_STEPS_US = [100, 250, 500, 1000, 1333, 2000, 2500, 3333, 4000, 5000, 5714, 6667, 8000, 10000];
 
 type EditableField = keyof CameraManualParameterUpdate;
-type ParameterView = 'common' | 'advanced';
 type ParameterSource = 'HCNetSDK' | 'ISAPI' | 'OpenSight' | '资源配置' | 'HCNetSDK + ISAPI';
 type EditorOption = {value: string; label: string};
 type ParameterEditor = {
@@ -342,7 +341,7 @@ const rows = (
 // eslint-disable-next-line complexity
 const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}) => {
     const chinese = language === Language.CHINESE;
-    const [view, setView] = useState<ParameterView>('common');
+    const [advancedExpanded, setAdvancedExpanded] = useState(false);
     const [comparison, setComparison] = useState<CameraParameterComparison | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -477,10 +476,11 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
         () => comparison ? rows(comparison, chinese) : [],
         [comparison, chinese],
     );
-    const visibleSections = useMemo(
-        () => view === 'advanced' ? sections : sections.filter(section => section.common),
-        [sections, view],
-    );
+    const commonSections = useMemo(() => sections.filter(section => section.common), [sections]);
+    const advancedSections = useMemo(() => sections.filter(section => !section.common), [sections]);
+    const visibleSections = useMemo(() => advancedExpanded
+        ? [...commonSections, ...advancedSections]
+        : commonSections, [advancedExpanded, commonSections, advancedSections]);
     const commonParameterCount = useMemo(
         () => sections.filter(section => section.common).reduce((count, section) => count + section.rows.length, 0),
         [sections],
@@ -498,9 +498,9 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
         <header className='CameraParametersHeader'>
             <div>
                 <strong>{chinese ? '相机参数' : 'Camera parameters'}</strong>
-                <span>{view === 'common'
-                    ? (chinese ? '常用调节与画面判断；原始值始终锁定' : 'Everyday tuning and image evaluation; originals stay locked')
-                    : (chinese ? '设备当前可读取的全部已接入参数' : 'All integrated parameters currently readable from this device')}</span>
+                <span>{advancedExpanded
+                    ? (chinese ? '已展开设备当前可读取的全部参数；原始值始终锁定' : 'All currently readable parameters are expanded; originals stay locked')
+                    : (chinese ? '常用调节与画面判断；原始值始终锁定' : 'Everyday tuning and image evaluation; originals stay locked')}</span>
             </div>
             <div className='CameraParametersActions'>
                 <span className={`CameraParametersAutoRefresh${loading ? ' loading' : ''}`} role='status'>
@@ -514,32 +514,6 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
         {error && <div className='CameraParametersMessage error'>{error}</div>}
 
         {comparison && <div className='CameraParametersBody'>
-            <div className='CameraParametersTabs' role='tablist' aria-label={chinese ? '相机参数范围' : 'Camera parameter scope'}>
-                <button
-                    type='button'
-                    role='tab'
-                    aria-selected={view === 'common'}
-                    className={view === 'common' ? 'active' : ''}
-                    onClick={() => setView('common')}
-                >
-                    <strong>{chinese ? '常用参数' : 'Common'}</strong>
-                    <span>{commonParameterCount}</span>
-                </button>
-                <button
-                    type='button'
-                    role='tab'
-                    aria-selected={view === 'advanced'}
-                    className={view === 'advanced' ? 'active' : ''}
-                    onClick={() => setView('advanced')}
-                >
-                    <strong>{chinese ? '全部参数 / 高级' : 'All / advanced'}</strong>
-                    <span>{advancedParameterCount}</span>
-                </button>
-                <p>{view === 'common'
-                    ? (chinese ? '只展示日常使用频率最高的参数。' : 'Shows the parameters used most often.')
-                    : (chinese ? '按当前设备返回结果展示；账户、密码和密钥等敏感配置不会显示。' : 'Based on device responses; accounts, passwords, and keys are excluded.')}</p>
-            </div>
-
             <div className='CameraParametersSnapshotMeta'>
                 <div className='original'>
                     <span>{chinese ? '左侧基准' : 'Left baseline'}</span>
@@ -562,7 +536,7 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
                     ? '该相机早于参数快照功能创建；原始值从本功能首次读取时开始保存。'
                     : 'This camera predates parameter snapshots; its baseline starts at the first parameter read.'}
             </div>}
-            {view === 'advanced' && comparison.original.advanced_control_captured_at && <div className='CameraParametersMessage notice'>
+            {advancedExpanded && comparison.original.advanced_control_captured_at && <div className='CameraParametersMessage notice'>
                 {chinese
                     ? `新增高级字段的原始值于 ${time(comparison.original.advanced_control_captured_at)} 首次锁定，已有原始字段未被覆盖。`
                     : `New advanced baselines were first locked at ${time(comparison.original.advanced_control_captured_at)}; existing originals were preserved.`}
@@ -601,7 +575,7 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
                 <span title={comparison.current.captured_at}>{chinese ? '当前值 · ✎ 可修改' : 'Current · ✎ editable'}</span>
             </div>
             {visibleSections.map(section => <section className='CameraParametersSection' key={section.title}>
-                <h3>{section.title}{view === 'advanced' && <small>{section.source}</small>}</h3>
+                <h3>{section.title}{advancedExpanded && <small>{section.source}</small>}</h3>
                 {/* eslint-disable-next-line complexity */}
                 {section.rows.map(row => {
                     const format = row.format || text;
@@ -613,7 +587,7 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
                     return <div className={`CameraParameterRow${changedRow ? ' changed' : ''}${supported ? '' : ' unsupported'}`} key={row.path}>
                         <span className='CameraParameterLabel'>
                             <b>{row.label}{changedRow && <em>{chinese ? '已变化' : 'Changed'}</em>}</b>
-                            {view === 'advanced' && <small>
+                            {advancedExpanded && <small>
                                 <i>{row.source || section.source}</i>
                                 <i className={supported ? 'supported' : 'unavailable'}>{supported ? (chinese ? '已读取' : 'Read') : (chinese ? '未返回' : 'Unavailable')}</i>
                                 <i className={row.editor ? 'writable' : 'readonly'}>{row.editor ? (chinese ? '可修改' : 'Writable') : (chinese ? '只读' : 'Read only')}</i>
@@ -636,6 +610,23 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
                     </div>;
                 })}
             </section>)}
+            <div className='CameraParametersExpand'>
+                <button
+                    type='button'
+                    aria-expanded={advancedExpanded}
+                    onClick={() => setAdvancedExpanded(expanded => !expanded)}
+                >
+                    <span>
+                        <strong>{advancedExpanded
+                            ? (chinese ? '收起全部参数' : 'Collapse all parameters')
+                            : (chinese ? '展开全部参数' : 'Expand all parameters')}</strong>
+                        <small>{advancedExpanded
+                            ? (chinese ? `收起后仅显示 ${commonParameterCount} 项常用参数` : `Collapse to ${commonParameterCount} common parameters`)
+                            : (chinese ? `当前显示 ${commonParameterCount} 项常用参数，共 ${advancedParameterCount} 项` : `${commonParameterCount} common parameters shown, ${advancedParameterCount} total`)}</small>
+                    </span>
+                    <i aria-hidden='true'>{advancedExpanded ? '⌃' : '⌄'}</i>
+                </button>
+            </div>
         </div>}
     </aside>;
 };

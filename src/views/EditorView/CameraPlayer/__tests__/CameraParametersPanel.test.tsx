@@ -93,18 +93,21 @@ describe('CameraParametersPanel', () => {
         expect(screen.getAllByText('已变化').length).toBeGreaterThanOrEqual(3);
     });
 
-    it('keeps common parameters focused and exposes all integrated fields in the advanced tab', async () => {
+    it('shows common parameters by default and expands all parameters from the bottom', async () => {
         render(<CameraParametersPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
 
         await screen.findByText('原始参数 · 已锁定');
-        expect(screen.getByRole('tab', {name: /常用参数/})).toHaveAttribute('aria-selected', 'true');
+        expect(screen.queryByRole('tab', {name: /常用参数/})).not.toBeInTheDocument();
         expect(screen.getByText('曝光与对焦')).toBeInTheDocument();
         expect(screen.queryByText('设备信息')).not.toBeInTheDocument();
         expect(screen.queryByText('图像效果（SDK）')).not.toBeInTheDocument();
+        const expandButton = screen.getByRole('button', {name: /展开全部参数/});
+        expect(expandButton).toHaveAttribute('aria-expanded', 'false');
 
-        fireEvent.click(screen.getByRole('tab', {name: /全部参数 \/ 高级/}));
+        fireEvent.click(expandButton);
 
-        expect(screen.getByRole('tab', {name: /全部参数 \/ 高级/})).toHaveAttribute('aria-selected', 'true');
+        const collapseButton = screen.getByRole('button', {name: /收起全部参数/});
+        expect(collapseButton).toHaveAttribute('aria-expanded', 'true');
         expect(screen.getByText('设备信息')).toBeInTheDocument();
         expect(screen.getByText('图像效果（SDK）')).toBeInTheDocument();
         expect(screen.getByText('亮度等级')).toBeInTheDocument();
@@ -113,6 +116,10 @@ describe('CameraParametersPanel', () => {
         expect(screen.getAllByText('只读').length).toBeGreaterThan(0);
         expect(screen.getAllByText('可修改').length).toBeGreaterThan(0);
         expect(screen.getByText(/新增高级字段的原始值于/)).toBeInTheDocument();
+
+        fireEvent.click(collapseButton);
+        expect(screen.queryByText('设备信息')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', {name: /展开全部参数/})).toHaveAttribute('aria-expanded', 'false');
     });
 
     it('automatically refreshes the live side without a manual refresh button', async () => {

@@ -87,52 +87,6 @@
   padding: 12px 14px 18px;
 }
 
-.CameraParametersTabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 7px;
-  margin-bottom: 10px;
-
-  button {
-    display: flex;
-    height: 34px;
-    align-items: center;
-    justify-content: center;
-    gap: 7px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.025);
-    color: rgba(255, 255, 255, 0.55);
-    cursor: pointer;
-
-    strong { font-size: 10px; font-weight: 600; }
-    span {
-      min-width: 17px;
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.07);
-      padding: 1px 5px;
-      font-size: 8px;
-      text-align: center;
-    }
-
-    &:hover { border-color: rgba(0, 158, 253, 0.35); color: rgba(255, 255, 255, 0.82); }
-    &.active {
-      border-color: rgba(0, 158, 253, 0.52);
-      background: rgba(0, 158, 253, 0.1);
-      color: #c9ebff;
-    }
-    &.active span { background: rgba(0, 158, 253, 0.2); color: #8dd3ff; }
-  }
-
-  p {
-    grid-column: 1 / -1;
-    margin: 0;
-    color: rgba(255, 255, 255, 0.38);
-    font-size: 9px;
-    line-height: 1.45;
-  }
-}
-
 .CameraParametersSnapshotMeta {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -156,6 +110,43 @@
   span { color: rgba(255, 255, 255, 0.45); font-size: 9px; }
   strong { color: rgba(255, 255, 255, 0.9); font-size: 11px; text-align: right; }
   small { grid-column: 1 / -1; color: rgba(255, 255, 255, 0.34); font-size: 9px; }
+}
+
+.CameraParametersExpand {
+  margin-top: 12px;
+
+  button {
+    display: flex;
+    width: 100%;
+    min-height: 44px;
+    box-sizing: border-box;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid rgba(0, 158, 253, 0.38);
+    border-radius: 5px;
+    background: rgba(0, 158, 253, 0.07);
+    padding: 8px 12px;
+    color: #c9ebff;
+    cursor: pointer;
+    text-align: left;
+
+    &:hover {
+      border-color: rgba(0, 158, 253, 0.65);
+      background: rgba(0, 158, 253, 0.12);
+    }
+  }
+
+  span {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  strong { font-size: 10px; font-weight: 600; }
+  small { color: rgba(255, 255, 255, 0.42); font-size: 8px; }
+  i { color: #7fd0ff; font-size: 15px; font-style: normal; }
 }
 
 .CameraParametersMessage {

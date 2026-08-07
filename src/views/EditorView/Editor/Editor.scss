@@ -29,6 +29,169 @@
         cursor: none;
       }
     }
+
+    .RectLabelDropdownLayer {
+      display: contents;
+    }
+
+    .RectLabelDropdown {
+      position: absolute;
+      z-index: 30;
+      min-width: 32px;
+      height: 16px;
+
+      &.is-open {
+        z-index: 1000;
+      }
+
+      &__trigger {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 16px;
+        margin: 0;
+        padding: 0 4px;
+        border: 0;
+        border-radius: 0;
+        outline: none;
+        box-sizing: border-box;
+        appearance: none;
+        font: 700 12px/16px 'Saira Semi Condensed', Arial, sans-serif;
+        text-align: center;
+        cursor: pointer;
+        box-shadow: none;
+
+        &:hover,
+        &:focus,
+        &:focus-visible {
+          border: 0;
+          outline: none;
+          box-shadow: none;
+        }
+      }
+
+      &__name {
+        min-width: 0;
+        flex: 1;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      &__color {
+        display: none;
+      }
+
+      // style 1 is intentionally retained as an inactive variant.
+      // RectLabelSelectOverlay defaults to style 2; switch its styleVariant prop to restore style 1.
+      &--style-1 {
+        min-width: 64px;
+        height: 20px;
+
+        .RectLabelDropdown__trigger {
+          justify-content: flex-start;
+          height: 20px;
+          padding: 0 5px;
+          border-radius: 2px;
+          color: #f3f3f3;
+          background: transparent;
+          font: 600 12px/20px 'Saira Semi Condensed', sans-serif;
+          text-align: left;
+
+          &:hover,
+          &:focus,
+          &:focus-visible {
+            background: transparent;
+          }
+        }
+
+        .RectLabelDropdown__color {
+          display: block;
+          flex: 0 0 7px;
+          width: 7px;
+          height: 12px;
+          margin-right: 5px;
+          border-radius: 1px;
+        }
+
+        .RectLabelDropdown__menu {
+          top: 22px;
+        }
+      }
+
+      &__menu {
+        position: absolute;
+        top: 18px;
+        left: 0;
+        z-index: 1001;
+        min-width: 180px;
+        max-height: 220px;
+        padding: 2px 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        border: 1px solid #444;
+        border-radius: 2px;
+        background: #262626;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.55);
+      }
+
+      &__option {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        height: 28px;
+        margin: 0;
+        padding: 0 9px;
+        border: 0;
+        outline: none;
+        color: #ddd;
+        background: transparent;
+        font: 500 12px/28px 'Saira Semi Condensed', sans-serif;
+        text-align: left;
+        cursor: pointer;
+
+        &:hover,
+        &:focus {
+          outline: none;
+          background: #383838;
+          box-shadow: none;
+        }
+
+        &.is-selected,
+        &.is-selected:hover,
+        &.is-selected:focus {
+          color: #fff;
+          background: #cf252b;
+        }
+      }
+
+      &__check {
+        flex: 0 0 13px;
+        width: 13px;
+        height: 13px;
+        margin-right: 7px;
+        color: #fff;
+        font: 700 12px/13px sans-serif;
+        text-align: center;
+      }
+
+      &__optionColor {
+        flex: 0 0 8px;
+        width: 8px;
+        height: 8px;
+        margin-right: 7px;
+        border-radius: 1px;
+      }
+
+      &__optionName {
+        min-width: 0;
+        flex: 1;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+    }
   }
 
   .MousePositionIndicator {

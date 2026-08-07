@@ -29,6 +29,7 @@ import {LabelUtil} from '../../utils/LabelUtil';
 import {Settings} from '../../settings/Settings';
 import {SmartAnnotationActions} from '../actions/SmartAnnotationActions';
 import {LabelActions} from '../actions/LabelActions';
+import {publishRectLabelOverlayPosition} from '../../utils/RectLabelOverlayPositionBus';
 
 export class RectRenderEngine extends BaseRenderEngine {
 
@@ -519,6 +520,11 @@ export class RectRenderEngine extends BaseRenderEngine {
         }
         
         const rectOnImage: IRect = RectUtil.translate(rect, data.viewPortContentImageRect);
+        const isTransforming = !!this.startResizeRectAnchor ||
+            (!!this.startMoveRectPoint && labelRect.id === this.moveRectId);
+        if (isTransforming) {
+            publishRectLabelOverlayPosition(labelRect.id, {x: rectOnImage.x, y: rectOnImage.y});
+        }
         const lineColor: string = BaseRenderEngine.resolveLabelLineColor(labelRect.labelId, true, labelRect.isCreatedByAI)
         const anchorColor: string = BaseRenderEngine.resolveLabelAnchorColor(true);
         this.renderRect(rectOnImage, true, lineColor, anchorColor);
@@ -837,6 +843,10 @@ export class RectRenderEngine extends BaseRenderEngine {
     // =================================================================================================================
     
     private drawLabelText(labelRect: LabelRect, rectOnImage: IRect, data: EditorData): void {
+        // Accepted rectangles use the interactive DOM dropdown rendered by Editor.
+        // Drawing the legacy canvas label as well makes both labels overlap.
+        if (labelRect.status === LabelStatus.ACCEPTED) return;
+
         // 获取标签文字：优先使用已分配的标签名称，其次使用建议标签
         let labelText = '';
         if (labelRect.labelId) {

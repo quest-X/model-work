@@ -1,11 +1,11 @@
 import React from 'react';
 import './Editor.scss';
 import {ISize} from '../../../interfaces/ISize';
-import {ImageData, LabelPoint, LabelRect} from '../../../store/labels/types';
+import {ImageData, LabelName, LabelPoint, LabelRect} from '../../../store/labels/types';
 import {FileUtil} from '../../../utils/FileUtil';
 import {AppState} from '../../../store';
 import {connect} from 'react-redux';
-import {updateImageDataById} from '../../../store/labels/actionCreators';
+import {updateActiveLabelId, updateImageDataById} from '../../../store/labels/actionCreators';
 import {ImageRepository} from '../../../logic/imageRepository/ImageRepository';
 import {LabelType} from '../../../data/enums/LabelType';
 import {PopupWindowType} from '../../../data/enums/PopupWindowType';
@@ -32,6 +32,9 @@ import {VideoSelector} from '../../../store/selectors/VideoSelector';
 import {ImageActions} from '../../../logic/actions/ImageActions';
 import {CanvasMultiViewState, CanvasMultiViewStore} from '../MultiView/CanvasMultiViewStore';
 import {CanvasAuxViews} from '../MultiView/CanvasAuxView';
+import {RectLabelSelectOverlay} from './RectLabelSelectOverlay';
+import {updatePreventCustomCursorStatus} from '../../../store/general/actionCreators';
+import {AIState} from '../../../store/ai/types';
 
 interface IProps {
     size: ISize;
@@ -43,6 +46,12 @@ interface IProps {
     customCursorStyle: CustomCursorStyle;
     imageDragMode: boolean;
     zoom: number;
+    labelNames?: LabelName[];
+    activeLabelViewType?: LabelType;
+    imageAIStates?: AIState['imageAIStates'];
+    enablePerClassColoration?: boolean;
+    updateActiveLabelId?: (labelId: string) => any;
+    updatePreventCustomCursorStatus?: (preventCustomCursor: boolean) => any;
 }
 
 interface IState {
@@ -53,7 +62,6 @@ interface IState {
 }
 
 export class Editor extends React.Component<IProps, IState> {
-
     private requestGeneration: number = 0;
     private mounted: boolean = false;
 
@@ -76,13 +84,15 @@ export class Editor extends React.Component<IProps, IState> {
 
     public componentDidMount(): void {
         this.mounted = true;
-        this.unsubscribeMultiView = CanvasMultiViewStore.subscribe(multiView => this.setState({multiView}, () => {
-            requestAnimationFrame(() => {
-                ViewPortActions.updateViewPortSize();
-                ViewPortActions.updateDefaultViewPortImageRect();
-                ViewPortActions.setDefaultZoom();
-            });
-        }));
+        this.unsubscribeMultiView = CanvasMultiViewStore.subscribe(multiView =>
+            this.setState({multiView}, () => {
+                requestAnimationFrame(() => {
+                    ViewPortActions.updateViewPortSize();
+                    ViewPortActions.updateDefaultViewPortImageRect();
+                    ViewPortActions.setDefaultZoom();
+                });
+            })
+        );
         this.mountEventListeners();
 
         const {imageData, activeLabelType} = this.props;
@@ -95,8 +105,8 @@ export class Editor extends React.Component<IProps, IState> {
 
         // 视频模式下隐藏光标和坐标指示器
         if (VideoSelector.isVideoMode()) {
-            if (EditorModel.cursor) EditorModel.cursor.style.display = "none";
-            if (EditorModel.mousePositionIndicator) EditorModel.mousePositionIndicator.style.display = "none";
+            if (EditorModel.cursor) EditorModel.cursor.style.display = 'none';
+            if (EditorModel.mousePositionIndicator) EditorModel.mousePositionIndicator.style.display = 'none';
         }
     }
 
@@ -211,7 +221,7 @@ export class Editor extends React.Component<IProps, IState> {
         EditorActions.setLoadingStatus(true);
         FileUtil.loadImage(imageData.fileData)
             .then((image: HTMLImageElement) => this.saveLoadedImage(image, imageData, generation))
-            .catch((error) => this.handleLoadImageError(imageData, generation, error));
+            .catch(error => this.handleLoadImageError(imageData, generation, error));
     };
 
     private isCurrentRequest = (imageId: string, generation: number): boolean =>
@@ -234,7 +244,7 @@ export class Editor extends React.Component<IProps, IState> {
         EditorActions.setActiveImage(image);
         AIActions.detect(imageData.id, image);
         EditorActions.setLoadingStatus(false);
-        this.updateModelAndRender()
+        this.updateModelAndRender();
     };
 
     private handleLoadImageError = (imageData: ImageData, generation: number, error?: any) => {
@@ -258,10 +268,10 @@ export class Editor extends React.Component<IProps, IState> {
         // 视频模式下隐藏光标和坐标指示器
         if (VideoSelector.isVideoMode()) {
             if (EditorModel.cursor) {
-                EditorModel.cursor.style.display = "none";
+                EditorModel.cursor.style.display = 'none';
             }
             if (EditorModel.mousePositionIndicator) {
-                EditorModel.mousePositionIndicator.style.display = "none";
+                EditorModel.mousePositionIndicator.style.display = 'none';
             }
             if (VideoSelector.isVideoPlaying()) {
                 return;
@@ -269,7 +279,10 @@ export class Editor extends React.Component<IProps, IState> {
         }
 
         const editorData: EditorData = EditorActions.getEditorData(event);
-        EditorModel.mousePositionOnViewPortContent = CanvasUtil.getMousePositionOnCanvasFromEvent(event, EditorModel.canvas);
+        EditorModel.mousePositionOnViewPortContent = CanvasUtil.getMousePositionOnCanvasFromEvent(
+            event,
+            EditorModel.canvas
+        );
         EditorModel.primaryRenderingEngine.update(editorData);
 
         EditorModel.supportRenderingEngine && EditorModel.supportRenderingEngine.update(editorData);
@@ -294,8 +307,10 @@ export class Editor extends React.Component<IProps, IState> {
             // 触控板捏合缩放 (pinch) — 浏览器将 pinch 转换为 ctrlKey + wheel
             const zoomDelta = -event.deltaY * 0.01;
             ViewPortActions.zoomByDelta(zoomDelta);
-            EditorModel.mousePositionOnViewPortContent =
-                CanvasUtil.getMousePositionOnCanvasFromEvent(event, EditorModel.canvas);
+            EditorModel.mousePositionOnViewPortContent = CanvasUtil.getMousePositionOnCanvasFromEvent(
+                event,
+                EditorModel.canvas
+            );
         } else if (event.altKey) {
             // Alt+滚轮 — 竖直平移画布
             if (EditorModel.viewPortScrollbars) {
@@ -318,7 +333,7 @@ export class Editor extends React.Component<IProps, IState> {
             event.preventDefault();
             this.setState({
                 isMiddleMouseDragging: true,
-                lastMiddleMousePosition: { x: event.clientX, y: event.clientY }
+                lastMiddleMousePosition: {x: event.clientX, y: event.clientY}
             });
             // Show grab cursor via DOM (bypass Redux to avoid circular import)
             if (EditorModel.cursor) {
@@ -332,23 +347,23 @@ export class Editor extends React.Component<IProps, IState> {
     private handleMiddleMouseMove = (event: MouseEvent) => {
         if (this.state.isMiddleMouseDragging && this.state.lastMiddleMousePosition) {
             event.preventDefault();
-            
+
             // 计算鼠标移动的距离
             const deltaX = event.clientX - this.state.lastMiddleMousePosition.x;
             const deltaY = event.clientY - this.state.lastMiddleMousePosition.y;
-            
+
             // 获取当前滚动位置并应用偏移
             if (EditorModel.viewPortScrollbars) {
                 const currentScrollLeft = EditorModel.viewPortScrollbars.getScrollLeft();
                 const currentScrollTop = EditorModel.viewPortScrollbars.getScrollTop();
-                
+
                 EditorModel.viewPortScrollbars.scrollLeft(currentScrollLeft - deltaX);
                 EditorModel.viewPortScrollbars.scrollTop(currentScrollTop - deltaY);
             }
-            
+
             // 更新最后的鼠标位置
             this.setState({
-                lastMiddleMousePosition: { x: event.clientX, y: event.clientY }
+                lastMiddleMousePosition: {x: event.clientX, y: event.clientY}
             });
         }
     };
@@ -375,84 +390,137 @@ export class Editor extends React.Component<IProps, IState> {
             return this.props.imageData.labelRects
                 .filter((labelRect: LabelRect) => labelRect.isCreatedByAI && labelRect.status !== LabelStatus.ACCEPTED)
                 .map((labelRect: LabelRect) => {
-                    const positionOnImage: IPoint = {x: labelRect.rect.x, y: labelRect.rect.y};
-                    const positionOnViewPort: IPoint = RenderEngineUtil.transferPointFromImageToViewPortContent(positionOnImage, editorData);
-                    return <LabelControlPanel
-                        position={positionOnViewPort}
-                        labelData={labelRect}
-                        imageData={this.props.imageData}
-                        key={labelRect.id}
-                    />
-                })
-        }
-        else if (this.props.activeLabelType === LabelType.POINT) {
+                    const positionOnImage: IPoint = {
+                        x: labelRect.rect.x,
+                        y: labelRect.rect.y
+                    };
+                    const positionOnViewPort: IPoint = RenderEngineUtil.transferPointFromImageToViewPortContent(
+                        positionOnImage,
+                        editorData
+                    );
+                    return (
+                        <LabelControlPanel
+                            position={positionOnViewPort}
+                            labelData={labelRect}
+                            imageData={this.props.imageData}
+                            key={labelRect.id}
+                        />
+                    );
+                });
+        } else if (this.props.activeLabelType === LabelType.POINT) {
             return this.props.imageData.labelPoints
-                .filter((labelPoint: LabelPoint) => labelPoint.isCreatedByAI && labelPoint.status !== LabelStatus.ACCEPTED)
+                .filter(
+                    (labelPoint: LabelPoint) => labelPoint.isCreatedByAI && labelPoint.status !== LabelStatus.ACCEPTED
+                )
                 .map((labelPoint: LabelPoint) => {
-                    const positionOnImage: IPoint = {x: labelPoint.point.x, y: labelPoint.point.y};
-                    const positionOnViewPort: IPoint = RenderEngineUtil.transferPointFromImageToViewPortContent(positionOnImage, editorData);
-                    return <LabelControlPanel
-                        position={positionOnViewPort}
-                        labelData={labelPoint}
-                        imageData={this.props.imageData}
-                        key={labelPoint.id}
-                    />
-                })
-        }
-        else return null;
+                    const positionOnImage: IPoint = {
+                        x: labelPoint.point.x,
+                        y: labelPoint.point.y
+                    };
+                    const positionOnViewPort: IPoint = RenderEngineUtil.transferPointFromImageToViewPortContent(
+                        positionOnImage,
+                        editorData
+                    );
+                    return (
+                        <LabelControlPanel
+                            position={positionOnViewPort}
+                            labelData={labelPoint}
+                            imageData={this.props.imageData}
+                            key={labelPoint.id}
+                        />
+                    );
+                });
+        } else return null;
     };
 
-    private onScrollbarsUpdate = (scrollbarContent)=>{
+    private onRectLabelChange = (rectId: string, labelId: string) => {
+        const selectedLabel = this.props.labelNames?.find(labelName => labelName.id === labelId);
+        if (!selectedLabel) return;
+
+        const newImageData: ImageData = {
+            ...this.props.imageData,
+            labelRects: this.props.imageData.labelRects.map(labelRect =>
+                labelRect.id === rectId ? {...labelRect, labelId, suggestedLabel: null} : labelRect
+            )
+        };
+        this.props.updateImageDataById(this.props.imageData.id, newImageData);
+        this.props.updateActiveLabelId?.(rectId);
+    };
+
+    private getRectLabelSelectOverlay = () => {
+        const activeLabelViewType = this.props.activeLabelViewType ?? this.props.activeLabelType;
+        const aiState = this.props.imageAIStates?.get(this.props.imageData.id);
+        const visible =
+            (activeLabelViewType === LabelType.RECT || activeLabelViewType === LabelType.ALL) &&
+            (aiState?.aiLabelsVisible ?? true);
+
+        // Keep both visual variants in RectLabelSelectOverlay. style 2 is primary;
+        // change only this prop to 'style-1' when the transparent variant is requested.
+        return (
+            <RectLabelSelectOverlay
+                editorData={EditorActions.getEditorData()}
+                labelRects={this.props.imageData.labelRects || []}
+                labelNames={this.props.labelNames || []}
+                enablePerClassColoration={this.props.enablePerClassColoration}
+                styleVariant='style-2'
+                visible={visible}
+                onChange={this.onRectLabelChange}
+                onActivate={labelId => this.props.updateActiveLabelId?.(labelId)}
+                onInteractionChange={active => this.props.updatePreventCustomCursorStatus?.(active)}
+            />
+        );
+    };
+
+    private onScrollbarsUpdate = scrollbarContent => {
         const newViewPortContentSize = {
             width: scrollbarContent.scrollWidth,
             height: scrollbarContent.scrollHeight
         };
-        if(!isEqual(newViewPortContentSize, this.state.viewPortSize)) {
-            this.setState({viewPortSize: newViewPortContentSize})
+        if (!isEqual(newViewPortContentSize, this.state.viewPortSize)) {
+            this.setState({viewPortSize: newViewPortContentSize});
         }
     };
 
     public render() {
         const {multiView} = this.state;
         return (
-            <div
-                className='Editor'
-                ref={ref => EditorModel.editor = ref}
-                draggable={false}
-            >
+            <div className='Editor' ref={ref => (EditorModel.editor = ref)} draggable={false}>
                 <div className={`CanvasMultiViewGrid layout-${multiView.layout}`}>
                     <div className='CanvasViewPane primary'>
                         <div className='CanvasViewHeader'>原图 · 可编辑</div>
                         <Scrollbars
-                            ref={ref => EditorModel.viewPortScrollbars = ref}
-                            renderTrackHorizontal={props => <div {...props} className='track-horizontal'/>}
-                            renderTrackVertical={props => <div {...props} className='track-vertical'/>}
+                            ref={ref => (EditorModel.viewPortScrollbars = ref)}
+                            renderTrackHorizontal={props => <div {...props} className='track-horizontal' />}
+                            renderTrackVertical={props => <div {...props} className='track-vertical' />}
                             onUpdate={this.onScrollbarsUpdate}
                         >
                             <div className='ViewPortContent'>
                                 <canvas
                                     className='ImageCanvas'
-                                    ref={ref => EditorModel.canvas = ref}
+                                    ref={ref => (EditorModel.canvas = ref)}
                                     draggable={false}
-                                    onContextMenu={(event: React.MouseEvent<HTMLCanvasElement>) => event.preventDefault()}
+                                    onContextMenu={(event: React.MouseEvent<HTMLCanvasElement>) =>
+                                        event.preventDefault()
+                                    }
                                     onMouseDown={(event: React.MouseEvent<HTMLCanvasElement>) => {
                                         if (event.button === 1) event.preventDefault();
                                     }}
                                 />
+                                {this.getRectLabelSelectOverlay()}
                                 {this.getOptionsPanels()}
                             </div>
                         </Scrollbars>
                     </div>
-                    <CanvasAuxViews imageData={this.props.imageData} state={multiView}/>
+                    <CanvasAuxViews imageData={this.props.imageData} state={multiView} />
                 </div>
                 <div
                     className='MousePositionIndicator'
-                    ref={ref => EditorModel.mousePositionIndicator = ref}
+                    ref={ref => (EditorModel.mousePositionIndicator = ref)}
                     draggable={false}
                 />
                 <div
                     className={EditorUtil.getCursorStyle(this.props.customCursorStyle)}
-                    ref={ref => EditorModel.cursor = ref}
+                    ref={ref => (EditorModel.cursor = ref)}
                     draggable={false}
                 >
                     <img
@@ -467,7 +535,9 @@ export class Editor extends React.Component<IProps, IState> {
 }
 
 const mapDispatchToProps = {
-    updateImageDataById
+    updateImageDataById,
+    updateActiveLabelId,
+    updatePreventCustomCursorStatus
 };
 
 const mapStateToProps = (state: AppState) => ({
@@ -476,10 +546,11 @@ const mapStateToProps = (state: AppState) => ({
     activeLabelId: state.labels.activeLabelId,
     customCursorStyle: state.general.customCursorStyle,
     imageDragMode: state.general.imageDragMode,
-    zoom: state.general.zoom
+    zoom: state.general.zoom,
+    labelNames: state.labels.labels,
+    activeLabelViewType: state.labels.activeLabelViewType,
+    imageAIStates: state.ai.imageAIStates,
+    enablePerClassColoration: state.general.enablePerClassColoration
 });
 
-export default connect(
-    mapStateToProps,
-    mapDispatchToProps
-)(Editor);
+export default connect(mapStateToProps, mapDispatchToProps)(Editor);

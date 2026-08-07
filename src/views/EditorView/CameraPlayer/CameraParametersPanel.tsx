@@ -517,16 +517,12 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
             <div className='CameraParametersSnapshotMeta'>
                 <div className='original'>
                     <span>{chinese ? '左侧基准' : 'Left baseline'}</span>
-                    <strong>{chinese ? '原始参数 · 已锁定' : 'Original · locked'}</strong>
                     <small>{comparison.original.source === 'connection'
                         ? (chinese ? '接入时快照' : 'Connection snapshot')
                         : (chinese ? '首次读取快照' : 'First-read snapshot')} · {time(comparison.original.captured_at)}</small>
                 </div>
                 <div className={comparison.current.live ? 'current live' : 'current stale'}>
                     <span>{chinese ? '右侧实时' : 'Right live'}</span>
-                    <strong>{comparison.current.live
-                        ? (chinese ? '当前参数 · 实时读取' : 'Current · live')
-                        : (chinese ? '当前参数 · 未刷新' : 'Current · unavailable')}</strong>
                     <small>{time(comparison.current.captured_at)}</small>
                 </div>
             </div>

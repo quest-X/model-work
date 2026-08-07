@@ -555,7 +555,7 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
             <div className='CameraParametersColumnLabels'>
                 <span>{chinese ? '参数' : 'Parameter'}</span>
                 <span title={comparison.original.captured_at}>{chinese ? '原始值' : 'Original'}</span>
-                <span title={comparison.current.captured_at}>{chinese ? '当前值 · ✎ 可修改' : 'Current · ✎ editable'}</span>
+                <span title={comparison.current.captured_at}>{chinese ? '当前值 · ✎ 可编辑' : 'Current · ✎ editable'}</span>
             </div>
             {visibleSections.map(section => <section className='CameraParametersSection' key={section.title}>
                 <h3>{section.title}{advancedExpanded && <small>{section.source}</small>}</h3>
@@ -569,11 +569,15 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
                     const supported = row.current !== null && row.current !== undefined && row.current !== '';
                     return <div className={`CameraParameterRow${changedRow ? ' changed' : ''}${supported ? '' : ' unsupported'}`} key={row.path}>
                         <span className='CameraParameterLabel'>
-                            <b>{row.label}{changedRow && <em>{chinese ? '已变化' : 'Changed'}</em>}</b>
-                            {advancedExpanded && <small>
-                                <i>{row.source || section.source}</i>
+                            <b>{row.label}</b>
+                            {(advancedExpanded || changedRow) && <small>
+                                {advancedExpanded && !row.editor && <i className='readonly'>{chinese ? '只读' : 'Read only'}</i>}
+                                {advancedExpanded &&
                                 <i className={supported ? 'supported' : 'unavailable'}>{supported ? (chinese ? '已读取' : 'Read') : (chinese ? '未返回' : 'Unavailable')}</i>
-                                <i className={row.editor ? 'writable' : 'readonly'}>{row.editor ? (chinese ? '可修改' : 'Writable') : (chinese ? '只读' : 'Read only')}</i>
+                                }
+                                {advancedExpanded && row.editor && <i className='writable'>{chinese ? '可编辑' : 'Editable'}</i>}
+                                {changedRow && <i className='modified'>{chinese ? '已修改' : 'Modified'}</i>}
+                                {advancedExpanded && <i className='source'>{row.source || section.source}</i>}
                             </small>}
                         </span>
                         <code>{format(row.original)}</code>

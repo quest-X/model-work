@@ -92,7 +92,7 @@ describe('CameraParametersPanel', () => {
         expect(screen.getByText(/当前值 ·/)).toBeInTheDocument();
         expect(screen.getByText('1/100s (10000 μs)')).toBeInTheDocument();
         expect(screen.getByText('1/200s (5000 μs)')).toBeInTheDocument();
-        expect(screen.getAllByText('已变化').length).toBeGreaterThanOrEqual(3);
+        expect(screen.getAllByText('已修改').length).toBeGreaterThanOrEqual(3);
     });
 
     it('keeps the first-read source label without showing a persistent legacy notice', async () => {
@@ -130,7 +130,15 @@ describe('CameraParametersPanel', () => {
         expect(screen.getByText('白平衡模式')).toBeInTheDocument();
         expect(screen.getAllByText('HCNetSDK').length).toBeGreaterThan(0);
         expect(screen.getAllByText('只读').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('可修改').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('可编辑').length).toBeGreaterThan(0);
+        const statusTags = (label: string) => Array.from(
+            screen.getByText(label).closest('.CameraParameterRow')!
+                .querySelectorAll('.CameraParameterLabel small i'),
+        ).map(node => node.textContent).filter(text =>
+            ['只读', '已读取', '可编辑', '已修改'].includes(text || ''),
+        );
+        expect(statusTags('对焦位置')).toEqual(['只读', '已读取']);
+        expect(statusTags('曝光模式')).toEqual(['已读取', '可编辑', '已修改']);
         expect(screen.getByText(/新增高级字段的原始值于/)).toBeInTheDocument();
 
         fireEvent.click(collapseButton);

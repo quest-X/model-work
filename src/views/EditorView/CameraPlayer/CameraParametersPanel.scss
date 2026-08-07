@@ -327,16 +327,9 @@
       &.supported { background: rgba(79, 193, 117, 0.1); color: rgba(121, 217, 153, 0.72); }
       &.unavailable { background: rgba(224, 163, 74, 0.1); color: rgba(237, 196, 129, 0.68); }
       &.writable { background: rgba(0, 158, 253, 0.11); color: rgba(109, 202, 255, 0.76); }
+      &.modified { background: rgba(224, 163, 74, 0.15); color: #e9b96b; }
+      &.source { margin-left: 2px; color: rgba(255, 255, 255, 0.28); }
     }
-  }
-
-  em {
-    border-radius: 2px;
-    background: rgba(224, 163, 74, 0.15);
-    padding: 1px 4px;
-    color: #e9b96b;
-    font-size: 8px;
-    font-style: normal;
   }
 
   code {

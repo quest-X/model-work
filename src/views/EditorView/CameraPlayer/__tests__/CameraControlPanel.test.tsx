@@ -1,5 +1,5 @@
 import React from 'react';
-import {fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {Language} from '../../../../data/LanguageConfig';
 import {CameraResourceService} from '../../../../services/CameraResourceService';
 import {CameraTrialService} from '../../../../services/CameraTrialService';
@@ -77,6 +77,52 @@ describe('CameraControlPanel', () => {
             state,
             metrics,
         } as any);
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
+    it('keeps controls disabled and retries when the initial state read is busy', async () => {
+        jest.useFakeTimers();
+        service.controls
+            .mockReset()
+            .mockRejectedValueOnce(new Error('该相机正在执行自动调节，请稍后再试'))
+            .mockResolvedValue({
+                capabilities: {
+                    auto_exposure: true,
+                    manual_exposure: true,
+                    exposure_metrics: true,
+                    auto_focus: true,
+                    focus_metrics: true,
+                    auto_wdr: true,
+                    auto_day_night: true,
+                },
+                active: inactive,
+                state,
+                metrics,
+                trial: IDLE_TRIAL_FIXTURE,
+            } as any);
+
+        render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        const focusButton = screen.getByRole('button', {name: '自动对焦'});
+        expect(screen.getByText('状态读取失败 · 正在重试')).toBeInTheDocument();
+        expect(focusButton).toBeDisabled();
+        fireEvent.click(focusButton);
+        expect(service.autoFocus).not.toHaveBeenCalled();
+
+        await act(async () => {
+            jest.advanceTimersByTime(1500);
+            await Promise.resolve();
+        });
+
+        expect(service.controls).toHaveBeenCalledTimes(2);
+        expect(screen.getByText('测试模式 · 尚未修改')).toBeInTheDocument();
+        expect(focusButton).not.toBeDisabled();
     });
 
     it('keeps apply-to-camera out of smart controls', async () => {

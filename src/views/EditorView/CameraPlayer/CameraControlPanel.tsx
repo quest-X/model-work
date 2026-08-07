@@ -20,6 +20,7 @@ type RunningAction = 'probe' | 'exposure' | 'focus' | 'wdr' | 'dayNight' | 'rest
 type ToggleAction = Exclude<RunningAction, 'probe' | 'revertTrial' | 'close' | null>;
 
 const DEFAULT_TARGET_LUMA = 0.35;
+const CONTROL_RETRY_INTERVAL_MS = 1500;
 const INACTIVE = {
     auto_exposure: false,
     auto_focus: false,
@@ -62,27 +63,35 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
 
     useEffect(() => {
         let active = true;
-        setRunning('probe');
-        CameraResourceService.controls(resourceId)
-            .then(value => {
+        let retryTimer: number | undefined;
+        const loadControls = async () => {
+            if (!active) return;
+            setRunning('probe');
+            try {
+                const value = await CameraResourceService.controls(resourceId);
                 if (!active) return;
                 const smartControls = value as CameraControlsWithTrial;
                 setControls(smartControls);
                 trialRef.current = smartControls.trial ?? IDLE_TRIAL;
                 setMetrics(value.metrics);
                 setError('');
-            })
-            .catch(reason => {
-                if (active) setError(reason instanceof Error ? reason.message : String(reason));
-            })
-            .finally(() => {
+            } catch (reason) {
+                if (!active) return;
+                setError(reason instanceof Error ? reason.message : String(reason));
+                retryTimer = window.setTimeout(loadControls, CONTROL_RETRY_INTERVAL_MS);
+            } finally {
                 if (active) setRunning(null);
-            });
-        return () => { active = false; };
+            }
+        };
+        void loadControls();
+        return () => {
+            active = false;
+            if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+        };
     }, [resourceId]);
 
     const execute = async (action: ToggleAction) => {
-        if (running) return;
+        if (running || !controls) return;
         if (['exposure', 'focus', 'wdr', 'dayNight'].includes(action)) onBeforeAction?.();
         setRunning(action);
         setError('');
@@ -234,12 +243,18 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
         </div>
 
         <div className={`CameraTrialState ${trial.phase}`}>
-            <strong>{trial.phase === 'trial'
+            <strong>{!controls
+                ? (error
+                    ? (chinese ? '状态读取失败 · 正在重试' : 'State unavailable · retrying')
+                    : (chinese ? '正在读取相机状态' : 'Reading camera state'))
+                : trial.phase === 'trial'
                 ? (chinese ? '试调中 · 临时生效' : 'Trial active · temporary')
                 : trial.phase === 'applied'
                     ? (chinese ? '已在相机参数中确认下发' : 'Applied from Camera parameters')
                     : (chinese ? '测试模式 · 尚未修改' : 'Test mode · unchanged')}</strong>
-            <span>{trial.phase === 'trial'
+            <span>{!controls
+                ? (chinese ? '相机忙碌时会自动重试，读取成功后才能操作' : 'Retries automatically while the camera is busy; controls unlock after a successful read')
+                : trial.phase === 'trial'
                 ? (chinese ? '可逐项取消或撤销全部；切换面板不会丢失试调' : 'Disable one by one or revert all; switching panels keeps the trial')
                 : (chinese ? '点击任一按钮开始可撤销试调' : 'Select any control to start a reversible trial')}</span>
         </div>
@@ -265,7 +280,7 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
                 className={`CameraAutoControlCard${card.active ? ' active' : ''}`}
                 aria-label={card.label}
                 aria-pressed={card.active}
-                disabled={!!running || (!card.active && card.capability === false)}
+                disabled={!controls || !!running || (!card.active && card.capability === false)}
                 onClick={() => execute(card.active ? card.disable : card.enable)}
                 key={card.key}
             >

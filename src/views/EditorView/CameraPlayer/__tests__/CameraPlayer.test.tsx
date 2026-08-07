@@ -49,6 +49,22 @@ describe('CameraPlayer', () => {
 
     afterEach(() => jest.restoreAllMocks());
 
+    it('opens and closes the smart controls explicitly', () => {
+        render(<CameraPlayer item={item} language={Language.CHINESE}/>);
+
+        const openButton = screen.getByRole('button', {name: '打开智能调节'});
+        expect(openButton).toHaveAttribute('aria-expanded', 'false');
+        expect(screen.queryByRole('button', {name: '关闭相机控制'})).not.toBeInTheDocument();
+
+        fireEvent.click(openButton);
+        expect(screen.getByRole('button', {name: '关闭智能调节'})).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByRole('button', {name: '关闭相机控制'})).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', {name: '关闭相机控制'}));
+        expect(screen.getByRole('button', {name: '打开智能调节'})).toHaveAttribute('aria-expanded', 'false');
+        expect(screen.queryByRole('button', {name: '关闭相机控制'})).not.toBeInTheDocument();
+    });
+
     it('freezes the current frame on pause and reconnects to the latest frame on resume', () => {
         render(<CameraPlayer item={item} language={Language.CHINESE}/>);
 

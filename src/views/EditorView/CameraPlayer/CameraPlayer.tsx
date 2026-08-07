@@ -23,7 +23,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     const [state, setState] = useState<'loading' | 'playing' | 'error'>('loading');
     const [isPaused, setIsPaused] = useState(false);
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
-    const [controlsOpen, setControlsOpen] = useState(true);
+    const [controlsOpen, setControlsOpen] = useState(false);
     const streamUrl = useMemo(() => CameraResourceService.streamUrl(
         item.cameraResourceId || '',
         item.cameraChannelId,
@@ -114,8 +114,16 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                 {item.cameraHost && <span>{item.cameraHost}</span>}
                 {item.cameraModel && <span>{item.cameraModel}</span>}
                 {item.cameraChannelId && <span>{chinese ? '通道' : 'Channel'} {item.cameraChannelId}</span>}
-                <button type='button' className={controlsOpen ? 'active' : ''} onClick={() => setControlsOpen(value => !value)}>
-                    {chinese ? '智能调节' : 'Smart controls'}
+                <button
+                    type='button'
+                    className={controlsOpen ? 'active' : ''}
+                    aria-controls='camera-smart-controls'
+                    aria-expanded={controlsOpen}
+                    onClick={() => setControlsOpen(value => !value)}
+                >
+                    {controlsOpen
+                        ? (chinese ? '关闭智能调节' : 'Close smart controls')
+                        : (chinese ? '打开智能调节' : 'Open smart controls')}
                 </button>
                 <button type='button' onClick={reconnect}>{chinese ? '重新连接' : 'Reconnect'}</button>
             </div>

@@ -85,7 +85,7 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose}) =
                 ? (chinese ? '正在恢复…' : 'Restoring…')
                 : (chinese ? '正在读取相机能力…' : 'Reading camera controls…');
 
-    return <aside className='CameraControlPanel'>
+    return <aside className='CameraControlPanel' id='camera-smart-controls'>
         <div className='CameraControlTitle'>
             <div>
                 <strong>{chinese ? '智能调节' : 'Smart controls'}</strong>

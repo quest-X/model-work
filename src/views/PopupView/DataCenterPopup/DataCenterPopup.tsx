@@ -6,7 +6,7 @@ import {QueueActions} from '../../../logic/actions/QueueActions';
 import {ImageRepository} from '../../../logic/imageRepository/ImageRepository';
 import {PopupWindowType} from '../../../data/enums/PopupWindowType';
 import {updateActivePopupType} from '../../../store/general/actionCreators';
-import {updateQueueItem} from '../../../store/queue/actionCreators';
+import {removeQueueItem, updateQueueItem} from '../../../store/queue/actionCreators';
 import {AppState} from '../../../store';
 import {Language} from '../../../data/LanguageConfig';
 import {ImageData, LabelName} from '../../../store/labels/types';
@@ -26,6 +26,7 @@ import {
     DatasetInferenceSelection,
 } from '../../../services/DatasetActionSelection';
 import {PendingImportFiles} from '../../../utils/PendingImportFiles';
+import {CameraResource, CameraResourceService} from '../../../services/CameraResourceService';
 import './DataCenterPopup.scss';
 
 interface DatasetVersionSummary {
@@ -57,7 +58,8 @@ interface DatasetSummary {
     deduplicated_bytes?: number;
     last_task_at?: string | null;
     last_task_type?: string | null;
-    media_type?: 'images' | 'video';
+    media_type?: 'images' | 'video' | 'camera';
+    camera?: CameraResource;
     video?: {
         filename: string;
         fps: number;
@@ -95,7 +97,7 @@ interface ModelAsset {
 
 type ModelCatalogSort = 'relevance' | 'recent' | 'name' | 'size';
 type CurrentModelSlot = 'detection' | 'segmentation' | null;
-type DatasetMediaFilter = 'all' | 'images' | 'video';
+type DatasetMediaFilter = 'all' | 'images' | 'video' | 'camera';
 type DatasetAnnotationFilter = 'all' | 'annotated' | 'unannotated';
 
 interface ModelRuntimeStatus {
@@ -124,6 +126,7 @@ interface IProps {
     labels: LabelName[];
     updateActivePopupTypeAction: (activePopupType: PopupWindowType) => void;
     updateQueueItemAction: (itemId: string, updates: Partial<QueueItem>) => void;
+    removeQueueItemAction?: (itemId: string) => void;
 }
 
 const itemCount = (item: QueueItem): number => {
@@ -345,6 +348,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
     labels,
     updateActivePopupTypeAction,
     updateQueueItemAction,
+    removeQueueItemAction,
 }) => {
     const zh = language === Language.CHINESE;
     const baseUrl = getEngineBaseUrl();
@@ -485,11 +489,32 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const refreshDatasets = useCallback(() => {
         setDatasetsLoading(true);
         setDatasetsError(null);
-        fetch(`${baseUrl}/datasets`).then(async response => {
-            if (!response.ok) throw new Error(`${response.status}`);
-            return response.json();
-        }).then(data => {
-            const nextDatasets = Array.isArray(data.datasets) ? data.datasets : [];
+        Promise.all([
+            fetch(`${baseUrl}/datasets`).then(async response => {
+                if (!response.ok) throw new Error(`${response.status}`);
+                return response.json();
+            }),
+            CameraResourceService.list().catch(() => [] as CameraResource[]),
+        ]).then(([data, cameras]) => {
+            const cameraDatasets: DatasetSummary[] = cameras.map(camera => ({
+                id: `camera:${camera.id}`,
+                name: camera.name,
+                created_at: camera.created_at,
+                updated_at: camera.updated_at,
+                image_count: 0,
+                classes: [],
+                format: 'camera',
+                source_type: 'camera_resource',
+                source_id: camera.id,
+                revision: 1,
+                status: 'ready',
+                media_type: 'camera',
+                camera,
+            }));
+            const nextDatasets = [
+                ...(Array.isArray(data.datasets) ? data.datasets : []),
+                ...cameraDatasets,
+            ];
             setDatasets(nextDatasets);
             setDatasetAnnotationCounts({});
             setDatasetAnnotationError(null);
@@ -559,6 +584,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
             return undefined;
         }
         const missingDatasets = datasets.filter(dataset => (
+            dataset.media_type !== 'camera' &&
             !Object.prototype.hasOwnProperty.call(datasetAnnotationCounts, dataset.id)
         ));
         if (missingDatasets.length === 0) {
@@ -603,7 +629,8 @@ export const DataCenterPopup: React.FC<IProps> = ({
         const controller = new AbortController();
         setStats(null);
         setStatsError(null);
-        if (!selectedId) {
+        const selectedDataset = datasets.find(dataset => dataset.id === selectedId);
+        if (!selectedId || selectedDataset?.media_type === 'camera') {
             setStatsLoading(false);
             return undefined;
         }
@@ -634,7 +661,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
                 if (!controller.signal.aborted) setStatsLoading(false);
             });
         return () => controller.abort();
-    }, [selectedId, baseUrl, zh]);
+    }, [selectedId, baseUrl, datasets, zh]);
 
     const useModel = async (model: ModelAsset) => {
         const identifier = model.id || model.name;
@@ -814,6 +841,11 @@ export const DataCenterPopup: React.FC<IProps> = ({
         setDatasetActionId(dataset.id);
         setDatasetActionError(null);
         try {
+            if (dataset.media_type === 'camera' && dataset.camera) {
+                await CameraResourceService.open(dataset.camera, imagesData);
+                PopupActions.close();
+                return;
+            }
             if (dataset.media_type === 'video' || dataset.source_type === 'video_queue') {
                 await restoreVideoDataset(dataset);
                 return;
@@ -847,10 +879,23 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const deleteDataset = (dataset: DatasetSummary, event: React.MouseEvent) => {
         event.stopPropagation();
         const datasetName = datasetDisplayName(dataset);
-        const prompt = zh
-            ? `确定永久删除服务器数据集“${datasetName}”吗？此操作不可撤销。`
-            : `Permanently delete server dataset “${datasetName}”? This cannot be undone.`;
+        const prompt = dataset.media_type === 'camera'
+            ? (zh
+                ? `确定删除相机资源“${datasetName}”吗？`
+                : `Delete camera resource “${datasetName}”?`)
+            : (zh
+                ? `确定永久删除服务器数据集“${datasetName}”吗？此操作不可撤销。`
+                : `Permanently delete server dataset “${datasetName}”? This cannot be undone.`);
         if (!window.confirm(prompt)) return;
+        if (dataset.camera) {
+            CameraResourceService.delete(dataset.camera.id).then(() => {
+                if (selectedId === dataset.id) setSelectedId(null);
+                const queueItem = queueItems.find(item => item.cameraResourceId === dataset.camera?.id);
+                if (queueItem) removeQueueItemAction?.(queueItem.id);
+                refreshDatasets();
+            }).catch(() => undefined);
+            return;
+        }
         fetch(`${baseUrl}/datasets/${dataset.id}`, {method: 'DELETE'}).then(response => {
             if (!response.ok) throw new Error(`${response.status}`);
             if (selectedId === dataset.id) setSelectedId(null);
@@ -1008,7 +1053,46 @@ export const DataCenterPopup: React.FC<IProps> = ({
         </div>
     );
 
+    const renderCameraDetails = (dataset: DatasetSummary, detailsId: string) => {
+        const camera = dataset.camera;
+        if (!camera) return null;
+        const channel = camera.channels.find(item => item.id === camera.channel_id);
+        return <div className='DatasetDetails' id={detailsId}>
+            {renderDatasetTimes(dataset)}
+            <div className='StatsPanel'>
+                <div className='StatsRow'><span>{zh ? '相机地址' : 'Camera address'}</span><span>{camera.host}</span></div>
+                <div className='StatsRow'><span>{zh ? '设备型号' : 'Model'}</span><span>{camera.device.model || '—'}</span></div>
+                <div className='StatsRow'><span>{zh ? '播放通道' : 'Live channel'}</span><span>{camera.channel_id}</span></div>
+                <div className='StatsRow'><span>{zh ? '码流' : 'Stream'}</span><span>
+                    {channel ? `${channel.codec || '—'} · ${channel.width || '—'}×${channel.height || '—'} · ${channel.frame_rate || '—'} fps` : '—'}
+                </span></div>
+            </div>
+            <div className='TaskLinksSection'>
+                <div className='SectionHeader'>{zh ? '实时画面' : 'Live stream'}</div>
+                <div className='TaskLinks'>
+                    <button
+                        type='button'
+                        className='TaskLink'
+                        disabled={datasetActionId === dataset.id}
+                        onClick={() => openDatasetForEditing(dataset)}
+                    >
+                        {datasetActionId === dataset.id
+                            ? (zh ? '正在打开…' : 'Opening…')
+                            : (zh ? '使用' : 'Use')}
+                    </button>
+                </div>
+                {datasetActionError && <p className='TaskActionError'>{datasetActionError}</p>}
+                <p className='TaskCapabilityHint'>
+                    {zh ? '打开后会像视频一样在编辑区持续播放实时画面。' : 'Opens a continuous live view in the editor, like a video source.'}
+                </p>
+            </div>
+        </div>;
+    };
+
     const datasetSourceLabel = (dataset: DatasetSummary, hasLocalSource: boolean): string => {
+        if (dataset.camera) {
+            return `${zh ? '网络相机' : 'Network camera'} · ${dataset.camera.host} · ${zh ? '通道' : 'Channel'} ${dataset.camera.channel_id}`;
+        }
         const linkedProject = dataset.project_name || (hasLocalSource ? projectName.trim() : '');
         const projectLabel = linkedProject
             ? `${zh ? '项目' : 'Project'} ${linkedProject}`
@@ -1044,12 +1128,18 @@ export const DataCenterPopup: React.FC<IProps> = ({
                             <span className={`DatasetState ${status.className}`} aria-live='polite'>{status.label}</span>
                         </span>
                         <span className='DatasetMeta'>
-                            <span>{dataset.media_type === 'video'
-                                ? (zh ? '视频' : 'Video') : (zh ? '图片' : 'Images')}</span>
-                            <span>{dataset.image_count} {dataset.media_type === 'video'
-                                ? (zh ? '帧' : 'frames')
-                                : (zh ? '张' : 'images')}</span>
-                            <span>{dataset.classes.length} {zh ? '类别' : 'classes'}</span>
+                            {dataset.camera ? <>
+                                <span>{zh ? '相机' : 'Camera'}</span>
+                                <span>{zh ? '实时' : 'Live'}</span>
+                                <span>{zh ? '通道' : 'Channel'} {dataset.camera.channel_id}</span>
+                            </> : <>
+                                <span>{dataset.media_type === 'video'
+                                    ? (zh ? '视频' : 'Video') : (zh ? '图片' : 'Images')}</span>
+                                <span>{dataset.image_count} {dataset.media_type === 'video'
+                                    ? (zh ? '帧' : 'frames')
+                                    : (zh ? '张' : 'images')}</span>
+                                <span>{dataset.classes.length} {zh ? '类别' : 'classes'}</span>
+                            </>}
                         </span>
                         <span className='DatasetSource'>{sourceLabel}</span>
                     </span>
@@ -1062,7 +1152,8 @@ export const DataCenterPopup: React.FC<IProps> = ({
                     onClick={(event) => deleteDataset(dataset, event)}
                 />
             </div>
-            {expanded && renderDatasetDetails(dataset, detailsId)}
+            {expanded && (dataset.camera
+                ? renderCameraDetails(dataset, detailsId) : renderDatasetDetails(dataset, detailsId))}
         </article>;
     };
 
@@ -1086,7 +1177,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
     // eslint-disable-next-line complexity
     const renderPersistentData = () => {
         const annotationStatsPending = datasetAnnotationFilter !== 'all'
-            && datasets.some(dataset => (
+            && datasets.filter(dataset => dataset.media_type !== 'camera').some(dataset => (
                 !Object.prototype.hasOwnProperty.call(datasetAnnotationCounts, dataset.id)
             ));
         const normalizedQuery = datasetQuery.trim().toLowerCase();
@@ -1101,6 +1192,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
                 ...dataset.classes,
             ].some(value => value?.toLowerCase().includes(normalizedQuery));
             if (!matchesQuery) return false;
+            if (dataset.media_type === 'camera') return true;
             if (datasetAnnotationFilter === 'all' || annotationStatsPending) return true;
             const annotatedCount = datasetAnnotationCounts[dataset.id];
             if (typeof annotatedCount !== 'number') return false;
@@ -1144,12 +1236,14 @@ export const DataCenterPopup: React.FC<IProps> = ({
                     <option value='all'>{zh ? '全部媒体' : 'All media'}</option>
                     <option value='images'>{zh ? '图片' : 'Images'}</option>
                     <option value='video'>{zh ? '视频' : 'Video'}</option>
+                    <option value='camera'>{zh ? '相机' : 'Camera'}</option>
                 </select>
             </label>
             <label className='ModelCatalogSelect'>
                 <span>{zh ? '标注' : 'Annotation'}</span>
                 <select
                     value={datasetAnnotationFilter}
+                    disabled={datasetMediaFilter === 'camera'}
                     aria-label={zh ? '数据标注状态' : 'Dataset annotation status'}
                     onChange={event => setDatasetAnnotationFilter(
                         event.target.value as DatasetAnnotationFilter,
@@ -1524,6 +1618,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
 const mapDispatchToProps = {
     updateActivePopupTypeAction: updateActivePopupType,
     updateQueueItemAction: updateQueueItem,
+    removeQueueItemAction: removeQueueItem,
 };
 
 const mapStateToProps = (state: AppState) => ({

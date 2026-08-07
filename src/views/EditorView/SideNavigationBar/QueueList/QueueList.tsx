@@ -34,6 +34,7 @@ const typeIconMap: Record<QueueItemType, string> = {
     [QueueItemType.VIDEO]: '/ico/pictures.png',
     [QueueItemType.IMAGE]: '/ico/camera.png',
     [QueueItemType.FOLDER]: '/ico/files.png',
+    [QueueItemType.CAMERA]: '/ico/camera.png',
 };
 
 // Strip legacy metadata suffix baked into item.name (e.g. " (174 帧 @ 30fps)" or " (174张图像)")
@@ -74,7 +75,8 @@ const QueueItemCard: React.FC<CardProps> = ({ item, isActive, language, onSelect
         [QueueDataSyncStatus.DIRTY]: texts.queueDataSync.dirty,
         [QueueDataSyncStatus.ERROR]: texts.queueDataSync.error,
     }[dataSyncStatus];
-    const supportsDataSync = item.type !== QueueItemType.VIDEO;
+    const supportsDataSync = item.type === QueueItemType.IMAGE
+        || item.type === QueueItemType.FOLDER;
     const showSyncAction = supportsDataSync
         && dataSyncStatus !== QueueDataSyncStatus.SYNCING
         && dataSyncStatus !== QueueDataSyncStatus.SYNCED;

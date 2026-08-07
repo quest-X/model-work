@@ -110,7 +110,8 @@
     transition: background-color 0.3s ease;
     
     // 视频编辑器模式：占满整个容器，时间轴固定在底部
-    &.VideoMode {
+    &.VideoMode,
+    &.CameraMode {
       justify-content: stretch;
       align-items: stretch;
     }

@@ -1,0 +1,177 @@
+@import '../../../settings/Settings';
+
+.CameraPlayer {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: #101010;
+  color: #fff;
+}
+
+.CameraPlayerHeader {
+  display: flex;
+  min-height: 48px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #202020;
+  padding: 7px 14px;
+}
+
+.CameraPlayerIdentity,
+.CameraPlayerMeta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.CameraPlayerIdentity strong {
+  overflow: hidden;
+  max-width: 280px;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.CameraLiveDot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #d58a38;
+
+  &.playing {
+    background: #57c67a;
+    box-shadow: 0 0 7px rgba(87, 198, 122, 0.65);
+  }
+
+  &.paused {
+    background: #e0a34a;
+  }
+
+  &.error {
+    background: #db6262;
+  }
+}
+
+.CameraLiveBadge {
+  border-radius: 3px;
+  background: rgba(220, 54, 54, 0.18);
+  padding: 2px 6px;
+  color: #ff8080;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+
+  &.paused {
+    background: rgba(220, 154, 54, 0.18);
+    color: #e9b96b;
+  }
+}
+
+.CameraPlayerMeta {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 10px;
+
+  span + span::before {
+    margin-right: 9px;
+    color: rgba(255, 255, 255, 0.18);
+    content: '·';
+  }
+
+  button {
+    height: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    padding: 0 10px;
+    color: rgba(255, 255, 255, 0.78);
+    cursor: pointer;
+    font-size: 10px;
+
+    &:hover {
+      border-color: rgba(0, 158, 253, 0.55);
+      color: #fff;
+    }
+  }
+}
+
+.CameraPlayerStage {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #090909;
+
+  > img,
+  > canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  > canvas {
+    display: none;
+
+    &.visible {
+      display: block;
+    }
+  }
+}
+
+.CameraPlayerNotice {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 12px;
+
+  &.error {
+    max-width: 360px;
+    flex-direction: column;
+    text-align: center;
+
+    strong {
+      color: #ffaaaa;
+      font-size: 14px;
+    }
+
+    button {
+      margin-top: 6px;
+      border: 1px solid rgba(0, 158, 253, 0.48);
+      border-radius: 4px;
+      background: rgba(0, 158, 253, 0.12);
+      padding: 6px 18px;
+      color: #b9ddf5;
+      cursor: pointer;
+    }
+  }
+}
+
+.CameraPlayerSpinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-top-color: $primaryColor;
+  border-radius: 50%;
+  animation: camera-player-spin 0.8s linear infinite;
+}
+
+@keyframes camera-player-spin {
+  to { transform: rotate(360deg); }
+}

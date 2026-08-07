@@ -1,0 +1,159 @@
+import React, {useEffect, useMemo, useRef, useState} from 'react';
+import {Language} from '../../../data/LanguageConfig';
+import {CameraResourceService} from '../../../services/CameraResourceService';
+import {QueueItem} from '../../../store/queue/types';
+import CameraTimeline from '../CameraTimeline/CameraTimeline';
+import './CameraPlayer.scss';
+
+interface IProps {
+    item: QueueItem;
+    language: Language;
+}
+
+const CameraPlayer: React.FC<IProps> = ({item, language}) => {
+    const chinese = language === Language.CHINESE;
+    const imageRef = useRef<HTMLImageElement>(null);
+    const frozenFrameRef = useRef<HTMLCanvasElement>(null);
+    const sourceIdentity = `${item.cameraResourceId || ''}:${item.cameraChannelId || ''}`;
+    const previousSourceIdentityRef = useRef(sourceIdentity);
+    const activePlaybackStartedAtRef = useRef<number | null>(null);
+    const accumulatedPlaybackSecondsRef = useRef(0);
+    const [nonce, setNonce] = useState(Date.now());
+    const [state, setState] = useState<'loading' | 'playing' | 'error'>('loading');
+    const [isPaused, setIsPaused] = useState(false);
+    const [elapsedSeconds, setElapsedSeconds] = useState(0);
+    const streamUrl = useMemo(() => CameraResourceService.streamUrl(
+        item.cameraResourceId || '',
+        item.cameraChannelId,
+        nonce,
+    ), [item.cameraResourceId, item.cameraChannelId, nonce]);
+
+    useEffect(() => {
+        if (previousSourceIdentityRef.current === sourceIdentity) return;
+        previousSourceIdentityRef.current = sourceIdentity;
+        activePlaybackStartedAtRef.current = null;
+        accumulatedPlaybackSecondsRef.current = 0;
+        setElapsedSeconds(0);
+        setIsPaused(false);
+        setState('loading');
+        setNonce(previous => previous + 1);
+    }, [sourceIdentity]);
+
+    useEffect(() => {
+        if (state !== 'playing' || isPaused || activePlaybackStartedAtRef.current === null) return undefined;
+        const updateElapsed = () => {
+            const startedAt = activePlaybackStartedAtRef.current;
+            if (startedAt === null) return;
+            setElapsedSeconds(accumulatedPlaybackSecondsRef.current + (performance.now() - startedAt) / 1000);
+        };
+        updateElapsed();
+        const timer = window.setInterval(updateElapsed, 250);
+        return () => window.clearInterval(timer);
+    }, [state, isPaused]);
+
+    const reconnect = () => {
+        activePlaybackStartedAtRef.current = null;
+        accumulatedPlaybackSecondsRef.current = 0;
+        setElapsedSeconds(0);
+        setIsPaused(false);
+        setState('loading');
+        setNonce(previous => previous + 1);
+    };
+
+    const pause = () => {
+        const image = imageRef.current;
+        const canvas = frozenFrameRef.current;
+        if (state !== 'playing' || !image || !canvas || !image.naturalWidth || !image.naturalHeight) return;
+
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext('2d');
+        if (!context) return;
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const startedAt = activePlaybackStartedAtRef.current;
+        if (startedAt !== null) {
+            accumulatedPlaybackSecondsRef.current += (performance.now() - startedAt) / 1000;
+            activePlaybackStartedAtRef.current = null;
+            setElapsedSeconds(accumulatedPlaybackSecondsRef.current);
+        }
+        setIsPaused(true);
+    };
+
+    const resume = () => {
+        setIsPaused(false);
+        setState('loading');
+        setNonce(previous => previous + 1);
+    };
+
+    const togglePlayback = () => isPaused ? resume() : pause();
+
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            const target = event.target;
+            if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLButtonElement) return;
+            if (event.code !== 'Space' || (!isPaused && state !== 'playing')) return;
+            event.preventDefault();
+            togglePlayback();
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isPaused, state]);
+
+    return <div className='CameraPlayer'>
+        <div className='CameraPlayerHeader'>
+            <div className='CameraPlayerIdentity'>
+                <span className={`CameraLiveDot ${isPaused ? 'paused' : state}`}/>
+                <strong>{item.name}</strong>
+                <span className={`CameraLiveBadge ${isPaused ? 'paused' : ''}`}>
+                    {isPaused ? (chinese ? '已暂停' : 'PAUSED') : (state === 'playing' ? 'LIVE' : (chinese ? '连接中' : 'CONNECTING'))}
+                </span>
+            </div>
+            <div className='CameraPlayerMeta'>
+                {item.cameraHost && <span>{item.cameraHost}</span>}
+                {item.cameraModel && <span>{item.cameraModel}</span>}
+                {item.cameraChannelId && <span>{chinese ? '通道' : 'Channel'} {item.cameraChannelId}</span>}
+                <button type='button' onClick={reconnect}>{chinese ? '重新连接' : 'Reconnect'}</button>
+            </div>
+        </div>
+        <div className='CameraPlayerStage'>
+            {state === 'loading' && <div className='CameraPlayerNotice'>
+                <span className='CameraPlayerSpinner'/>
+                {chinese ? '正在建立实时画面…' : 'Opening live stream…'}
+            </div>}
+            {state === 'error' && <div className='CameraPlayerNotice error'>
+                <strong>{chinese ? '实时画面连接失败' : 'Unable to open live stream'}</strong>
+                <span>{chinese ? '请检查相机网络、RTSP 端口和码流通道。' : 'Check the camera network, RTSP port, and stream channel.'}</span>
+                <button type='button' onClick={reconnect}>{chinese ? '重试' : 'Retry'}</button>
+            </div>}
+            <canvas
+                ref={frozenFrameRef}
+                className={isPaused ? 'CameraFrozenFrame visible' : 'CameraFrozenFrame'}
+                aria-label={chinese ? `${item.name} 暂停画面` : `${item.name} paused frame`}
+            />
+            {!isPaused && <img
+                ref={imageRef}
+                key={nonce}
+                src={streamUrl}
+                alt={chinese ? `${item.name} 实时画面` : `${item.name} live stream`}
+                onLoad={() => {
+                    if (activePlaybackStartedAtRef.current === null) {
+                        activePlaybackStartedAtRef.current = performance.now();
+                    }
+                    setState('playing');
+                }}
+                onError={() => setState('error')}
+                draggable={false}
+            />}
+        </div>
+        <CameraTimeline
+            language={language}
+            elapsedSeconds={elapsedSeconds}
+            fps={10}
+            isPlaying={state === 'playing' && !isPaused}
+            canPlayPause={isPaused || state === 'playing'}
+            onPlayPause={togglePlayback}
+        />
+    </div>;
+};
+
+export default CameraPlayer;

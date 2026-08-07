@@ -1,0 +1,17 @@
+.CameraTimeline {
+  flex: 0 0 auto;
+
+  .CameraTimelineCanvas {
+    cursor: default;
+
+    &:hover {
+      cursor: default;
+    }
+  }
+
+  .PlayPauseButton:disabled,
+  .CameraMuteButton:disabled {
+    cursor: not-allowed;
+    opacity: 0.38;
+  }
+}

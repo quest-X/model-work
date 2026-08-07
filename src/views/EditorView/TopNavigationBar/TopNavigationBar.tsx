@@ -12,7 +12,7 @@ import {TextButton} from '../../Common/TextButton/TextButton';
 import {Language, LanguageConfig} from '../../../data/LanguageConfig';
 import {QueueDataSyncStatus, QueueItem} from '../../../store/queue/types';
 import {updateQueueItem} from '../../../store/queue/actionCreators';
-import {getEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
+import {getEngineBaseUrl, getExtensionEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
 
 interface IProps {
     updateActivePopupTypeAction: (activePopupType: PopupWindowType) => any;
@@ -33,6 +33,7 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
     const currentTexts = LanguageConfig[props.language];
     const [showActionsDropdown, setShowActionsDropdown] = useState(false);
     const [activeServicesDropdown, setActiveServicesDropdown] = useState<ServicesDropdown>(null);
+    const [cameraConnectAvailable, setCameraConnectAvailable] = useState(false);
     const renameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const activeQueueItem = props.queueItems.find(item => item.id === props.activeQueueItemId);
     const localChangeCount = props.queueItems.filter(
@@ -136,6 +137,29 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
         setActiveServicesDropdown(null);
         props.updateActivePopupTypeAction(PopupWindowType.L2G_RETRIEVAL);
     };
+
+    const openCameraConnect = () => {
+        setActiveServicesDropdown(null);
+        props.updateActivePopupTypeAction(PopupWindowType.CAMERA_CONNECT);
+    };
+
+    useEffect(() => {
+        if (!props.hasExtensionEngine) {
+            setCameraConnectAvailable(false);
+            return undefined;
+        }
+        const controller = new AbortController();
+        fetch(`${getExtensionEngineBaseUrl()}/health`, {signal: controller.signal})
+            .then(response => response.ok ? response.json() : Promise.reject(new Error(`${response.status}`)))
+            .then(health => {
+                const plugin = health?.plugins?.camera_connect;
+                setCameraConnectAvailable(Boolean(plugin?.enabled && plugin?.state === 'ready'));
+            })
+            .catch(error => {
+                if (error?.name !== 'AbortError') setCameraConnectAvailable(false);
+            });
+        return () => controller.abort();
+    }, [props.hasExtensionEngine]);
 
     const toggleLanguage = () => {
         const newLanguage = props.language === Language.CHINESE ? Language.ENGLISH : Language.CHINESE;
@@ -286,6 +310,12 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                                         <img src='ico/ai.png' alt='l2g-retrieval'/>
                                         {currentTexts.modelManagement.l2gRetrieval}
                                     </div>
+                                    {cameraConnectAvailable && <div className='DropDownMenuContentOption active'
+                                        onClick={openCameraConnect}>
+                                        <div className='Marker'/>
+                                        <img src='ico/camera.png' alt='camera-connect'/>
+                                        {currentTexts.modelManagement.cameraConnect}
+                                    </div>}
                                 </div>
                             )}
                         </div>

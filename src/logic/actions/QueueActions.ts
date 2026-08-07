@@ -300,6 +300,17 @@ export class QueueActions {
         store.dispatch(updateActiveImageIndex(0));
     }
 
+    private static switchToCamera(targetItem: QueueItem): void {
+        if (!targetItem.cameraResourceId) {
+            throw new Error('相机资源 ID 缺失');
+        }
+        QueueActions.setVideoRuntimeGlobals();
+        store.dispatch(updateVideoMode(false));
+        ImageRepository.setActiveFileId(targetItem.id);
+        store.dispatch(updateImageData([]));
+        store.dispatch(updateActiveImageIndex(0));
+    }
+
     public static async switchToQueueItem(
         targetItem: QueueItem,
         currentImagesData: ImageData[]
@@ -344,6 +355,8 @@ export class QueueActions {
 
             if (preparedVideo) {
                 QueueActions.commitVideoSwitch(preparedVideo, cachedData);
+            } else if (targetItem.type === QueueItemType.CAMERA) {
+                QueueActions.switchToCamera(targetItem);
             } else {
                 QueueActions.switchToNonVideo(targetItem, cachedData);
             }

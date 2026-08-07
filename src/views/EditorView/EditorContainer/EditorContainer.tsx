@@ -14,6 +14,7 @@ import {VerticalEditorButton} from '../VerticalEditorButton/VerticalEditorButton
 import './EditorContainer.scss';
 import Editor from '../Editor/Editor';
 import VideoEditor from '../VideoEditor/VideoEditor';
+import CameraPlayer from '../CameraPlayer/CameraPlayer';
 import {ContextManager} from '../../../logic/hotkey/ContextManager';
 import {ContextType} from '../../../data/enums/ContextType';
 import EditorBottomNavigationBar from '../EditorBottomNavigationBar/EditorBottomNavigationBar';
@@ -721,6 +722,9 @@ const EditorContainer: React.FC<IProps> = (
         return <LabelsToolkit/>;
     };
 
+    const activeQueueItem = queueItems.find(item => item.id === activeQueueItemId) || null;
+    const isCameraMode = activeQueueItem?.type === QueueItemType.CAMERA;
+
     return (
         <div className='EditorContainer'>
             <SideNavigationBar
@@ -733,7 +737,7 @@ const EditorContainer: React.FC<IProps> = (
             />
             <div 
                 {...getRootProps({
-                    className: `EditorWrapper ${isVideoMode ? 'VideoMode' : ''} ${isDragActive ? 'drag-active' : ''}`,
+                    className: `EditorWrapper ${isVideoMode ? 'VideoMode' : ''} ${isCameraMode ? 'CameraMode' : ''} ${isDragActive ? 'drag-active' : ''}`,
                     onMouseDown: (e) => {
                         // 只有在非拖拽状态下才切换上下文
                         if (!isDragActive) {
@@ -759,7 +763,13 @@ const EditorContainer: React.FC<IProps> = (
                 {projectType === ProjectType.OBJECT_DETECTION && <EditorTopNavigationBar
                     key='editor-top-navigation-bar'
                 />}
-                {isVideoMode && activeVideo ? (
+                {isCameraMode && activeQueueItem ? (
+                    <CameraPlayer
+                        item={activeQueueItem}
+                        language={language}
+                        key={activeQueueItem.id}
+                    />
+                ) : isVideoMode && activeVideo ? (
                     // 视频编辑模式
                     <VideoEditor
                         editorSize={calculateEditorSize()}

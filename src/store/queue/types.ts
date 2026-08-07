@@ -3,7 +3,8 @@ import { Action } from '../Actions';
 export enum QueueItemType {
     IMAGE = 'IMAGE',
     VIDEO = 'VIDEO',
-    FOLDER = 'FOLDER'
+    FOLDER = 'FOLDER',
+    CAMERA = 'CAMERA'
 }
 
 export enum QueueItemStatus {
@@ -39,6 +40,10 @@ export type QueueItem = {
     status: QueueItemStatus;
     uploadedAt: number; // timestamp
     thumbnail?: string; // Base64 thumbnail for images/videos
+    cameraResourceId?: string;
+    cameraChannelId?: string;
+    cameraHost?: string;
+    cameraModel?: string;
     error?: string;
     dataSyncStatus?: QueueDataSyncStatus;
     datasetId?: string;

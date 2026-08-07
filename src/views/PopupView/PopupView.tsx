@@ -31,6 +31,7 @@ import VectorDbPopup from './VectorDbPopup/VectorDbPopup';
 import L2GRetrievalPopup from './L2GRetrievalPopup/L2GRetrievalPopup';
 import ModelInspectorPopup, {MODEL_INSPECTOR_ESCAPE_EVENT} from './ModelInspectorPopup/ModelInspectorPopup';
 import VisualSearchPopup from './VisualSearchPopup/VisualSearchPopup';
+import CameraConnectPopup from './CameraConnectPopup/CameraConnectPopup';
 import {clearDatasetActionSelections} from '../../services/DatasetActionSelection';
 
 
@@ -99,6 +100,7 @@ const PopupView: React.FC<IProps> = ({ activePopupType }) => {
         [PopupWindowType.L2G_RETRIEVAL]: () => <L2GRetrievalPopup />,
         [PopupWindowType.VISUAL_SEARCH]: () => <VisualSearchPopup />,
         [PopupWindowType.MODEL_INSPECTOR]: () => <ModelInspectorPopup />,
+        [PopupWindowType.CAMERA_CONNECT]: () => <CameraConnectPopup />,
         [PopupWindowType.LOADER]: () => <ClipLoader size={50} color={CSSHelper.getLeadingColor()} loading={true} />,
     };
 

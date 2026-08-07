@@ -41,6 +41,39 @@ export type CameraResource = {
     updated_at: string;
 };
 
+export type CameraConnectionProfile = {
+    host: string;
+    port: number;
+    rtsp_port: number;
+    username: string;
+    password: string;
+    scheme: 'http' | 'https';
+    verify_tls: boolean;
+    timeout_seconds: number;
+};
+
+export type CameraDiscoveryDevice = {
+    host: string;
+    name: string;
+    manufacturer: string;
+    model: string;
+    scheme: 'http' | 'https';
+    port: number;
+    rtsp_port: number;
+    sdk_port: number | null;
+    open_ports: number[];
+    services: string[];
+    discovery_methods: string[];
+    confidence: 'confirmed' | 'probable';
+};
+
+export type CameraDiscoveryResponse = {
+    networks: string[];
+    scanned_hosts: number;
+    duration_ms: number;
+    devices: CameraDiscoveryDevice[];
+};
+
 export type CameraImageMetrics = {
     luma: number;
     saturation_ratio: number;
@@ -105,6 +138,16 @@ const errorDetail = async (response: Response): Promise<string> => {
 };
 
 export class CameraResourceService {
+    public static async discover(timeoutSeconds: number = 0.35): Promise<CameraDiscoveryResponse> {
+        const response = await fetch(`${cameraBaseUrl()}/discovery`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({timeout_seconds: timeoutSeconds}),
+        });
+        if (!response.ok) throw new Error(await errorDetail(response));
+        return response.json();
+    }
+
     public static async list(): Promise<CameraResource[]> {
         const response = await fetch(`${cameraBaseUrl()}/resources`);
         if (!response.ok) throw new Error(await errorDetail(response));
@@ -118,6 +161,27 @@ export class CameraResourceService {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload),
         });
+        if (!response.ok) throw new Error(await errorDetail(response));
+        return response.json();
+    }
+
+    public static async credentials(resourceId: string): Promise<CameraConnectionProfile> {
+        const response = await fetch(
+            `${cameraBaseUrl()}/resources/${encodeURIComponent(resourceId)}/credentials`,
+        );
+        if (!response.ok) throw new Error(await errorDetail(response));
+        return response.json();
+    }
+
+    public static async update(resourceId: string, payload: Record<string, unknown>): Promise<CameraResource> {
+        const response = await fetch(
+            `${cameraBaseUrl()}/resources/${encodeURIComponent(resourceId)}`,
+            {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+            },
+        );
         if (!response.ok) throw new Error(await errorDetail(response));
         return response.json();
     }

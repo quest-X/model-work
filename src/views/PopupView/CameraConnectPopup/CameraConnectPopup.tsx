@@ -4,7 +4,12 @@ import {Language} from '../../../data/LanguageConfig';
 import {PopupActions} from '../../../logic/actions/PopupActions';
 import {AppState} from '../../../store';
 import {ImageData} from '../../../store/labels/types';
-import {CameraResourceService} from '../../../services/CameraResourceService';
+import {
+    CameraDiscoveryDevice,
+    CameraDiscoveryResponse,
+    CameraResource,
+    CameraResourceService,
+} from '../../../services/CameraResourceService';
 import {getExtensionEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
 import {GenericYesNoPopup} from '../GenericYesNoPopup/GenericYesNoPopup';
 import './CameraConnectPopup.scss';
@@ -42,7 +47,7 @@ interface IProps {
     imagesData: ImageData[];
 }
 
-const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
+export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
     const chinese = language === Language.CHINESE;
     const [scheme, setScheme] = useState<'http' | 'https'>('http');
     const [host, setHost] = useState('');
@@ -59,10 +64,40 @@ const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
     const [previewUrl, setPreviewUrl] = useState('');
     const [resourceName, setResourceName] = useState('');
     const [saving, setSaving] = useState(false);
+    const [scanning, setScanning] = useState(false);
+    const [scanError, setScanError] = useState('');
+    const [discovery, setDiscovery] = useState<CameraDiscoveryResponse | null>(null);
+    const [savedResources, setSavedResources] = useState<CameraResource[]>([]);
+    const [savedResource, setSavedResource] = useState<CameraResource | null>(null);
+    const [loadingCredentials, setLoadingCredentials] = useState(false);
 
     useEffect(() => () => {
         if (previewUrl) URL.revokeObjectURL(previewUrl);
     }, [previewUrl]);
+
+    useEffect(() => {
+        let active = true;
+        CameraResourceService.list()
+            .then(resources => {
+                if (active) setSavedResources(resources);
+            })
+            .catch(() => {
+                // Remembered connections are optional; manual entry must remain available.
+            });
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    const savedByHost = useMemo(() => {
+        const remembered = new Map<string, CameraResource>();
+        [...savedResources]
+            .sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at))
+            .forEach(resource => {
+                if (!remembered.has(resource.host)) remembered.set(resource.host, resource);
+            });
+        return remembered;
+    }, [savedResources]);
 
     const requestBody = useMemo(() => ({
         scheme,
@@ -75,7 +110,7 @@ const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
         timeout_seconds: 8,
     }), [scheme, host, port, rtspPort, username, password, verifyTls]);
 
-    const formInvalid = !host.trim()
+    const manualFormInvalid = !host.trim()
         || !username.trim()
         || !password
         || !Number.isInteger(Number(port))
@@ -84,6 +119,7 @@ const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
         || !Number.isInteger(Number(rtspPort))
         || Number(rtspPort) < 1
         || Number(rtspPort) > 65535;
+    const formInvalid = manualFormInvalid;
 
     const readError = async (response: Response): Promise<string> => {
         try {
@@ -96,6 +132,73 @@ const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
             // Fall through to the status-based message.
         }
         return chinese ? `请求失败（HTTP ${response.status}）` : `Request failed (HTTP ${response.status})`;
+    };
+
+    const scanCameras = async () => {
+        if (scanning) return;
+        setScanning(true);
+        setScanError('');
+        try {
+            setDiscovery(await CameraResourceService.discover());
+        } catch (scanFailure) {
+            setScanError(scanFailure instanceof Error ? scanFailure.message : String(scanFailure));
+        } finally {
+            setScanning(false);
+        }
+    };
+
+    const useSavedResource = async (resource: CameraResource) => {
+        setLoadingCredentials(true);
+        setSavedResource(resource);
+        setScheme(resource.scheme);
+        setHost(resource.host);
+        setPort(String(resource.port));
+        setRtspPort(String(resource.rtsp_port));
+        setUsername('admin');
+        setPassword('');
+        setVerifyTls(false);
+        setResult(null);
+        setError('');
+        setResourceName(resource.name);
+        if (previewUrl) {
+            URL.revokeObjectURL(previewUrl);
+            setPreviewUrl('');
+        }
+        try {
+            const profile = await CameraResourceService.credentials(resource.id);
+            setScheme(profile.scheme);
+            setHost(profile.host);
+            setPort(String(profile.port));
+            setRtspPort(String(profile.rtsp_port));
+            setUsername(profile.username);
+            setPassword(profile.password);
+            setVerifyTls(profile.verify_tls);
+        } catch (profileError) {
+            setError(profileError instanceof Error ? profileError.message : String(profileError));
+        } finally {
+            setLoadingCredentials(false);
+        }
+    };
+
+    const useDiscoveredCamera = (camera: CameraDiscoveryDevice) => {
+        const remembered = savedByHost.get(camera.host);
+        if (remembered) {
+            void useSavedResource(remembered);
+            return;
+        }
+        setSavedResource(null);
+        setHost(camera.host);
+        setScheme(camera.scheme);
+        setPort(String(camera.port));
+        setRtspPort(String(camera.rtsp_port));
+        setVerifyTls(false);
+        setResult(null);
+        setError('');
+        setResourceName(camera.name || camera.model || camera.host);
+        if (previewUrl) {
+            URL.revokeObjectURL(previewUrl);
+            setPreviewUrl('');
+        }
     };
 
     const connectCamera = async () => {
@@ -117,7 +220,7 @@ const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
             const connected = await response.json() as CameraConnectResult;
             setResult(connected);
             setChannelId(connected.playback_channel || connected.snapshot_channel || connected.channels[0]?.id || '101');
-            setResourceName(connected.device.name || connected.device.model || host.trim());
+            setResourceName(savedResource?.name || connected.device.name || connected.device.model || host.trim());
         } catch (connectionError) {
             setError(connectionError instanceof Error ? connectionError.message : String(connectionError));
         } finally {
@@ -151,11 +254,14 @@ const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
         setSaving(true);
         setError('');
         try {
-            const resource = await CameraResourceService.create({
+            const payload = {
                 ...requestBody,
                 name: resourceName.trim(),
                 channel_id: channelId,
-            });
+            };
+            const resource = savedResource
+                ? await CameraResourceService.update(savedResource.id, payload)
+                : await CameraResourceService.create(payload);
             setPassword('');
             window.dispatchEvent(new CustomEvent('opensight:camera-resource-updated'));
             await CameraResourceService.open(resource, imagesData);
@@ -171,8 +277,8 @@ const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
         <div className='CameraConnectPopupContent'>
             <div className='CameraIntro'>
                 {chinese
-                    ? '使用 ISAPI Digest 验证海康网络摄像机。确认后将相机保存到资源中心，账号密码由服务端加密保存且不会返回浏览器。'
-                    : 'Connect with Hikvision ISAPI Digest. Confirm to save the camera in Resource Center; credentials are encrypted server-side and never returned.'}
+                    ? '使用 ISAPI Digest 验证海康网络摄像机。首次确认后会自动记住连接方式；下次选择相机时直接填入账号密码，可自行修改。'
+                    : 'Connect with Hikvision ISAPI Digest. Confirmed settings are remembered and filled into the editable form when the camera is selected again.'}
             </div>
 
             <div className='CameraForm'>
@@ -189,7 +295,16 @@ const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
                 </label>
                 <label className='wide'>
                     <span>{chinese ? '相机 IP' : 'Camera IP'}</span>
-                    <input autoFocus value={host} onChange={event => setHost(event.target.value)} placeholder='192.168.10.64'/>
+                    <input
+                        autoFocus
+                        value={host}
+                        onChange={event => setHost(event.target.value)}
+                        onBlur={() => {
+                            const remembered = savedByHost.get(host.trim());
+                            if (remembered && !savedResource && !password) void useSavedResource(remembered);
+                        }}
+                        placeholder='192.168.10.64'
+                    />
                 </label>
                 <label>
                     <span>{chinese ? '管理端口' : 'HTTP port'}</span>
@@ -201,17 +316,96 @@ const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
                 </label>
                 <label>
                     <span>{chinese ? '用户名' : 'Username'}</span>
-                    <input value={username} autoComplete='username' onChange={event => setUsername(event.target.value)}/>
+                    <input
+                        value={username}
+                        autoComplete='username'
+                        onChange={event => setUsername(event.target.value)}
+                    />
                 </label>
                 <label className='wide'>
                     <span>{chinese ? '密码' : 'Password'}</span>
-                    <input type='password' value={password} autoComplete='new-password' onChange={event => setPassword(event.target.value)}/>
+                    <input
+                        type='password'
+                        value={password}
+                        autoComplete='current-password'
+                        onChange={event => setPassword(event.target.value)}
+                    />
                 </label>
                 {scheme === 'https' && <label className='CameraCheckbox wide'>
                     <input type='checkbox' checked={verifyTls} onChange={event => setVerifyTls(event.target.checked)}/>
                     <span>{chinese ? '校验相机 TLS 证书' : 'Verify camera TLS certificate'}</span>
                 </label>}
             </div>
+
+            <section className='CameraDiscoveryPanel' aria-label={chinese ? '局域网相机发现' : 'LAN camera discovery'}>
+                <div className='CameraDiscoveryHeader'>
+                    <div>
+                        <strong>{chinese ? '局域网相机发现' : 'LAN camera discovery'}</strong>
+                        <span>{chinese
+                            ? '从服务器当前网段发现 ONVIF、RTSP 及常见厂商相机；扫描不会提交账号密码。'
+                            : 'Find ONVIF, RTSP, and common vendor cameras on the server LAN without sending credentials.'}</span>
+                    </div>
+                    <button type='button' onClick={scanCameras} disabled={scanning}>
+                        {scanning
+                            ? (chinese ? '正在扫描…' : 'Scanning…')
+                            : (chinese ? '扫描局域网' : 'Scan LAN')}
+                    </button>
+                </div>
+                {scanError && <div className='CameraDiscoveryError'>{scanError}</div>}
+                {discovery && <>
+                    <div className='CameraDiscoverySummary'>
+                        {chinese
+                            ? `已扫描 ${discovery.networks.join('、')} 的 ${discovery.scanned_hosts} 个地址，发现 ${discovery.devices.length} 台相机 · ${(discovery.duration_ms / 1000).toFixed(1)} 秒`
+                            : `Scanned ${discovery.scanned_hosts} addresses on ${discovery.networks.join(', ')}; found ${discovery.devices.length} cameras · ${(discovery.duration_ms / 1000).toFixed(1)}s`}
+                    </div>
+                    {discovery.devices.length === 0
+                        ? <div className='CameraDiscoveryEmpty'>
+                            {chinese ? '未发现可识别的网络相机，可继续手动填写 IP。' : 'No identifiable network cameras found. You can still enter an IP manually.'}
+                        </div>
+                        : <div className='CameraDiscoveryResults'>
+                            {discovery.devices.map(camera => {
+                                const remembered = savedByHost.get(camera.host);
+                                const selected = remembered
+                                    ? savedResource?.id === remembered.id
+                                    : !savedResource && host === camera.host;
+                                return <button
+                                    type='button'
+                                    className={`CameraDiscoveryRow${remembered ? ' remembered' : ''}${selected ? ' selected' : ''}`}
+                                    key={camera.host}
+                                    onClick={() => useDiscoveredCamera(camera)}
+                                    aria-pressed={selected}
+                                >
+                                    <span className={`CameraDiscoveryDot ${camera.confidence}`}/>
+                                    <span className='CameraDiscoveryIdentity'>
+                                        <strong>{remembered?.name || camera.name || camera.model || camera.host}</strong>
+                                        <span>
+                                            {remembered && (chinese ? '已保存连接 · ' : 'Saved connection · ')}
+                                            {camera.manufacturer}{camera.model ? ` · ${camera.model}` : ''}
+                                        </span>
+                                    </span>
+                                    <code>{camera.host}</code>
+                                    <span className='CameraDiscoveryPorts'>
+                                        {camera.open_ports.length ? `${chinese ? '端口' : 'Ports'} ${camera.open_ports.join(' / ')}` : 'ONVIF'}
+                                    </span>
+                                    {remembered
+                                        ? <span className='CameraDiscoveryUse remembered'>
+                                            {chinese ? '填入表单' : 'Fill form'}
+                                        </span>
+                                        : <>
+                                            <span className='CameraDiscoveryConfidence'>
+                                                {camera.confidence === 'confirmed'
+                                                    ? (chinese ? '已确认' : 'Confirmed')
+                                                    : (chinese ? '疑似相机' : 'Probable')}
+                                            </span>
+                                            <span className='CameraDiscoveryUse'>
+                                                {chinese ? '选择' : 'Select'}
+                                            </span>
+                                        </>}
+                                </button>;
+                            })}
+                        </div>}
+                </>}
+            </section>
 
             {error && <div className='CameraBanner error'>{error}</div>}
             {result && <>
@@ -260,11 +454,13 @@ const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
         renderContent={renderContent}
         acceptLabel={saving
             ? (chinese ? '正在保存…' : 'Saving…')
+            : loadingCredentials
+                ? (chinese ? '正在读取…' : 'Loading…')
             : connecting
                 ? (chinese ? '正在连接…' : 'Connecting…')
                 : result ? (chinese ? '确认' : 'Confirm') : (chinese ? '连接' : 'Connect')}
         onAccept={result ? saveCamera : connectCamera}
-        disableAcceptButton={formInvalid || connecting || saving || (!!result && !resourceName.trim())}
+        disableAcceptButton={formInvalid || loadingCredentials || connecting || saving || (!!result && !resourceName.trim())}
         rejectLabel={chinese ? '关闭' : 'Close'}
         onReject={PopupActions.close}
     />;

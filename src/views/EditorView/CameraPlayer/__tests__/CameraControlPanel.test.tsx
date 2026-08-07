@@ -19,6 +19,10 @@ jest.mock('../../../../services/CameraTrialService', () => ({
     CameraTrialService: {
         apply: jest.fn(),
         revert: jest.fn(),
+        autoWdr: jest.fn(),
+        restoreWdr: jest.fn(),
+        autoDayNight: jest.fn(),
+        restoreDayNight: jest.fn(),
     },
 }));
 
@@ -35,6 +39,17 @@ const metrics = {
 const state = {
     exposure: {mode: 'auto' as const, shutter_us: 10000, gain_level: 22},
     focus: {mode: 'auto' as const, position: 0, relative_position: 0, speed_level: 1},
+    wdr: {mode: 'close' as const, level: 50},
+    day_night: {mode: 'day' as const},
+};
+const inactive = {auto_exposure: false, auto_focus: false, auto_wdr: false, auto_day_night: false};
+const IDLE_TRIAL_FIXTURE = {
+    phase: 'idle' as const,
+    dirty: false,
+    active: inactive,
+    started_at: null,
+    expires_at: null,
+    applied_at: null,
 };
 const controlledExposureState = {
     ...state,
@@ -55,59 +70,40 @@ describe('CameraControlPanel', () => {
                 exposure_metrics: true,
                 auto_focus: true,
                 focus_metrics: true,
+                auto_wdr: true,
+                auto_day_night: true,
             },
-            active: {auto_exposure: false, auto_focus: false},
+            active: inactive,
             state,
             metrics,
-        });
+        } as any);
     });
 
-    it('keeps changes reversible until they are explicitly applied to the camera', async () => {
+    it('keeps apply-to-camera out of smart controls', async () => {
         service.autoExposure.mockResolvedValue({
             action: 'auto_exposure',
             message: '自动曝光已完成',
             after: {...metrics, luma: 0.36},
             state: controlledExposureState,
-            active: {auto_exposure: true, auto_focus: false},
+            active: {...inactive, auto_exposure: true},
             trial: {
                 phase: 'trial',
                 dirty: true,
-                active: {auto_exposure: true, auto_focus: false},
+                active: {...inactive, auto_exposure: true},
                 started_at: '2026-08-07T10:00:00Z',
                 expires_at: '2026-08-07T10:10:00Z',
                 applied_at: null,
             },
         } as any);
-        trialService.apply.mockResolvedValue({
-            action: 'apply_trial',
-            message: '当前试调参数已固定到相机',
-            after: {...metrics, luma: 0.36},
-            state: controlledExposureState,
-            active: {auto_exposure: false, auto_focus: false},
-            trial: {
-                phase: 'applied',
-                dirty: false,
-                active: {auto_exposure: false, auto_focus: false},
-                started_at: null,
-                expires_at: null,
-                applied_at: '2026-08-07T10:01:00Z',
-            },
-        });
         render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
 
         await screen.findByText('测试模式 · 尚未修改');
         const exposureButton = screen.getByRole('button', {name: '自动曝光'});
         await waitFor(() => expect(exposureButton).not.toBeDisabled());
         fireEvent.click(exposureButton);
-        expect(await screen.findByText('试调中 · 尚未确认')).toBeInTheDocument();
-
-        const applyButton = screen.getByRole('button', {name: '应用到相机'});
-        expect(applyButton).not.toBeDisabled();
-        fireEvent.click(applyButton);
-
-        await waitFor(() => expect(trialService.apply).toHaveBeenCalledWith('resource-1'));
-        expect(await screen.findByText('已应用到相机')).toBeInTheDocument();
-        expect(screen.getByText('当前试调参数已固定到相机')).toBeInTheDocument();
+        expect(await screen.findByText('试调中 · 临时生效')).toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: '应用到相机'})).not.toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '撤销全部试调'})).toBeInTheDocument();
     });
 
     it('reverts an unconfirmed trial before closing the panel', async () => {
@@ -119,14 +115,16 @@ describe('CameraControlPanel', () => {
                 exposure_metrics: true,
                 auto_focus: true,
                 focus_metrics: true,
+                auto_wdr: true,
+                auto_day_night: true,
             },
-            active: {auto_exposure: true, auto_focus: false},
+            active: {...inactive, auto_exposure: true},
             state: controlledExposureState,
             metrics,
             trial: {
                 phase: 'trial',
                 dirty: true,
-                active: {auto_exposure: true, auto_focus: false},
+                active: {...inactive, auto_exposure: true},
                 started_at: '2026-08-07T10:00:00Z',
                 expires_at: '2026-08-07T10:10:00Z',
                 applied_at: null,
@@ -137,11 +135,11 @@ describe('CameraControlPanel', () => {
             message: '试调已撤销，已恢复试调前的相机参数',
             after: metrics,
             state,
-            active: {auto_exposure: false, auto_focus: false},
+            active: inactive,
             trial: {
                 phase: 'idle',
                 dirty: false,
-                active: {auto_exposure: false, auto_focus: false},
+                active: inactive,
                 started_at: null,
                 expires_at: null,
                 applied_at: null,
@@ -149,7 +147,7 @@ describe('CameraControlPanel', () => {
         });
         render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={onClose}/>);
 
-        await screen.findByText('试调中 · 尚未确认');
+        await screen.findByText('试调中 · 临时生效');
         fireEvent.click(screen.getByRole('button', {name: '关闭相机控制'}));
 
         await waitFor(() => expect(trialService.revert).toHaveBeenCalledWith('resource-1'));
@@ -163,7 +161,7 @@ describe('CameraControlPanel', () => {
             message: '自动曝光已完成',
             after: {...metrics, luma: 0.36},
             state: controlledExposureState,
-            active: {auto_exposure: true, auto_focus: false},
+            active: {...inactive, auto_exposure: true},
             converged: true,
             iterations: 4,
             target_luma: 0.35,
@@ -173,7 +171,7 @@ describe('CameraControlPanel', () => {
             message: '已恢复相机原生自动曝光',
             after: metrics,
             state,
-            active: {auto_exposure: false, auto_focus: false},
+            active: inactive,
         });
         render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()} onBeforeAction={onBeforeAction}/>);
 
@@ -205,14 +203,14 @@ describe('CameraControlPanel', () => {
             before: metrics,
             improvement: 500,
             state: controlledFocusState,
-            active: {auto_exposure: false, auto_focus: true},
+            active: {...inactive, auto_focus: true},
         });
         service.restoreFocus.mockResolvedValue({
             action: 'restore_auto_focus',
             message: '已恢复相机原生自动对焦',
             after: metrics,
             state,
-            active: {auto_exposure: false, auto_focus: false},
+            active: inactive,
         });
         render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
 
@@ -229,5 +227,49 @@ describe('CameraControlPanel', () => {
         await waitFor(() => expect(service.restoreFocus).toHaveBeenCalledWith('resource-1'));
         expect(await screen.findByText('已恢复相机原生自动对焦')).toBeInTheDocument();
         expect(focusButton).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('independently toggles auto WDR and auto day/night', async () => {
+        trialService.autoWdr.mockResolvedValue({
+            action: 'auto_wdr',
+            message: '自动宽动态已开启',
+            after: metrics,
+            state: {...state, wdr: {mode: 'auto', level: 50}},
+            active: {...inactive, auto_wdr: true},
+            trial: {...IDLE_TRIAL_FIXTURE, phase: 'trial', dirty: true, active: {...inactive, auto_wdr: true}},
+        } as any);
+        trialService.restoreWdr.mockResolvedValue({
+            action: 'restore_trial_wdr',
+            message: '已恢复试调前的宽动态参数',
+            after: metrics,
+            state,
+            active: inactive,
+            trial: {...IDLE_TRIAL_FIXTURE, phase: 'trial'},
+        } as any);
+        trialService.autoDayNight.mockResolvedValue({
+            action: 'auto_day_night',
+            message: '自动日夜切换已开启',
+            after: metrics,
+            state: {...state, day_night: {mode: 'auto'}},
+            active: {...inactive, auto_day_night: true},
+            trial: {...IDLE_TRIAL_FIXTURE, phase: 'trial', dirty: true, active: {...inactive, auto_day_night: true}},
+        } as any);
+
+        render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
+        await screen.findByText('1800');
+
+        const wdrButton = screen.getByRole('button', {name: '自动宽动态'});
+        const dayNightButton = screen.getByRole('button', {name: '自动日夜'});
+        fireEvent.click(wdrButton);
+        await waitFor(() => expect(trialService.autoWdr).toHaveBeenCalledWith('resource-1'));
+        await waitFor(() => expect(wdrButton).toHaveAttribute('aria-pressed', 'true'));
+
+        fireEvent.click(wdrButton);
+        await waitFor(() => expect(trialService.restoreWdr).toHaveBeenCalledWith('resource-1'));
+        await waitFor(() => expect(wdrButton).toHaveAttribute('aria-pressed', 'false'));
+
+        fireEvent.click(dayNightButton);
+        await waitFor(() => expect(trialService.autoDayNight).toHaveBeenCalledWith('resource-1'));
+        await waitFor(() => expect(dayNightButton).toHaveAttribute('aria-pressed', 'true'));
     });
 });

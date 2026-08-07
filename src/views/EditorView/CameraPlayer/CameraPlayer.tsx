@@ -5,6 +5,7 @@ import {QueueItem} from '../../../store/queue/types';
 import CameraTimeline from '../CameraTimeline/CameraTimeline';
 import {CanvasMultiViewStore} from '../MultiView/CanvasMultiViewStore';
 import CameraControlPanel from './CameraControlPanel';
+import CameraParametersPanel from './CameraParametersPanel';
 import './CameraPlayer.scss';
 
 interface IProps {
@@ -26,6 +27,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     const [isPaused, setIsPaused] = useState(false);
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
     const [controlsOpen, setControlsOpen] = useState(false);
+    const [parametersOpen, setParametersOpen] = useState(false);
     const [canvasLayout, setCanvasLayout] = useState(CanvasMultiViewStore.get().layout);
     const [baselineReady, setBaselineReady] = useState(false);
     const comparisonMode = canvasLayout === '1x2';
@@ -62,6 +64,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     }, [state, isPaused]);
 
     const captureBaseline = useCallback(() => {
+        if (baselineReady) return;
         const image = imageRef.current;
         const canvas = baselineFrameRef.current;
         if (state !== 'playing' || isPaused || !image || !canvas || !image.naturalWidth || !image.naturalHeight) return;
@@ -75,17 +78,13 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
         } catch (_) {
             setBaselineReady(false);
         }
-    }, [isPaused, state]);
+    }, [baselineReady, isPaused, state]);
 
     useEffect(() => {
-        if (!comparisonMode) {
-            setBaselineReady(false);
-            return undefined;
-        }
-        if (state !== 'playing' || isPaused) return undefined;
+        if (!comparisonMode || baselineReady || state !== 'playing' || isPaused) return undefined;
         const frame = window.requestAnimationFrame(captureBaseline);
         return () => window.cancelAnimationFrame(frame);
-    }, [captureBaseline, comparisonMode, isPaused, nonce, state]);
+    }, [baselineReady, captureBaseline, comparisonMode, isPaused, nonce, state]);
 
     const reconnect = () => {
         activePlaybackStartedAtRef.current = null;
@@ -93,7 +92,6 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
         setElapsedSeconds(0);
         setIsPaused(false);
         setState('loading');
-        setBaselineReady(false);
         setNonce(previous => previous + 1);
     };
 
@@ -154,18 +152,33 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                     className={controlsOpen ? 'active' : ''}
                     aria-controls='camera-smart-controls'
                     aria-expanded={controlsOpen}
-                    onClick={() => setControlsOpen(true)}
+                    onClick={() => {
+                        setParametersOpen(false);
+                        setControlsOpen(true);
+                    }}
                 >
                     {chinese ? '智能调节' : 'Smart controls'}
+                </button>
+                <button
+                    type='button'
+                    className={parametersOpen ? 'active' : ''}
+                    aria-controls='camera-parameters-panel'
+                    aria-expanded={parametersOpen}
+                    onClick={() => {
+                        setControlsOpen(false);
+                        setParametersOpen(true);
+                    }}
+                >
+                    {chinese ? '相机参数' : 'Camera parameters'}
                 </button>
                 <button type='button' onClick={reconnect}>{chinese ? '重新连接' : 'Reconnect'}</button>
             </div>
         </div>
         <div className={`CameraPlayerStage ${comparisonMode ? 'comparison' : ''}`}>
-            {comparisonMode && <div className='CameraComparePane original'>
+            <div className={`CameraComparePane original ${comparisonMode ? '' : 'hidden'}`}>
                 <div className='CameraCompareLabel'>
                     <strong>{chinese ? '原始画面' : 'Original'}</strong>
-                    <button type='button' onClick={captureBaseline}>{chinese ? '更新原始画面' : 'Update baseline'}</button>
+                    <span>{baselineReady ? (chinese ? '已锁定' : 'LOCKED') : (chinese ? '保存中' : 'CAPTURING')}</span>
                 </div>
                 <canvas
                     ref={baselineFrameRef}
@@ -175,7 +188,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                 {!baselineReady && <div className='CameraBaselineNotice'>
                     {chinese ? '正在保存调节前画面…' : 'Capturing the pre-adjustment frame…'}
                 </div>}
-            </div>}
+            </div>
             <div className='CameraComparePane effect'>
                 {comparisonMode && <div className='CameraCompareLabel'>
                     <strong>{chinese ? '调节效果' : 'Adjusted result'}</strong>
@@ -214,8 +227,13 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                 {controlsOpen && item.cameraResourceId && <CameraControlPanel
                     resourceId={item.cameraResourceId}
                     language={language}
-                    onBeforeAction={comparisonMode ? captureBaseline : undefined}
+                    onBeforeAction={captureBaseline}
                     onClose={() => setControlsOpen(false)}
+                />}
+                {parametersOpen && item.cameraResourceId && <CameraParametersPanel
+                    resourceId={item.cameraResourceId}
+                    language={language}
+                    onClose={() => setParametersOpen(false)}
                 />}
             </div>
         </div>

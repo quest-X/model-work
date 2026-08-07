@@ -47,6 +47,181 @@
   line-height: 1.55;
 }
 
+.CameraDiscoveryPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border: 1px solid rgba(0, 158, 253, 0.2);
+  border-radius: 7px;
+  background: rgba(0, 158, 253, 0.045);
+  padding: 12px 14px;
+}
+
+.CameraDiscoveryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+
+  > div {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+
+    strong {
+      color: rgba(255, 255, 255, 0.88);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    span {
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+  }
+
+  > button {
+    height: 32px;
+    flex: 0 0 auto;
+    border: 1px solid rgba(0, 158, 253, 0.52);
+    border-radius: 4px;
+    background: rgba(0, 158, 253, 0.16);
+    padding: 0 14px;
+    color: #c8eaff;
+    cursor: pointer;
+    font-size: 11px;
+
+    &:hover:not(:disabled) {
+      background: rgba(0, 158, 253, 0.25);
+    }
+
+    &:disabled {
+      cursor: default;
+      opacity: 0.62;
+    }
+  }
+}
+
+.CameraDiscoverySummary,
+.CameraDiscoveryError,
+.CameraDiscoveryEmpty {
+  border-radius: 4px;
+  padding: 7px 9px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.CameraDiscoverySummary {
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.CameraDiscoveryError {
+  background: rgba(255, 106, 106, 0.08);
+  color: #ffb0b0;
+}
+
+.CameraDiscoveryEmpty {
+  color: rgba(255, 255, 255, 0.48);
+  text-align: center;
+}
+
+.CameraDiscoveryResults {
+  display: flex;
+  max-height: 168px;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+}
+
+.CameraDiscoveryRow {
+  display: grid;
+  grid-template-columns: 8px minmax(170px, 1.4fr) 105px minmax(130px, 1fr) 62px 42px;
+  align-items: center;
+  gap: 8px;
+  min-height: 45px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  background: rgba(18, 18, 18, 0.58);
+  padding: 6px 9px;
+  color: rgba(255, 255, 255, 0.68);
+  cursor: pointer;
+  text-align: left;
+
+  &:hover,
+  &.selected {
+    border-color: rgba(0, 158, 253, 0.48);
+    background: rgba(0, 158, 253, 0.09);
+  }
+
+  code {
+    color: #9bc9ec;
+    font-size: 10px;
+  }
+}
+
+.CameraDiscoveryDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d6a954;
+
+  &.confirmed {
+    background: #5cc980;
+    box-shadow: 0 0 6px rgba(92, 201, 128, 0.46);
+  }
+}
+
+.CameraDiscoveryIdentity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+
+  strong,
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: rgba(255, 255, 255, 0.86);
+    font-size: 11px;
+    font-weight: 550;
+  }
+
+  span {
+    color: rgba(255, 255, 255, 0.46);
+    font-size: 9px;
+  }
+}
+
+.CameraDiscoveryPorts,
+.CameraDiscoveryConfidence,
+.CameraDiscoveryUse {
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.CameraDiscoveryConfidence {
+  color: #a9ddb9;
+}
+
+.CameraDiscoveryUse {
+  color: #81cfff;
+  text-align: right;
+
+  &.remembered {
+    grid-column: 5 / 7;
+    font-weight: 600;
+  }
+}
+
 .CameraForm {
   display: grid;
   grid-template-columns: 120px minmax(170px, 1fr) 120px 120px;
@@ -83,6 +258,7 @@
     padding: 0 9px;
     color: white;
     font-size: 12px;
+
   }
 
   .CameraCheckbox {
@@ -267,6 +443,15 @@
 }
 
 @media (max-width: 760px) {
+  .CameraDiscoveryRow {
+    grid-template-columns: 8px 1fr 92px 38px;
+
+    .CameraDiscoveryPorts,
+    .CameraDiscoveryConfidence {
+      display: none;
+    }
+  }
+
   .CameraForm {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

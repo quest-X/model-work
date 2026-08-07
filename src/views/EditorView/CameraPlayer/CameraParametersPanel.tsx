@@ -492,7 +492,7 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
                 <strong>{chinese ? '相机参数' : 'Camera parameters'}</strong>
                 <span>{advancedExpanded
                     ? (chinese ? '已展开设备当前可读取的全部参数；原始值始终锁定' : 'All currently readable parameters are expanded; originals stay locked')
-                    : (chinese ? '常用调节与画面判断；原始值始终锁定' : 'Everyday tuning and image evaluation; originals stay locked')}</span>
+                    : (chinese ? '常用调参与画面判断；原始值始终锁定' : 'Everyday tuning and image evaluation; originals stay locked')}</span>
             </div>
             <div className='CameraParametersActions'>
                 <span className={`CameraParametersAutoRefresh${loading ? ' loading' : ''}`} role='status'>

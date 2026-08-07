@@ -87,7 +87,7 @@ describe('CameraControlPanel', () => {
         jest.useFakeTimers();
         service.controls
             .mockReset()
-            .mockRejectedValueOnce(new Error('该相机正在执行自动调节，请稍后再试'))
+            .mockRejectedValueOnce(new Error('该相机正在执行自动调参，请稍后再试'))
             .mockResolvedValue({
                 capabilities: {
                     auto_exposure: true,
@@ -110,7 +110,7 @@ describe('CameraControlPanel', () => {
         });
 
         const focusButton = screen.getByRole('button', {name: '自动对焦'});
-        expect(screen.getByText('该相机正在执行自动调节，请稍后再试')).toBeInTheDocument();
+        expect(screen.getByText('该相机正在执行自动调参，请稍后再试')).toBeInTheDocument();
         expect(focusButton).toBeDisabled();
         fireEvent.click(focusButton);
         expect(service.autoFocus).not.toHaveBeenCalled();
@@ -121,7 +121,7 @@ describe('CameraControlPanel', () => {
         });
 
         expect(service.controls).toHaveBeenCalledTimes(2);
-        expect(screen.queryByText('该相机正在执行自动调节，请稍后再试')).not.toBeInTheDocument();
+        expect(screen.queryByText('该相机正在执行自动调参，请稍后再试')).not.toBeInTheDocument();
         expect(screen.queryByText('调试中')).not.toBeInTheDocument();
         expect(focusButton).not.toBeDisabled();
     });

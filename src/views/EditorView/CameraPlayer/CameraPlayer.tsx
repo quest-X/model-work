@@ -157,7 +157,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                         setControlsOpen(true);
                     }}
                 >
-                    {chinese ? '智能调节' : 'Smart controls'}
+                    {chinese ? '智能调参' : 'Smart controls'}
                 </button>
                 <button
                     type='button'
@@ -186,12 +186,12 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                     aria-label={chinese ? `${item.name} 原始画面` : `${item.name} original frame`}
                 />
                 {!baselineReady && <div className='CameraBaselineNotice'>
-                    {chinese ? '正在保存调节前画面…' : 'Capturing the pre-adjustment frame…'}
+                    {chinese ? '正在保存调参前画面…' : 'Capturing the pre-adjustment frame…'}
                 </div>}
             </div>
             <div className='CameraComparePane effect'>
                 {comparisonMode && <div className='CameraCompareLabel'>
-                    <strong>{chinese ? '调节效果' : 'Adjusted result'}</strong>
+                    <strong>{chinese ? '调参效果' : 'Adjusted result'}</strong>
                     <span>LIVE</span>
                 </div>}
                 {state === 'loading' && <div className='CameraPlayerNotice'>
@@ -213,7 +213,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                     key={nonce}
                     src={streamUrl}
                     alt={comparisonMode
-                        ? (chinese ? `${item.name} 调节效果画面` : `${item.name} adjusted live stream`)
+                        ? (chinese ? `${item.name} 调参效果画面` : `${item.name} adjusted live stream`)
                         : (chinese ? `${item.name} 实时画面` : `${item.name} live stream`)}
                     onLoad={() => {
                         if (activePlaybackStartedAtRef.current === null) {

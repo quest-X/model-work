@@ -280,7 +280,7 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
         <div className='CameraControlTitle'>
             <div>
                 <div className='CameraControlTitleHeading'>
-                    <strong>{chinese ? '智能调节' : 'Smart controls'}</strong>
+                    <strong>{chinese ? '智能调参' : 'Smart controls'}</strong>
                     {trial.phase === 'trial' && <span className='CameraDebugBadge'>
                         {chinese ? '调试中' : 'Debugging'}
                     </span>}

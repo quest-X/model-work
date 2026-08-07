@@ -76,7 +76,7 @@ describe('CameraPlayer', () => {
     it('uses Smart controls as a panel launcher instead of an on/off switch', () => {
         render(<CameraPlayer item={item} language={Language.CHINESE}/>);
 
-        const openButton = screen.getByRole('button', {name: '智能调节'});
+        const openButton = screen.getByRole('button', {name: '智能调参'});
         expect(openButton).toHaveAttribute('aria-expanded', 'false');
         expect(screen.queryByRole('button', {name: '关闭相机控制'})).not.toBeInTheDocument();
 
@@ -92,7 +92,7 @@ describe('CameraPlayer', () => {
     it('opens the camera parameter comparison and closes smart controls', () => {
         render(<CameraPlayer item={item} language={Language.CHINESE}/>);
 
-        fireEvent.click(screen.getByRole('button', {name: '智能调节'}));
+        fireEvent.click(screen.getByRole('button', {name: '智能调参'}));
         expect(screen.getByRole('button', {name: '关闭相机控制'})).toBeInTheDocument();
 
         const parametersButton = screen.getByRole('button', {name: '相机参数'});
@@ -127,8 +127,8 @@ describe('CameraPlayer', () => {
         render(<CameraPlayer item={item} language={Language.CHINESE}/>);
 
         expect(screen.getByText('原始画面')).toBeInTheDocument();
-        expect(screen.getByText('调节效果')).toBeInTheDocument();
-        const liveImage = screen.getByRole('img', {name: 'Camera 01 调节效果画面'});
+        expect(screen.getByText('调参效果')).toBeInTheDocument();
+        const liveImage = screen.getByRole('img', {name: 'Camera 01 调参效果画面'});
         Object.defineProperty(liveImage, 'naturalWidth', {configurable: true, value: 640});
         Object.defineProperty(liveImage, 'naturalHeight', {configurable: true, value: 360});
         fireEvent.load(liveImage);
@@ -145,7 +145,7 @@ describe('CameraPlayer', () => {
         expect(screen.queryByRole('button', {name: '更新原始画面'})).not.toBeInTheDocument();
         expect(drawImage).toHaveBeenCalledTimes(1);
 
-        fireEvent.click(screen.getByRole('button', {name: '智能调节'}));
+        fireEvent.click(screen.getByRole('button', {name: '智能调参'}));
         const exposureButton = await screen.findByRole('button', {name: '自动曝光'});
         await waitFor(() => expect(exposureButton).not.toBeDisabled());
         fireEvent.click(exposureButton);

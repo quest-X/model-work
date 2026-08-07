@@ -16,6 +16,7 @@ interface IProps {
 }
 
 type RunningAction = 'probe' | 'exposure' | 'focus' | 'restoreExposure' | 'restoreFocus' | null;
+const DEFAULT_TARGET_LUMA = 0.35;
 
 const percent = (value: number): string => `${Math.round(value * 100)}%`;
 
@@ -30,7 +31,6 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
     const [controls, setControls] = useState<CameraControls | null>(null);
     const [metrics, setMetrics] = useState<CameraImageMetrics | null>(null);
     const [lastResult, setLastResult] = useState<CameraControlResult | null>(null);
-    const [targetLuma, setTargetLuma] = useState(0.35);
     const [running, setRunning] = useState<RunningAction>('probe');
     const [error, setError] = useState('');
 
@@ -84,7 +84,7 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
         try {
             let result: CameraControlResult;
             if (action === 'exposure') {
-                result = await CameraResourceService.autoExposure(resourceId, targetLuma);
+                result = await CameraResourceService.autoExposure(resourceId, DEFAULT_TARGET_LUMA);
             } else if (action === 'focus') {
                 result = await CameraResourceService.autoFocus(resourceId);
             } else if (action === 'restoreExposure') {
@@ -139,18 +139,6 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
                 <div><strong>{chinese ? '自动曝光' : 'Auto exposure'}</strong><span>AEC</span></div>
                 <em>{exposureActive ? (chinese ? '已激活' : 'Active') : (chinese ? '未激活' : 'Inactive')}</em>
             </div>
-            <label className='CameraTargetSlider'>
-                <span>{chinese ? '目标亮度' : 'Target luma'} <b>{percent(targetLuma)}</b></span>
-                <input
-                    type='range'
-                    min='0.18'
-                    max='0.55'
-                    step='0.01'
-                    value={targetLuma}
-                    onChange={event => setTargetLuma(Number(event.target.value))}
-                    disabled={!!running}
-                />
-            </label>
             <div className='CameraCurrentValues'>
                 <span>{chinese ? '快门' : 'Shutter'} <b>{shutter(controls?.state.exposure.shutter_us || 0)}</b></span>
                 <span>{chinese ? '增益' : 'Gain'} <b>{controls?.state.exposure.gain_level ?? '—'}</b></span>

@@ -75,6 +75,8 @@ describe('CameraControlPanel', () => {
         render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()} onBeforeAction={onBeforeAction}/>);
 
         expect(await screen.findByText('1800')).toBeInTheDocument();
+        expect(screen.queryByRole('slider')).not.toBeInTheDocument();
+        expect(screen.queryByText('目标亮度')).not.toBeInTheDocument();
         const exposureButton = screen.getByRole('button', {name: '自动曝光'});
         expect(exposureButton).toHaveAttribute('aria-pressed', 'false');
         expect(screen.queryByRole('button', {name: '恢复相机自动'})).not.toBeInTheDocument();

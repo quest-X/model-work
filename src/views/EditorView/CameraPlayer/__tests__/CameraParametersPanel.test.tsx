@@ -15,6 +15,7 @@ jest.mock('../../../../services/CameraTrialService', () => ({
 
 const snapshot = {
     captured_at: '2026-08-07T02:00:00+00:00',
+    advanced_control_captured_at: '2026-08-07T03:00:00+00:00',
     source: 'connection',
     live: false,
     connection: {scheme: 'http', host: '192.168.10.12', management_port: 80, rtsp_port: 554, channel_id: '102'},
@@ -32,6 +33,12 @@ const snapshot = {
         state: {
             exposure: {mode: 'auto', shutter_us: 10000, gain_level: 20},
             focus: {mode: 'auto', position: 30, relative_position: 30, speed_level: 2},
+            sdk_image: {
+                video_effect: {brightness_level: 50, contrast_level: 45},
+                white_balance: {mode: 'auto', red_gain: 50, blue_gain: 48},
+                enhancement: {power_line_frequency: '50 Hz', defog_mode: 'auto'},
+                lens: {optical_zoom_level: 2.5},
+            },
         },
         metrics: {luma: 0.2, saturation_ratio: 0.01, dark_ratio: 0.4, focus_score: 90, width: 640, height: 360},
     },
@@ -84,6 +91,28 @@ describe('CameraParametersPanel', () => {
         expect(screen.getByText('1/100s (10000 μs)')).toBeInTheDocument();
         expect(screen.getByText('1/200s (5000 μs)')).toBeInTheDocument();
         expect(screen.getAllByText('已变化').length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('keeps common parameters focused and exposes all integrated fields in the advanced tab', async () => {
+        render(<CameraParametersPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
+
+        await screen.findByText('原始参数 · 已锁定');
+        expect(screen.getByRole('tab', {name: /常用参数/})).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByText('曝光与对焦')).toBeInTheDocument();
+        expect(screen.queryByText('设备信息')).not.toBeInTheDocument();
+        expect(screen.queryByText('图像效果（SDK）')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('tab', {name: /全部参数 \/ 高级/}));
+
+        expect(screen.getByRole('tab', {name: /全部参数 \/ 高级/})).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByText('设备信息')).toBeInTheDocument();
+        expect(screen.getByText('图像效果（SDK）')).toBeInTheDocument();
+        expect(screen.getByText('亮度等级')).toBeInTheDocument();
+        expect(screen.getByText('白平衡模式')).toBeInTheDocument();
+        expect(screen.getAllByText('HCNetSDK').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('只读').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('可修改').length).toBeGreaterThan(0);
+        expect(screen.getByText(/新增高级字段的原始值于/)).toBeInTheDocument();
     });
 
     it('automatically refreshes the live side without a manual refresh button', async () => {

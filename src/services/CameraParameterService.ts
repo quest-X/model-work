@@ -5,6 +5,7 @@ import {getExtensionEngineBaseUrl} from '../utils/DefaultBackendUrl';
 export type CameraParameterSnapshot = {
     captured_at: string;
     control_captured_at?: string;
+    advanced_control_captured_at?: string;
     source: 'connection' | 'first_read' | 'live';
     live: boolean;
     connection: {

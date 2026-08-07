@@ -33,20 +33,23 @@ export type CameraSmartControlState = CameraControlState & {
 
 export type CameraSmartActive = CameraTrialStatus['active'];
 
+export type CameraAdvancedParameterValue = string | number | boolean | null;
+export type CameraSdkImageState = Record<string, Record<string, CameraAdvancedParameterValue>>;
+
 export type CameraControlsWithTrial = Omit<CameraControls, 'capabilities' | 'active' | 'state'> & {
     capabilities: CameraControls['capabilities'] & {
         auto_wdr: boolean;
         auto_day_night: boolean;
     };
     active?: CameraSmartActive;
-    state: CameraSmartControlState;
+    state: CameraSmartControlState & {sdk_image?: CameraSdkImageState};
     trial?: CameraTrialStatus;
 };
 
 export type CameraSmartControlResult = Omit<CameraControlResult, 'action' | 'active' | 'state'> & {
     action: CameraControlResult['action'] | 'auto_wdr' | 'auto_day_night' | 'restore_trial_exposure' | 'restore_trial_focus' | 'restore_trial_wdr' | 'restore_trial_day_night' | 'revert_trial' | 'apply_trial';
     active?: CameraSmartActive;
-    state: CameraSmartControlState;
+    state: CameraSmartControlState & {sdk_image?: CameraSdkImageState};
     trial?: CameraTrialStatus;
 };
 

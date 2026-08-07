@@ -1453,7 +1453,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
             {renderPersistentModelState()}
             {renderModelCatalogFilter(orderedModels.length)}
             <div className='ModelResourceList'>
-                {orderedModels.map(renderModelItem)}
+                {orderedModels.map(model => renderModelItem(model))}
             </div>
         </section>;
     };

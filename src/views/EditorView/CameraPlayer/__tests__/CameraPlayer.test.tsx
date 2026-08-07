@@ -7,6 +7,10 @@ import CameraPlayer from '../CameraPlayer';
 jest.mock('../../../../services/CameraResourceService', () => ({
     CameraResourceService: {
         streamUrl: (_resourceId: string, _channelId: string, nonce: number) => `http://camera.test/live?nonce=${nonce}`,
+        controls: () => new Promise(() => undefined),
+        autoExposure: jest.fn(),
+        autoFocus: jest.fn(),
+        restoreExposure: jest.fn(),
     },
 }));
 
@@ -62,7 +66,7 @@ describe('CameraPlayer', () => {
         fireEvent.click(screen.getByRole('button', {name: /播放/}));
         expect(screen.getByRole('img', {name: 'Camera 01 实时画面'})).toBeInTheDocument();
         expect(screen.getByText('连接中')).toBeInTheDocument();
-        expect(screen.getByLabelText('相机直播进度条')).toBeInTheDocument();
+        expect(screen.getByLabelText('相机直播进度条')).toHaveAttribute('height', '80');
     });
 
     it('keeps playback disabled until the first live frame loads', () => {

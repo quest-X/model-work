@@ -3,6 +3,7 @@ import {Language} from '../../../data/LanguageConfig';
 import {CameraResourceService} from '../../../services/CameraResourceService';
 import {QueueItem} from '../../../store/queue/types';
 import CameraTimeline from '../CameraTimeline/CameraTimeline';
+import CameraControlPanel from './CameraControlPanel';
 import './CameraPlayer.scss';
 
 interface IProps {
@@ -22,6 +23,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     const [state, setState] = useState<'loading' | 'playing' | 'error'>('loading');
     const [isPaused, setIsPaused] = useState(false);
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
+    const [controlsOpen, setControlsOpen] = useState(true);
     const streamUrl = useMemo(() => CameraResourceService.streamUrl(
         item.cameraResourceId || '',
         item.cameraChannelId,
@@ -112,6 +114,9 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                 {item.cameraHost && <span>{item.cameraHost}</span>}
                 {item.cameraModel && <span>{item.cameraModel}</span>}
                 {item.cameraChannelId && <span>{chinese ? '通道' : 'Channel'} {item.cameraChannelId}</span>}
+                <button type='button' className={controlsOpen ? 'active' : ''} onClick={() => setControlsOpen(value => !value)}>
+                    {chinese ? '智能调节' : 'Smart controls'}
+                </button>
                 <button type='button' onClick={reconnect}>{chinese ? '重新连接' : 'Reconnect'}</button>
             </div>
         </div>
@@ -143,6 +148,11 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                 }}
                 onError={() => setState('error')}
                 draggable={false}
+            />}
+            {controlsOpen && item.cameraResourceId && <CameraControlPanel
+                resourceId={item.cameraResourceId}
+                language={language}
+                onClose={() => setControlsOpen(false)}
             />}
         </div>
         <CameraTimeline

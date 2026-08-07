@@ -100,6 +100,12 @@
       border-color: rgba(0, 158, 253, 0.55);
       color: #fff;
     }
+
+    &.active {
+      border-color: rgba(0, 158, 253, 0.55);
+      background: rgba(0, 158, 253, 0.13);
+      color: #b9ddf5;
+    }
   }
 }
 

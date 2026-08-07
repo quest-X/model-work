@@ -41,6 +41,53 @@ export type CameraResource = {
     updated_at: string;
 };
 
+export type CameraImageMetrics = {
+    luma: number;
+    saturation_ratio: number;
+    dark_ratio: number;
+    focus_score: number;
+    width: number;
+    height: number;
+};
+
+export type CameraControlState = {
+    exposure: {
+        mode: 'auto' | 'manual';
+        shutter_us: number;
+        gain_level: number;
+    };
+    focus: {
+        mode: 'auto' | 'manual' | 'semi_auto' | 'unknown';
+        position: number;
+        relative_position: number;
+        speed_level: number;
+    };
+};
+
+export type CameraControls = {
+    capabilities: {
+        auto_exposure: boolean;
+        manual_exposure: boolean;
+        exposure_metrics: boolean;
+        auto_focus: boolean;
+        focus_metrics: boolean;
+    };
+    state: CameraControlState;
+    metrics: CameraImageMetrics;
+};
+
+export type CameraControlResult = {
+    action: 'auto_exposure' | 'auto_focus' | 'restore_auto_exposure';
+    message: string;
+    before?: CameraImageMetrics;
+    after: CameraImageMetrics;
+    state: CameraControlState;
+    converged?: boolean;
+    iterations?: number;
+    target_luma?: number;
+    improvement?: number;
+};
+
 const cameraBaseUrl = (): string =>
     `${getExtensionEngineBaseUrl()}/extensions/camera-connect`;
 
@@ -73,6 +120,45 @@ export class CameraResourceService {
             {method: 'DELETE'},
         );
         if (!response.ok && response.status !== 404) throw new Error(await errorDetail(response));
+    }
+
+    public static async controls(resourceId: string): Promise<CameraControls> {
+        const response = await fetch(
+            `${cameraBaseUrl()}/resources/${encodeURIComponent(resourceId)}/controls`,
+        );
+        if (!response.ok) throw new Error(await errorDetail(response));
+        return response.json();
+    }
+
+    public static async autoExposure(resourceId: string, targetLuma: number): Promise<CameraControlResult> {
+        const response = await fetch(
+            `${cameraBaseUrl()}/resources/${encodeURIComponent(resourceId)}/auto-exposure`,
+            {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({target_luma: targetLuma}),
+            },
+        );
+        if (!response.ok) throw new Error(await errorDetail(response));
+        return response.json();
+    }
+
+    public static async autoFocus(resourceId: string): Promise<CameraControlResult> {
+        const response = await fetch(
+            `${cameraBaseUrl()}/resources/${encodeURIComponent(resourceId)}/auto-focus`,
+            {method: 'POST'},
+        );
+        if (!response.ok) throw new Error(await errorDetail(response));
+        return response.json();
+    }
+
+    public static async restoreExposure(resourceId: string): Promise<CameraControlResult> {
+        const response = await fetch(
+            `${cameraBaseUrl()}/resources/${encodeURIComponent(resourceId)}/controls/exposure/restore`,
+            {method: 'POST'},
+        );
+        if (!response.ok) throw new Error(await errorDetail(response));
+        return response.json();
     }
 
     public static snapshotUrl(resourceId: string, channelId?: string): string {

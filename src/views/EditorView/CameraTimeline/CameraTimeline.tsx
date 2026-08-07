@@ -13,6 +13,7 @@ interface IProps {
 }
 
 const WINDOW_SECONDS = 5 * 60;
+const VIDEO_TIMELINE_HEIGHT = 80;
 
 const formatTime = (seconds: number): string => {
     const value = Math.max(0, Math.floor(seconds));
@@ -101,7 +102,7 @@ const CameraTimeline: React.FC<IProps> = ({
         const updateSize = () => {
             const rect = container.getBoundingClientRect();
             canvas.width = rect.width;
-            canvas.height = 60;
+            canvas.height = VIDEO_TIMELINE_HEIGHT;
             drawTimeline();
         };
         updateSize();

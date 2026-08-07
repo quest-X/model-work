@@ -47,6 +47,7 @@ describe('CameraControlPanel', () => {
                 auto_focus: true,
                 focus_metrics: true,
             },
+            active: {auto_exposure: false, auto_focus: false},
             state,
             metrics,
         });
@@ -58,6 +59,7 @@ describe('CameraControlPanel', () => {
             message: '自动曝光已完成',
             after: {...metrics, luma: 0.36},
             state: controlledExposureState,
+            active: {auto_exposure: true, auto_focus: false},
             converged: true,
             iterations: 4,
             target_luma: 0.35,
@@ -67,6 +69,7 @@ describe('CameraControlPanel', () => {
             message: '已恢复相机原生自动曝光',
             after: metrics,
             state,
+            active: {auto_exposure: false, auto_focus: false},
         });
         render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
 
@@ -94,12 +97,14 @@ describe('CameraControlPanel', () => {
             before: metrics,
             improvement: 500,
             state: controlledFocusState,
+            active: {auto_exposure: false, auto_focus: true},
         });
         service.restoreFocus.mockResolvedValue({
             action: 'restore_auto_focus',
             message: '已恢复相机原生自动对焦',
             after: metrics,
             state,
+            active: {auto_exposure: false, auto_focus: false},
         });
         render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
 

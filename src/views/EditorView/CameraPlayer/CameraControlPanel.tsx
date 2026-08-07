@@ -36,7 +36,23 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose}) =
     const applyResult = (result: CameraControlResult) => {
         setLastResult(result);
         setMetrics(result.after);
-        setControls(previous => previous ? {...previous, state: result.state, metrics: result.after} : previous);
+        setControls(previous => previous ? {
+            ...previous,
+            active: result.active ?? {
+                auto_exposure: result.action === 'auto_exposure'
+                    ? true
+                    : result.action === 'restore_auto_exposure'
+                        ? false
+                        : previous.active?.auto_exposure ?? previous.state.exposure.mode === 'manual',
+                auto_focus: result.action === 'auto_focus'
+                    ? true
+                    : result.action === 'restore_auto_focus'
+                        ? false
+                        : previous.active?.auto_focus ?? false,
+            },
+            state: result.state,
+            metrics: result.after,
+        } : previous);
     };
 
     useEffect(() => {
@@ -89,8 +105,8 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose}) =
             : running === 'restoreExposure' || running === 'restoreFocus'
                 ? (chinese ? '正在恢复…' : 'Restoring…')
                 : (chinese ? '正在读取相机能力…' : 'Reading camera controls…');
-    const exposureActive = controls?.state.exposure.mode === 'manual';
-    const focusActive = controls?.state.focus.mode === 'manual';
+    const exposureActive = controls?.active?.auto_exposure ?? controls?.state.exposure.mode === 'manual';
+    const focusActive = controls?.active?.auto_focus ?? false;
 
     return <aside className='CameraControlPanel' id='camera-smart-controls'>
         <div className='CameraControlTitle'>

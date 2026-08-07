@@ -72,6 +72,10 @@ export type CameraControls = {
         auto_focus: boolean;
         focus_metrics: boolean;
     };
+    active?: {
+        auto_exposure: boolean;
+        auto_focus: boolean;
+    };
     state: CameraControlState;
     metrics: CameraImageMetrics;
 };
@@ -79,6 +83,10 @@ export type CameraControls = {
 export type CameraControlResult = {
     action: 'auto_exposure' | 'auto_focus' | 'restore_auto_exposure' | 'restore_auto_focus';
     message: string;
+    active?: {
+        auto_exposure: boolean;
+        auto_focus: boolean;
+    };
     before?: CameraImageMetrics;
     after: CameraImageMetrics;
     state: CameraControlState;

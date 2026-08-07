@@ -128,7 +128,7 @@
 
 .CameraControlButtons {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 7px;
 }
 
@@ -142,7 +142,7 @@
   cursor: pointer;
   font-size: 9px;
 
-  &.primary,
+  &.active,
   &.CameraFocusButton {
     border-color: rgba(0, 158, 253, 0.55);
     background: rgba(0, 158, 253, 0.16);

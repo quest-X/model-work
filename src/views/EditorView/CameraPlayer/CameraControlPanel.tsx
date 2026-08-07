@@ -84,6 +84,7 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose}) =
             : running === 'restore'
                 ? (chinese ? '正在恢复…' : 'Restoring…')
                 : (chinese ? '正在读取相机能力…' : 'Reading camera controls…');
+    const exposureActive = controls?.state.exposure.mode === 'manual';
 
     return <aside className='CameraControlPanel' id='camera-smart-controls'>
         <div className='CameraControlTitle'>
@@ -131,11 +132,16 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose}) =
                 <span>{chinese ? '增益' : 'Gain'} <b>{controls?.state.exposure.gain_level ?? '—'}</b></span>
             </div>
             <div className='CameraControlButtons'>
-                <button type='button' className='primary' disabled={!!running || controls?.capabilities.auto_exposure === false} onClick={() => execute('exposure')}>
-                    {running === 'exposure' ? busyText : (chinese ? '自动曝光' : 'Auto expose')}
-                </button>
-                <button type='button' disabled={!!running} onClick={() => execute('restore')}>
-                    {chinese ? '恢复相机自动' : 'Camera auto'}
+                <button
+                    type='button'
+                    className={exposureActive ? 'active' : ''}
+                    aria-pressed={exposureActive}
+                    disabled={!!running || (!exposureActive && controls?.capabilities.auto_exposure === false)}
+                    onClick={() => execute(exposureActive ? 'restore' : 'exposure')}
+                >
+                    {running === 'exposure' || running === 'restore'
+                        ? busyText
+                        : (chinese ? '自动曝光' : 'Auto exposure')}
                 </button>
             </div>
         </section>

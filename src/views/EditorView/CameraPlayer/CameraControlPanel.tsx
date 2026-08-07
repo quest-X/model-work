@@ -16,8 +16,8 @@ interface IProps {
     onBeforeAction?: () => void;
 }
 
-type RunningAction = 'probe' | 'exposure' | 'focus' | 'wdr' | 'dayNight' | 'restoreExposure' | 'restoreFocus' | 'restoreWdr' | 'restoreDayNight' | 'revertTrial' | 'close' | null;
-type ToggleAction = Exclude<RunningAction, 'probe' | 'revertTrial' | 'close' | null>;
+type RunningAction = 'probe' | 'exposure' | 'focus' | 'wdr' | 'dayNight' | 'restoreExposure' | 'restoreFocus' | 'restoreWdr' | 'restoreDayNight' | 'close' | null;
+type ToggleAction = Exclude<RunningAction, 'probe' | 'close' | null>;
 
 const DEFAULT_TARGET_LUMA = 0.35;
 const CONTROL_RETRY_INTERVAL_MS = 1500;
@@ -142,20 +142,6 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
         }
     };
 
-    const revertTrial = async () => {
-        if (running) return;
-        setRunning('revertTrial');
-        setError('');
-        setLastResult(null);
-        try {
-            applyResult(await CameraTrialService.revert(resourceId));
-        } catch (reason) {
-            setError(reason instanceof Error ? reason.message : String(reason));
-        } finally {
-            setRunning(null);
-        }
-    };
-
     const closePanel = async () => {
         if (running && running !== 'probe') return;
         if (trialRef.current.phase !== 'trial') {
@@ -184,7 +170,7 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
                     ? (chinese ? '正在开启自动日夜…' : 'Enabling auto day/night…')
                     : running?.startsWith('restore')
                         ? (chinese ? '正在恢复…' : 'Restoring…')
-                        : running === 'revertTrial' || running === 'close'
+                        : running === 'close'
                             ? (chinese ? '正在撤销试调…' : 'Reverting trial…')
                             : (chinese ? '正在读取相机能力…' : 'Reading camera controls…');
     const active = controls?.active ?? INACTIVE;
@@ -362,12 +348,6 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
                     {card.label}
                 </button>
             </section>)}
-        </div>
-
-        <div className='CameraTrialActions single'>
-            <button type='button' disabled={!!running || trial.phase !== 'trial'} onClick={revertTrial}>
-                {running === 'revertTrial' ? busyText : (chinese ? '撤销全部试调' : 'Revert all trials')}
-            </button>
         </div>
 
         {running && running !== 'probe' && <div className='CameraControlProgress'><span/><b>{busyText}</b></div>}

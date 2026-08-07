@@ -149,7 +149,7 @@ describe('CameraControlPanel', () => {
         fireEvent.click(exposureButton);
         expect(await screen.findByText('试调中 · 临时生效')).toBeInTheDocument();
         expect(screen.queryByRole('button', {name: '应用到相机'})).not.toBeInTheDocument();
-        expect(screen.getByRole('button', {name: '撤销全部试调'})).toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: '撤销全部试调'})).not.toBeInTheDocument();
     });
 
     it('shows professional abbreviations and camera parameters for all four controls', async () => {

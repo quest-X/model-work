@@ -177,39 +177,6 @@
   b { color: rgba(255, 255, 255, 0.68); font-size: 8px; font-weight: 500; }
 }
 
-.CameraTrialActions {
-  position: sticky;
-  z-index: 1;
-  bottom: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background: #202020;
-  padding: 11px 13px;
-
-  button {
-    height: 32px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.035);
-    color: rgba(255, 255, 255, 0.72);
-    cursor: pointer;
-    font-size: 9px;
-
-    &.primary {
-      border-color: rgba(0, 158, 253, 0.62);
-      background: rgba(0, 158, 253, 0.16);
-      color: #b9e2fb;
-    }
-
-    &:hover:not(:disabled) { border-color: $primaryColor; color: #fff; }
-    &:disabled { cursor: not-allowed; opacity: 0.35; }
-  }
-
-  &.single { grid-template-columns: 1fr; }
-}
-
 .CameraControlMessage {
   display: flex;
   flex-direction: column;
@@ -244,7 +211,7 @@
 
 .CameraControlProgress {
   position: sticky;
-  bottom: 55px;
+  bottom: 0;
   background: #202020;
   b { font-weight: 500; }
 }

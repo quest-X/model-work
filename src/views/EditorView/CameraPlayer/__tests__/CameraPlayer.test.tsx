@@ -1,7 +1,8 @@
 import React from 'react';
-import {fireEvent, render, screen} from '@testing-library/react';
+import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {Language} from '../../../../data/LanguageConfig';
 import {QueueItem} from '../../../../store/queue/types';
+import {CanvasMultiViewStore} from '../../MultiView/CanvasMultiViewStore';
 import CameraPlayer from '../CameraPlayer';
 
 jest.mock('../../../../services/CameraResourceService', () => ({
@@ -44,11 +45,15 @@ describe('CameraPlayer', () => {
     } as QueueItem;
 
     beforeEach(() => {
+        act(() => CanvasMultiViewStore.setLayout('1x1'));
         drawImage.mockClear();
         jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
     });
 
-    afterEach(() => jest.restoreAllMocks());
+    afterEach(() => {
+        act(() => CanvasMultiViewStore.setLayout('1x1'));
+        jest.restoreAllMocks();
+    });
 
     it('uses Smart controls as a panel launcher instead of an on/off switch', () => {
         render(<CameraPlayer item={item} language={Language.CHINESE}/>);
@@ -64,6 +69,24 @@ describe('CameraPlayer', () => {
         fireEvent.click(screen.getByRole('button', {name: '关闭相机控制'}));
         expect(openButton).toHaveAttribute('aria-expanded', 'false');
         expect(screen.queryByRole('button', {name: '关闭相机控制'})).not.toBeInTheDocument();
+    });
+
+    it('captures the original frame on the left and keeps the adjusted stream live on the right', async () => {
+        act(() => CanvasMultiViewStore.setLayout('1x2'));
+        render(<CameraPlayer item={item} language={Language.CHINESE}/>);
+
+        expect(screen.getByText('原始画面')).toBeInTheDocument();
+        expect(screen.getByText('调节效果')).toBeInTheDocument();
+        const liveImage = screen.getByRole('img', {name: 'Camera 01 调节效果画面'});
+        Object.defineProperty(liveImage, 'naturalWidth', {configurable: true, value: 640});
+        Object.defineProperty(liveImage, 'naturalHeight', {configurable: true, value: 360});
+        fireEvent.load(liveImage);
+
+        await waitFor(() => expect(drawImage).toHaveBeenCalledWith(liveImage, 0, 0, 640, 360));
+        await waitFor(() => expect(screen.getByLabelText('Camera 01 原始画面')).toHaveClass('visible'));
+
+        fireEvent.click(screen.getByRole('button', {name: '更新原始画面'}));
+        expect(drawImage).toHaveBeenCalledTimes(2);
     });
 
     it('freezes the current frame on pause and reconnects to the latest frame on resume', () => {

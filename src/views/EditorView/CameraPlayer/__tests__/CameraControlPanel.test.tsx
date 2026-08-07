@@ -54,6 +54,7 @@ describe('CameraControlPanel', () => {
     });
 
     it('uses one button to enable automatic exposure and restore the camera default', async () => {
+        const onBeforeAction = jest.fn();
         service.autoExposure.mockResolvedValue({
             action: 'auto_exposure',
             message: '自动曝光已完成',
@@ -71,7 +72,7 @@ describe('CameraControlPanel', () => {
             state,
             active: {auto_exposure: false, auto_focus: false},
         });
-        render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
+        render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()} onBeforeAction={onBeforeAction}/>);
 
         expect(await screen.findByText('1800')).toBeInTheDocument();
         const exposureButton = screen.getByRole('button', {name: '自动曝光'});
@@ -80,11 +81,13 @@ describe('CameraControlPanel', () => {
         fireEvent.click(exposureButton);
 
         await waitFor(() => expect(service.autoExposure).toHaveBeenCalledWith('resource-1', 0.35));
+        expect(onBeforeAction).toHaveBeenCalledTimes(1);
         expect(await screen.findByText('自动曝光已完成')).toBeInTheDocument();
         expect(exposureButton).toHaveAttribute('aria-pressed', 'true');
 
         fireEvent.click(exposureButton);
         await waitFor(() => expect(service.restoreExposure).toHaveBeenCalledWith('resource-1'));
+        expect(onBeforeAction).toHaveBeenCalledTimes(1);
         expect(await screen.findByText('已恢复相机原生自动曝光')).toBeInTheDocument();
         expect(exposureButton).toHaveAttribute('aria-pressed', 'false');
     });

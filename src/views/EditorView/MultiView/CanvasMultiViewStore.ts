@@ -1,4 +1,4 @@
-export type CanvasViewLayout = '1x1' | '2x2' | '1x3';
+export type CanvasViewLayout = '1x1' | '1x2' | '2x2' | '1x3';
 export type CanvasViewKind = 'original' | 'heatmap' | 'features' | 'attention';
 
 export interface CanvasMultiViewState {
@@ -8,6 +8,7 @@ export interface CanvasMultiViewState {
 
 const defaults: Record<CanvasViewLayout, CanvasViewKind[]> = {
     '1x1': ['original'],
+    '1x2': ['original', 'original'],
     '2x2': ['original', 'heatmap', 'features', 'attention'],
     '1x3': ['original', 'heatmap', 'features', 'attention'],
 };

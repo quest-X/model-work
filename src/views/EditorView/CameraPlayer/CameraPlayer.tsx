@@ -1,8 +1,9 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Language} from '../../../data/LanguageConfig';
 import {CameraResourceService} from '../../../services/CameraResourceService';
 import {QueueItem} from '../../../store/queue/types';
 import CameraTimeline from '../CameraTimeline/CameraTimeline';
+import {CanvasMultiViewStore} from '../MultiView/CanvasMultiViewStore';
 import CameraControlPanel from './CameraControlPanel';
 import './CameraPlayer.scss';
 
@@ -15,6 +16,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     const chinese = language === Language.CHINESE;
     const imageRef = useRef<HTMLImageElement>(null);
     const frozenFrameRef = useRef<HTMLCanvasElement>(null);
+    const baselineFrameRef = useRef<HTMLCanvasElement>(null);
     const sourceIdentity = `${item.cameraResourceId || ''}:${item.cameraChannelId || ''}`;
     const previousSourceIdentityRef = useRef(sourceIdentity);
     const activePlaybackStartedAtRef = useRef<number | null>(null);
@@ -24,11 +26,16 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     const [isPaused, setIsPaused] = useState(false);
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
     const [controlsOpen, setControlsOpen] = useState(false);
+    const [canvasLayout, setCanvasLayout] = useState(CanvasMultiViewStore.get().layout);
+    const [baselineReady, setBaselineReady] = useState(false);
+    const comparisonMode = canvasLayout === '1x2';
     const streamUrl = useMemo(() => CameraResourceService.streamUrl(
         item.cameraResourceId || '',
         item.cameraChannelId,
         nonce,
     ), [item.cameraResourceId, item.cameraChannelId, nonce]);
+
+    useEffect(() => CanvasMultiViewStore.subscribe(value => setCanvasLayout(value.layout)), []);
 
     useEffect(() => {
         if (previousSourceIdentityRef.current === sourceIdentity) return;
@@ -38,6 +45,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
         setElapsedSeconds(0);
         setIsPaused(false);
         setState('loading');
+        setBaselineReady(false);
         setNonce(previous => previous + 1);
     }, [sourceIdentity]);
 
@@ -53,12 +61,39 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
         return () => window.clearInterval(timer);
     }, [state, isPaused]);
 
+    const captureBaseline = useCallback(() => {
+        const image = imageRef.current;
+        const canvas = baselineFrameRef.current;
+        if (state !== 'playing' || isPaused || !image || !canvas || !image.naturalWidth || !image.naturalHeight) return;
+        const context = canvas.getContext('2d');
+        if (!context) return;
+        try {
+            canvas.width = image.naturalWidth;
+            canvas.height = image.naturalHeight;
+            context.drawImage(image, 0, 0, canvas.width, canvas.height);
+            setBaselineReady(true);
+        } catch (_) {
+            setBaselineReady(false);
+        }
+    }, [isPaused, state]);
+
+    useEffect(() => {
+        if (!comparisonMode) {
+            setBaselineReady(false);
+            return undefined;
+        }
+        if (state !== 'playing' || isPaused) return undefined;
+        const frame = window.requestAnimationFrame(captureBaseline);
+        return () => window.cancelAnimationFrame(frame);
+    }, [captureBaseline, comparisonMode, isPaused, nonce, state]);
+
     const reconnect = () => {
         activePlaybackStartedAtRef.current = null;
         accumulatedPlaybackSecondsRef.current = 0;
         setElapsedSeconds(0);
         setIsPaused(false);
         setState('loading');
+        setBaselineReady(false);
         setNonce(previous => previous + 1);
     };
 
@@ -126,40 +161,63 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                 <button type='button' onClick={reconnect}>{chinese ? '重新连接' : 'Reconnect'}</button>
             </div>
         </div>
-        <div className='CameraPlayerStage'>
-            {state === 'loading' && <div className='CameraPlayerNotice'>
-                <span className='CameraPlayerSpinner'/>
-                {chinese ? '正在建立实时画面…' : 'Opening live stream…'}
+        <div className={`CameraPlayerStage ${comparisonMode ? 'comparison' : ''}`}>
+            {comparisonMode && <div className='CameraComparePane original'>
+                <div className='CameraCompareLabel'>
+                    <strong>{chinese ? '原始画面' : 'Original'}</strong>
+                    <button type='button' onClick={captureBaseline}>{chinese ? '更新原始画面' : 'Update baseline'}</button>
+                </div>
+                <canvas
+                    ref={baselineFrameRef}
+                    className={baselineReady ? 'CameraBaselineFrame visible' : 'CameraBaselineFrame'}
+                    aria-label={chinese ? `${item.name} 原始画面` : `${item.name} original frame`}
+                />
+                {!baselineReady && <div className='CameraBaselineNotice'>
+                    {chinese ? '正在保存调节前画面…' : 'Capturing the pre-adjustment frame…'}
+                </div>}
             </div>}
-            {state === 'error' && <div className='CameraPlayerNotice error'>
-                <strong>{chinese ? '实时画面连接失败' : 'Unable to open live stream'}</strong>
-                <span>{chinese ? '请检查相机网络、RTSP 端口和码流通道。' : 'Check the camera network, RTSP port, and stream channel.'}</span>
-                <button type='button' onClick={reconnect}>{chinese ? '重试' : 'Retry'}</button>
-            </div>}
-            <canvas
-                ref={frozenFrameRef}
-                className={isPaused ? 'CameraFrozenFrame visible' : 'CameraFrozenFrame'}
-                aria-label={chinese ? `${item.name} 暂停画面` : `${item.name} paused frame`}
-            />
-            {!isPaused && <img
-                ref={imageRef}
-                key={nonce}
-                src={streamUrl}
-                alt={chinese ? `${item.name} 实时画面` : `${item.name} live stream`}
-                onLoad={() => {
-                    if (activePlaybackStartedAtRef.current === null) {
-                        activePlaybackStartedAtRef.current = performance.now();
-                    }
-                    setState('playing');
-                }}
-                onError={() => setState('error')}
-                draggable={false}
-            />}
-            {controlsOpen && item.cameraResourceId && <CameraControlPanel
-                resourceId={item.cameraResourceId}
-                language={language}
-                onClose={() => setControlsOpen(false)}
-            />}
+            <div className='CameraComparePane effect'>
+                {comparisonMode && <div className='CameraCompareLabel'>
+                    <strong>{chinese ? '调节效果' : 'Adjusted result'}</strong>
+                    <span>LIVE</span>
+                </div>}
+                {state === 'loading' && <div className='CameraPlayerNotice'>
+                    <span className='CameraPlayerSpinner'/>
+                    {chinese ? '正在建立实时画面…' : 'Opening live stream…'}
+                </div>}
+                {state === 'error' && <div className='CameraPlayerNotice error'>
+                    <strong>{chinese ? '实时画面连接失败' : 'Unable to open live stream'}</strong>
+                    <span>{chinese ? '请检查相机网络、RTSP 端口和码流通道。' : 'Check the camera network, RTSP port, and stream channel.'}</span>
+                    <button type='button' onClick={reconnect}>{chinese ? '重试' : 'Retry'}</button>
+                </div>}
+                <canvas
+                    ref={frozenFrameRef}
+                    className={isPaused ? 'CameraFrozenFrame visible' : 'CameraFrozenFrame'}
+                    aria-label={chinese ? `${item.name} 暂停画面` : `${item.name} paused frame`}
+                />
+                {!isPaused && <img
+                    ref={imageRef}
+                    key={nonce}
+                    src={streamUrl}
+                    alt={comparisonMode
+                        ? (chinese ? `${item.name} 调节效果画面` : `${item.name} adjusted live stream`)
+                        : (chinese ? `${item.name} 实时画面` : `${item.name} live stream`)}
+                    onLoad={() => {
+                        if (activePlaybackStartedAtRef.current === null) {
+                            activePlaybackStartedAtRef.current = performance.now();
+                        }
+                        setState('playing');
+                    }}
+                    onError={() => setState('error')}
+                    draggable={false}
+                />}
+                {controlsOpen && item.cameraResourceId && <CameraControlPanel
+                    resourceId={item.cameraResourceId}
+                    language={language}
+                    onBeforeAction={comparisonMode ? captureBaseline : undefined}
+                    onClose={() => setControlsOpen(false)}
+                />}
+            </div>
         </div>
         <CameraTimeline
             language={language}

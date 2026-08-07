@@ -12,6 +12,7 @@ interface IProps {
     resourceId: string;
     language: Language;
     onClose: () => void;
+    onBeforeAction?: () => void;
 }
 
 type RunningAction = 'probe' | 'exposure' | 'focus' | 'restoreExposure' | 'restoreFocus' | null;
@@ -24,7 +25,7 @@ const shutter = (microseconds: number): string => {
     return denominator > 1 ? `1/${denominator}s` : `${(microseconds / 1_000_000).toFixed(2)}s`;
 };
 
-const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose}) => {
+const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, onBeforeAction}) => {
     const chinese = language === Language.CHINESE;
     const [controls, setControls] = useState<CameraControls | null>(null);
     const [metrics, setMetrics] = useState<CameraImageMetrics | null>(null);
@@ -76,6 +77,7 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose}) =
 
     const execute = async (action: Exclude<RunningAction, 'probe' | null>) => {
         if (running) return;
+        if (action === 'exposure' || action === 'focus') onBeforeAction?.();
         setRunning(action);
         setError('');
         setLastResult(null);

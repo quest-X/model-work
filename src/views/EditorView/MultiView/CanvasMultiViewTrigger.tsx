@@ -14,6 +14,7 @@ export const CanvasMultiViewTrigger = () => {
             onChange={event => CanvasMultiViewStore.setLayout(event.target.value as CanvasViewLayout)}
         >
             <option value='1x1'>1 × 1</option>
+            <option value='1x2'>1 × 2</option>
             <option value='2x2'>2 × 2</option>
             <option value='1x3'>1 × 3</option>
         </select>

@@ -1,11 +1,16 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {Language} from '../../../data/LanguageConfig';
 import {
     CameraControlResult,
-    CameraControls,
     CameraImageMetrics,
     CameraResourceService,
 } from '../../../services/CameraResourceService';
+import {
+    CameraControlsWithTrial,
+    CameraTrialResult,
+    CameraTrialService,
+    CameraTrialStatus,
+} from '../../../services/CameraTrialService';
 import './CameraControlPanel.scss';
 
 interface IProps {
@@ -15,8 +20,17 @@ interface IProps {
     onBeforeAction?: () => void;
 }
 
-type RunningAction = 'probe' | 'exposure' | 'focus' | 'restoreExposure' | 'restoreFocus' | null;
+type RunningAction = 'probe' | 'exposure' | 'focus' | 'restoreExposure' | 'restoreFocus' | 'revertTrial' | 'applyTrial' | 'close' | null;
+type ToggleAction = 'exposure' | 'focus' | 'restoreExposure' | 'restoreFocus';
 const DEFAULT_TARGET_LUMA = 0.35;
+const IDLE_TRIAL: CameraTrialStatus = {
+    phase: 'idle',
+    dirty: false,
+    active: {auto_exposure: false, auto_focus: false},
+    started_at: null,
+    expires_at: null,
+    applied_at: null,
+};
 
 const percent = (value: number): string => `${Math.round(value * 100)}%`;
 
@@ -28,17 +42,21 @@ const shutter = (microseconds: number): string => {
 
 const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, onBeforeAction}) => {
     const chinese = language === Language.CHINESE;
-    const [controls, setControls] = useState<CameraControls | null>(null);
+    const [controls, setControls] = useState<CameraControlsWithTrial | null>(null);
     const [metrics, setMetrics] = useState<CameraImageMetrics | null>(null);
-    const [lastResult, setLastResult] = useState<CameraControlResult | null>(null);
+    const [lastResult, setLastResult] = useState<CameraTrialResult | CameraControlResult | null>(null);
     const [running, setRunning] = useState<RunningAction>('probe');
     const [error, setError] = useState('');
+    const trialRef = useRef<CameraTrialStatus>(IDLE_TRIAL);
 
-    const applyResult = (result: CameraControlResult) => {
+    const applyResult = (result: CameraTrialResult | CameraControlResult) => {
+        const trial = 'trial' in result && result.trial ? result.trial : trialRef.current;
+        trialRef.current = trial;
         setLastResult(result);
         setMetrics(result.after);
         setControls(previous => previous ? {
             ...previous,
+            trial,
             active: result.active ?? {
                 auto_exposure: result.action === 'auto_exposure'
                     ? true
@@ -63,6 +81,7 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
             .then(value => {
                 if (!active) return;
                 setControls(value);
+                trialRef.current = (value as CameraControlsWithTrial).trial ?? IDLE_TRIAL;
                 setMetrics(value.metrics);
                 setError('');
             })
@@ -75,7 +94,13 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
         return () => { active = false; };
     }, [resourceId]);
 
-    const execute = async (action: Exclude<RunningAction, 'probe' | null>) => {
+    useEffect(() => () => {
+        if (trialRef.current.phase === 'trial') {
+            void CameraTrialService.revert(resourceId, true).catch(() => undefined);
+        }
+    }, [resourceId]);
+
+    const execute = async (action: ToggleAction) => {
         if (running) return;
         if (action === 'exposure' || action === 'focus') onBeforeAction?.();
         setRunning(action);
@@ -100,23 +125,77 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
         }
     };
 
+    const finishTrial = async (action: 'revertTrial' | 'applyTrial') => {
+        if (running) return;
+        setRunning(action);
+        setError('');
+        setLastResult(null);
+        try {
+            const result = action === 'revertTrial'
+                ? await CameraTrialService.revert(resourceId)
+                : await CameraTrialService.apply(resourceId);
+            applyResult(result);
+        } catch (reason) {
+            setError(reason instanceof Error ? reason.message : String(reason));
+        } finally {
+            setRunning(null);
+        }
+    };
+
+    const closePanel = async () => {
+        if (running && running !== 'probe') return;
+        if (trialRef.current.phase !== 'trial') {
+            onClose();
+            return;
+        }
+        setRunning('close');
+        setError('');
+        try {
+            const result = await CameraTrialService.revert(resourceId);
+            applyResult(result);
+            onClose();
+        } catch (reason) {
+            setError(reason instanceof Error ? reason.message : String(reason));
+        } finally {
+            setRunning(null);
+        }
+    };
+
     const busyText = running === 'exposure'
         ? (chinese ? '正在自动曝光…' : 'Auto exposing…')
         : running === 'focus'
             ? (chinese ? '正在自动对焦…' : 'Auto focusing…')
             : running === 'restoreExposure' || running === 'restoreFocus'
                 ? (chinese ? '正在恢复…' : 'Restoring…')
+                : running === 'revertTrial' || running === 'close'
+                    ? (chinese ? '正在撤销试调…' : 'Reverting trial…')
+                    : running === 'applyTrial'
+                        ? (chinese ? '正在应用到相机…' : 'Applying to camera…')
                 : (chinese ? '正在读取相机能力…' : 'Reading camera controls…');
-    const exposureActive = controls?.active?.auto_exposure ?? controls?.state.exposure.mode === 'manual';
+    const exposureActive = controls?.active?.auto_exposure ?? false;
     const focusActive = controls?.active?.auto_focus ?? false;
+    const trial = controls?.trial ?? IDLE_TRIAL;
 
     return <aside className='CameraControlPanel' id='camera-smart-controls'>
         <div className='CameraControlTitle'>
             <div>
                 <strong>{chinese ? '智能调节' : 'Smart controls'}</strong>
-                <span>{chinese ? '中央重点测光与清晰度分析' : 'Center-weighted metering and focus analysis'}</span>
+                <span>{chinese ? '先试调对比，确认后再固定到相机' : 'Preview first, then apply fixed settings'}</span>
             </div>
-            <button type='button' onClick={onClose} aria-label={chinese ? '关闭相机控制' : 'Close camera controls'}>×</button>
+            <button type='button' disabled={!!running && running !== 'probe'} onClick={closePanel} aria-label={chinese ? '关闭相机控制' : 'Close camera controls'}>×</button>
+        </div>
+
+        <div className={`CameraTrialState ${trial.phase}`}>
+            <strong>{trial.phase === 'trial'
+                ? (chinese ? '试调中 · 尚未确认' : 'Trial active · not applied')
+                : trial.phase === 'applied'
+                    ? (chinese ? '已应用到相机' : 'Applied to camera')
+                    : (chinese ? '测试模式 · 尚未修改' : 'Test mode · unchanged')}</strong>
+            <span>{trial.phase === 'trial'
+                ? (chinese ? '关闭面板或撤销试调会恢复原参数' : 'Close or revert to restore the original settings')
+                : trial.phase === 'applied'
+                    ? (chinese ? '当前效果已作为固定参数保留' : 'The current result is retained as fixed settings')
+                    : (chinese ? '自动调节只会先进入可撤销试调' : 'Automatic controls start as a reversible trial')}</span>
         </div>
 
         {running === 'probe' && <div className='CameraControlLoading'><span/>{busyText}</div>}
@@ -180,6 +259,24 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
                 </button>
             </div>
         </section>
+
+        <div className='CameraTrialActions'>
+            <button
+                type='button'
+                disabled={!!running || trial.phase !== 'trial'}
+                onClick={() => finishTrial('revertTrial')}
+            >
+                {running === 'revertTrial' ? busyText : (chinese ? '撤销试调' : 'Revert trial')}
+            </button>
+            <button
+                type='button'
+                className='primary'
+                disabled={!!running || trial.phase !== 'trial' || !trial.dirty}
+                onClick={() => finishTrial('applyTrial')}
+            >
+                {running === 'applyTrial' ? busyText : (chinese ? '应用到相机' : 'Apply to camera')}
+            </button>
+        </div>
 
         {running && running !== 'probe' && <div className='CameraControlProgress'><span/><b>{busyText}</b></div>}
     </aside>;

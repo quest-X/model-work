@@ -44,6 +44,29 @@
     line-height: 20px;
 
     &:hover { color: #fff; }
+    &:disabled { cursor: wait; opacity: 0.35; }
+  }
+}
+
+.CameraTrialState {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  padding: 9px 13px;
+
+  strong { color: rgba(255, 255, 255, 0.72); font-size: 10px; font-weight: 600; }
+  span { color: rgba(255, 255, 255, 0.4); font-size: 8px; }
+
+  &.trial {
+    background: rgba(218, 148, 46, 0.12);
+    strong { color: #f0bd70; }
+  }
+
+  &.applied {
+    background: rgba(52, 176, 94, 0.13);
+    strong { color: #8bd7a5; }
   }
 }
 
@@ -135,6 +158,37 @@
   &:disabled { cursor: wait; opacity: 0.45; }
 }
 
+.CameraTrialActions {
+  position: sticky;
+  z-index: 1;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: #202020;
+  padding: 11px 13px;
+
+  button {
+    height: 32px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.035);
+    color: rgba(255, 255, 255, 0.72);
+    cursor: pointer;
+    font-size: 9px;
+
+    &.primary {
+      border-color: rgba(0, 158, 253, 0.62);
+      background: rgba(0, 158, 253, 0.16);
+      color: #b9e2fb;
+    }
+
+    &:hover:not(:disabled) { border-color: $primaryColor; color: #fff; }
+    &:disabled { cursor: not-allowed; opacity: 0.35; }
+  }
+}
+
 .CameraControlMessage {
   display: flex;
   flex-direction: column;
@@ -169,7 +223,7 @@
 
 .CameraControlProgress {
   position: sticky;
-  bottom: 0;
+  bottom: 55px;
   background: #202020;
   b { font-weight: 500; }
 }

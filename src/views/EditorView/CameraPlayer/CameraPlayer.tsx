@@ -15,6 +15,7 @@ interface IProps {
 
 const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     const chinese = language === Language.CHINESE;
+    const cameraDisplayName = item.cameraHost || item.name;
     const imageRef = useRef<HTMLImageElement>(null);
     const frozenFrameRef = useRef<HTMLCanvasElement>(null);
     const baselineFrameRef = useRef<HTMLCanvasElement>(null);
@@ -138,13 +139,12 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
         <div className='CameraPlayerHeader'>
             <div className='CameraPlayerIdentity'>
                 <span className={`CameraLiveDot ${isPaused ? 'paused' : state}`}/>
-                <strong>{item.name}</strong>
+                <strong>{cameraDisplayName}</strong>
                 <span className={`CameraLiveBadge ${isPaused ? 'paused' : ''}`}>
                     {isPaused ? (chinese ? '已暂停' : 'PAUSED') : (state === 'playing' ? 'LIVE' : (chinese ? '连接中' : 'CONNECTING'))}
                 </span>
             </div>
             <div className='CameraPlayerMeta'>
-                {item.cameraHost && <span>{item.cameraHost}</span>}
                 {item.cameraModel && <span>{item.cameraModel}</span>}
                 {item.cameraChannelId && <span>{chinese ? '通道' : 'Channel'} {item.cameraChannelId}</span>}
                 <button

@@ -48,6 +48,7 @@
 }
 
 .CameraDiscoveryPanel {
+  --camera-status-column-width: 84px;
   display: flex;
   flex-direction: column;
   gap: 9px;
@@ -83,12 +84,13 @@
   }
 
   > button {
+    width: var(--camera-status-column-width);
     height: 32px;
     flex: 0 0 auto;
     border: 1px solid rgba(0, 158, 253, 0.52);
     border-radius: 4px;
     background: rgba(0, 158, 253, 0.16);
-    padding: 0 14px;
+    padding: 0;
     color: #c8eaff;
     cursor: pointer;
     font-size: 11px;
@@ -134,6 +136,15 @@
   flex-direction: column;
   gap: 5px;
   overflow-y: auto;
+}
+
+.CameraConnectedDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 3px;
+  border-top: 1px solid rgba(0, 158, 253, 0.18);
+  padding-top: 12px;
 }
 
 .CameraDiscoveryRow {
@@ -200,24 +211,27 @@
 }
 
 .CameraDiscoveryPorts,
-.CameraDiscoveryConfidence,
-.CameraDiscoveryUse {
+.CameraDiscoveryStatus {
   overflow: hidden;
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.CameraDiscoveryConfidence {
-  color: #a9ddb9;
-}
+.CameraDiscoveryStatus {
+  width: var(--camera-status-column-width);
+  grid-column: 5 / 7;
+  justify-self: end;
+  margin-right: -9px;
+  text-align: center;
 
-.CameraDiscoveryUse {
-  color: #81cfff;
-  text-align: right;
+  &.saved {
+    color: #72dca0;
+    font-weight: 600;
+  }
 
-  &.remembered {
-    grid-column: 5 / 7;
+  &.disconnected {
+    color: #81cfff;
     font-weight: 600;
   }
 }
@@ -444,11 +458,14 @@
 
 @media (max-width: 760px) {
   .CameraDiscoveryRow {
-    grid-template-columns: 8px 1fr 92px 38px;
+    grid-template-columns: 8px 1fr 92px 70px;
 
-    .CameraDiscoveryPorts,
-    .CameraDiscoveryConfidence {
+    .CameraDiscoveryPorts {
       display: none;
+    }
+
+    .CameraDiscoveryStatus {
+      grid-column: 4;
     }
   }
 

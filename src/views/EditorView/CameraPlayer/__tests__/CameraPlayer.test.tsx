@@ -64,6 +64,15 @@ describe('CameraPlayer', () => {
         jest.restoreAllMocks();
     });
 
+    it('shows the camera IP beside the live status without repeating it in metadata', () => {
+        const {container} = render(<CameraPlayer item={item} language={Language.CHINESE}/>);
+
+        expect(container.querySelector('.CameraPlayerIdentity strong')).toHaveTextContent('192.168.10.12');
+        expect(container.querySelector('.CameraPlayerIdentity strong')).not.toHaveTextContent('Camera 01');
+        expect(container.querySelector('.CameraPlayerMeta')).not.toHaveTextContent('192.168.10.12');
+        expect(container.querySelector('.CameraPlayerMeta')).toHaveTextContent('DS-2CD2686FWDA2-IZS');
+    });
+
     it('uses Smart controls as a panel launcher instead of an on/off switch', () => {
         render(<CameraPlayer item={item} language={Language.CHINESE}/>);
 

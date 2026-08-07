@@ -95,6 +95,19 @@ describe('CameraParametersPanel', () => {
         expect(screen.getAllByText('已变化').length).toBeGreaterThanOrEqual(3);
     });
 
+    it('keeps the first-read source label without showing a persistent legacy notice', async () => {
+        (CameraParameterService.compare as jest.Mock).mockResolvedValue({
+            original: {...snapshot, source: 'first_read'},
+            current: {...snapshot, source: 'live', live: true},
+            changed_paths: [],
+        });
+
+        render(<CameraParametersPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
+
+        expect(await screen.findByText(/首次读取快照/)).toBeInTheDocument();
+        expect(screen.queryByText(/该相机早于参数快照功能创建/)).not.toBeInTheDocument();
+    });
+
     it('shows common parameters by default and expands all parameters from the bottom', async () => {
         render(<CameraParametersPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
 
@@ -105,6 +118,7 @@ describe('CameraParametersPanel', () => {
         expect(screen.queryByText('图像效果（SDK）')).not.toBeInTheDocument();
         const expandButton = screen.getByRole('button', {name: /展开全部参数/});
         expect(expandButton).toHaveAttribute('aria-expanded', 'false');
+        expect(screen.queryByText(/当前显示 .* 项常用参数/)).not.toBeInTheDocument();
 
         fireEvent.click(expandButton);
 

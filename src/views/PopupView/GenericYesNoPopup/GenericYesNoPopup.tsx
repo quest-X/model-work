@@ -17,6 +17,7 @@ interface IProps {
     onReject?: () => any;
     skipRejectButton?: boolean;
     disableRejectButton?: boolean;
+    footerContent?: React.ReactNode;
 }
 
 export const GenericYesNoPopup: React.FC<IProps> = (
@@ -30,7 +31,8 @@ export const GenericYesNoPopup: React.FC<IProps> = (
         rejectLabel,
         onReject,
         skipRejectButton,
-        disableRejectButton
+        disableRejectButton,
+        footerContent
     }) => {
 
     const [status, setMountStatus] = useState(false);
@@ -52,7 +54,8 @@ export const GenericYesNoPopup: React.FC<IProps> = (
             <div className='Content'>
                 {renderContent()}
             </div>
-            <div className='Footer'>
+            <div className={`Footer${footerContent ? ' withContent' : ''}`}>
+                {footerContent && <div className='FooterContent'>{footerContent}</div>}
                 {!skipRejectButton && <TextButton
                     label={rejectLabel ? rejectLabel : texts.cancel}
                     onClick={onReject}

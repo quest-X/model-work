@@ -481,14 +481,6 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
     const visibleSections = useMemo(() => advancedExpanded
         ? [...commonSections, ...advancedSections]
         : commonSections, [advancedExpanded, commonSections, advancedSections]);
-    const commonParameterCount = useMemo(
-        () => sections.filter(section => section.common).reduce((count, section) => count + section.rows.length, 0),
-        [sections],
-    );
-    const advancedParameterCount = useMemo(
-        () => sections.reduce((count, section) => count + section.rows.length, 0),
-        [sections],
-    );
     const changed = useMemo(() => new Set(comparison?.changed_paths || []), [comparison]);
     const isChanged = (path: string) => path.split('|').some(candidate => candidate === 'connection'
         ? Array.from(changed).some(item => item.startsWith('connection.'))
@@ -527,11 +519,6 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
                 </div>
             </div>
 
-            {comparison.original.source === 'first_read' && <div className='CameraParametersMessage notice'>
-                {chinese
-                    ? '该相机早于参数快照功能创建；原始值从本功能首次读取时开始保存。'
-                    : 'This camera predates parameter snapshots; its baseline starts at the first parameter read.'}
-            </div>}
             {advancedExpanded && comparison.original.advanced_control_captured_at && <div className='CameraParametersMessage notice'>
                 {chinese
                     ? `新增高级字段的原始值于 ${time(comparison.original.advanced_control_captured_at)} 首次锁定，已有原始字段未被覆盖。`
@@ -612,14 +599,9 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
                     aria-expanded={advancedExpanded}
                     onClick={() => setAdvancedExpanded(expanded => !expanded)}
                 >
-                    <span>
-                        <strong>{advancedExpanded
-                            ? (chinese ? '收起全部参数' : 'Collapse all parameters')
-                            : (chinese ? '展开全部参数' : 'Expand all parameters')}</strong>
-                        <small>{advancedExpanded
-                            ? (chinese ? `收起后仅显示 ${commonParameterCount} 项常用参数` : `Collapse to ${commonParameterCount} common parameters`)
-                            : (chinese ? `当前显示 ${commonParameterCount} 项常用参数，共 ${advancedParameterCount} 项` : `${commonParameterCount} common parameters shown, ${advancedParameterCount} total`)}</small>
-                    </span>
+                    <strong>{advancedExpanded
+                        ? (chinese ? '收起全部参数' : 'Collapse all parameters')
+                        : (chinese ? '展开全部参数' : 'Expand all parameters')}</strong>
                     <i aria-hidden='true'>{advancedExpanded ? '⌃' : '⌄'}</i>
                 </button>
             </div>

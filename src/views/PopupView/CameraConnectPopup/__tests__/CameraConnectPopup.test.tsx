@@ -5,9 +5,10 @@ import {CameraResourceService} from '../../../../services/CameraResourceService'
 import {CameraConnectPopup} from '../CameraConnectPopup';
 
 jest.mock('../../GenericYesNoPopup/GenericYesNoPopup', () => ({
-    GenericYesNoPopup: ({title, renderContent, acceptLabel, onAccept, disableAcceptButton, rejectLabel, onReject}: any) => <div>
+    GenericYesNoPopup: ({title, renderContent, acceptLabel, onAccept, disableAcceptButton, rejectLabel, onReject, footerContent}: any) => <div>
         <h1>{title}</h1>
         {renderContent()}
+        {footerContent}
         <button onClick={onAccept} disabled={disableAcceptButton}>{acceptLabel}</button>
         <button onClick={onReject}>{rejectLabel}</button>
     </div>,
@@ -62,9 +63,12 @@ describe('CameraConnectPopup LAN discovery', () => {
             json: async () => ({
                 status: 'success',
                 device: savedResource.device,
-                channels: [],
-                snapshot_channel: '101',
-                playback_channel: '101',
+                channels: [
+                    {id: '101', name: 'Main', enabled: true, width: 3840, height: 2160, rtsp_url: 'rtsp://camera/101'},
+                    {id: '102', name: 'Sub', enabled: true, width: 640, height: 360, rtsp_url: 'rtsp://camera/102'},
+                ],
+                snapshot_channel: '102',
+                playback_channel: '102',
             }),
         }) as jest.Mock;
         (CameraResourceService.discover as jest.Mock).mockResolvedValue({
@@ -123,7 +127,8 @@ describe('CameraConnectPopup LAN discovery', () => {
         expect(ports[0]).toHaveValue(80);
         expect(ports[1]).toHaveValue(554);
         expect(screen.queryByText('已记住')).not.toBeInTheDocument();
-        expect(screen.getByText('填入表单')).toBeInTheDocument();
+        expect(screen.getByText('已保存')).toBeInTheDocument();
+        expect(screen.queryByText('填入表单')).not.toBeInTheDocument();
         expect(screen.queryByText('已记住此相机')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', {name: '使用已保存连接'})).not.toBeInTheDocument();
         expect(screen.getByLabelText('用户名')).toBeEnabled();
@@ -133,6 +138,17 @@ describe('CameraConnectPopup LAN discovery', () => {
         fireEvent.change(screen.getByLabelText('用户名'), {target: {value: 'edited-operator'}});
         fireEvent.click(screen.getByRole('button', {name: '连接'}));
         await waitFor(() => expect(screen.getByText('相机连接成功')).toBeInTheDocument());
+        expect(screen.getByLabelText('播放通道')).toHaveValue('101');
+        const successBanner = screen.getByText('相机连接成功');
+        const protocolSelect = screen.getByLabelText('协议');
+        const confirmButton = screen.getByRole('button', {name: '确认'});
+        const connectedDetails = document.querySelector('.CameraConnectedDetails');
+        expect(successBanner.closest('.CameraForm')).toBeNull();
+        expect(successBanner.nextElementSibling).toHaveClass('CameraForm');
+        expect(successBanner.compareDocumentPosition(protocolSelect) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(successBanner.compareDocumentPosition(confirmButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(connectedDetails).not.toBeNull();
+        expect(connectedDetails?.closest('.CameraDiscoveryPanel')).not.toBeNull();
         fireEvent.click(screen.getByRole('button', {name: '确认'}));
 
         await waitFor(() => expect(CameraResourceService.update).toHaveBeenCalledWith(
@@ -141,6 +157,7 @@ describe('CameraConnectPopup LAN discovery', () => {
                 username: 'edited-operator',
                 password: 'saved-camera-password',
                 host: savedResource.host,
+                channel_id: '101',
             }),
         ));
         await waitFor(() => expect(CameraResourceService.open).toHaveBeenCalledWith(savedResource, []));
@@ -155,7 +172,9 @@ describe('CameraConnectPopup LAN discovery', () => {
         fireEvent.click(screen.getByText('North gate').closest('button') as HTMLButtonElement);
 
         expect(screen.getByPlaceholderText('192.168.10.64')).toHaveValue('192.168.10.12');
-        expect(screen.getByText('已确认')).toBeInTheDocument();
+        expect(screen.getByPlaceholderText('admin')).toHaveValue('');
+        expect(screen.getByPlaceholderText('123456')).toHaveValue('');
+        expect(screen.getByText('未连接')).toBeInTheDocument();
         expect(screen.getByRole('button', {name: '连接'})).toBeDisabled();
     });
 });

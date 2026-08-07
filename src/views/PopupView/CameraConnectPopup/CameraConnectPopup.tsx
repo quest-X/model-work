@@ -53,7 +53,7 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
     const [host, setHost] = useState('');
     const [port, setPort] = useState('80');
     const [rtspPort, setRtspPort] = useState('554');
-    const [username, setUsername] = useState('admin');
+    const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [verifyTls, setVerifyTls] = useState(false);
     const [connecting, setConnecting] = useState(false);
@@ -154,7 +154,7 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
         setHost(resource.host);
         setPort(String(resource.port));
         setRtspPort(String(resource.rtsp_port));
-        setUsername('admin');
+        setUsername('');
         setPassword('');
         setVerifyTls(false);
         setResult(null);
@@ -191,6 +191,8 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
         setScheme(camera.scheme);
         setPort(String(camera.port));
         setRtspPort(String(camera.rtsp_port));
+        setUsername('');
+        setPassword('');
         setVerifyTls(false);
         setResult(null);
         setError('');
@@ -219,7 +221,11 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
             if (!response.ok) throw new Error(await readError(response));
             const connected = await response.json() as CameraConnectResult;
             setResult(connected);
-            setChannelId(connected.playback_channel || connected.snapshot_channel || connected.channels[0]?.id || '101');
+            const availableChannels = new Set(connected.channels.map(channel => channel.id));
+            const savedChannel = savedResource?.channel_id;
+            setChannelId(savedChannel && availableChannels.has(savedChannel)
+                ? savedChannel
+                : connected.playback_channel || connected.snapshot_channel || connected.channels[0]?.id || '101');
             setResourceName(savedResource?.name || connected.device.name || connected.device.model || host.trim());
         } catch (connectionError) {
             setError(connectionError instanceof Error ? connectionError.message : String(connectionError));
@@ -281,6 +287,10 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
                     : 'Connect with Hikvision ISAPI Digest. Confirmed settings are remembered and filled into the editable form when the camera is selected again.'}
             </div>
 
+            {result && <div className='CameraBanner success CameraConnectionSuccess'>
+                {chinese ? '相机连接成功' : 'Camera connected'}
+            </div>}
+
             <div className='CameraForm'>
                 <label>
                     <span>{chinese ? '协议' : 'Protocol'}</span>
@@ -319,6 +329,7 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
                     <input
                         value={username}
                         autoComplete='username'
+                        placeholder='admin'
                         onChange={event => setUsername(event.target.value)}
                     />
                 </label>
@@ -328,6 +339,7 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
                         type='password'
                         value={password}
                         autoComplete='current-password'
+                        placeholder='123456'
                         onChange={event => setPassword(event.target.value)}
                     />
                 </label>
@@ -387,31 +399,17 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
                                     <span className='CameraDiscoveryPorts'>
                                         {camera.open_ports.length ? `${chinese ? '端口' : 'Ports'} ${camera.open_ports.join(' / ')}` : 'ONVIF'}
                                     </span>
-                                    {remembered
-                                        ? <span className='CameraDiscoveryUse remembered'>
-                                            {chinese ? '填入表单' : 'Fill form'}
-                                        </span>
-                                        : <>
-                                            <span className='CameraDiscoveryConfidence'>
-                                                {camera.confidence === 'confirmed'
-                                                    ? (chinese ? '已确认' : 'Confirmed')
-                                                    : (chinese ? '疑似相机' : 'Probable')}
-                                            </span>
-                                            <span className='CameraDiscoveryUse'>
-                                                {chinese ? '选择' : 'Select'}
-                                            </span>
-                                        </>}
+                                    <span className={`CameraDiscoveryStatus ${remembered ? 'saved' : 'disconnected'}`}>
+                                        {remembered
+                                            ? (chinese ? '已保存' : 'Saved')
+                                            : (chinese ? '未连接' : 'Not connected')}
+                                    </span>
                                 </button>;
                             })}
                         </div>}
                 </>}
-            </section>
-
-            {error && <div className='CameraBanner error'>{error}</div>}
-            {result && <>
-                <div className='CameraBanner success'>
-                    {chinese ? '相机连接成功' : 'Camera connected'}
-                </div>
+                {error && <div className='CameraBanner error'>{error}</div>}
+                {result && <div className='CameraConnectedDetails'>
                 <div className='CameraDeviceGrid'>
                     <div><span>{chinese ? '名称' : 'Name'}</span><strong>{result.device.name || '—'}</strong></div>
                     <div><span>{chinese ? '型号' : 'Model'}</span><strong>{result.device.model || '—'}</strong></div>
@@ -436,7 +434,11 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
                         <span>{chinese ? '资源名称' : 'Resource name'}</span>
                         <input value={resourceName} onChange={event => setResourceName(event.target.value)} maxLength={128}/>
                     </label>
-                    <select value={channelId} onChange={event => setChannelId(event.target.value)}>
+                    <select
+                        aria-label={chinese ? '播放通道' : 'Playback channel'}
+                        value={channelId}
+                        onChange={event => setChannelId(event.target.value)}
+                    >
                         {(result.channels.length ? result.channels : [{id: '101'} as CameraChannel]).map(channel =>
                             <option key={channel.id} value={channel.id}>{chinese ? '通道' : 'Channel'} {channel.id}</option>)}
                     </select>
@@ -445,7 +447,8 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
                     </button>
                 </div>
                 {previewUrl && <img className='CameraPreview' src={previewUrl} alt={chinese ? '相机抓图预览' : 'Camera snapshot'}/>}
-            </>}
+                </div>}
+            </section>
         </div>
     );
 

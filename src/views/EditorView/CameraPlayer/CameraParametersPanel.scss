@@ -3,9 +3,9 @@
   z-index: 6;
   top: 12px;
   right: 12px;
-  bottom: 12px;
   display: flex;
   width: min(720px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
   min-width: 520px;
   flex-direction: column;
   overflow: hidden;
@@ -82,7 +82,7 @@
 
 .CameraParametersBody {
   min-height: 0;
-  flex: 1;
+  flex: 0 1 auto;
   overflow: auto;
   padding: 12px 14px 18px;
 }
@@ -113,40 +113,32 @@
 }
 
 .CameraParametersExpand {
-  margin-top: 12px;
+  margin-top: 8px;
 
   button {
     display: flex;
     width: 100%;
-    min-height: 44px;
+    min-height: 30px;
     box-sizing: border-box;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    border: 1px solid rgba(0, 158, 253, 0.38);
-    border-radius: 5px;
-    background: rgba(0, 158, 253, 0.07);
-    padding: 8px 12px;
-    color: #c9ebff;
+    justify-content: center;
+    gap: 6px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    padding: 6px 10px;
+    color: rgba(255, 255, 255, 0.58);
     cursor: pointer;
-    text-align: left;
+    text-align: center;
 
     &:hover {
-      border-color: rgba(0, 158, 253, 0.65);
-      background: rgba(0, 158, 253, 0.12);
+      background: rgba(255, 255, 255, 0.04);
+      color: rgba(255, 255, 255, 0.82);
     }
   }
 
-  span {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 2px;
-  }
-
   strong { font-size: 10px; font-weight: 600; }
-  small { color: rgba(255, 255, 255, 0.42); font-size: 8px; }
-  i { color: #7fd0ff; font-size: 15px; font-style: normal; }
+  i { color: inherit; font-size: 11px; font-style: normal; }
 }
 
 .CameraParametersMessage {

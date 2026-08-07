@@ -116,29 +116,50 @@
   margin-top: 8px;
 
   button {
+    position: relative;
     display: flex;
     width: 100%;
-    min-height: 30px;
+    min-height: 32px;
     box-sizing: border-box;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    border: 0;
+    border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: 3px;
-    background: transparent;
-    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.055);
+    padding: 7px 34px;
     color: rgba(255, 255, 255, 0.58);
     cursor: pointer;
     text-align: center;
 
     &:hover {
-      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.085);
       color: rgba(255, 255, 255, 0.82);
+    }
+
+    &:focus-visible {
+      outline: 1px solid rgba(255, 255, 255, 0.28);
+      outline-offset: 1px;
     }
   }
 
-  strong { font-size: 10px; font-weight: 600; }
-  i { color: inherit; font-size: 11px; font-style: normal; }
+  strong { font-size: 10px; font-weight: 600; line-height: 16px; }
+
+  i {
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    display: flex;
+    width: 12px;
+    height: 16px;
+    align-items: center;
+    justify-content: center;
+    transform: translateY(-50%);
+    color: inherit;
+    font-size: 11px;
+    font-style: normal;
+    line-height: 1;
+  }
 }
 
 .CameraParametersMessage {

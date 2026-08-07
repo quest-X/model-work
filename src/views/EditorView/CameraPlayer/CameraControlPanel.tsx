@@ -279,27 +279,15 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, on
     return <aside className='CameraControlPanel' id='camera-smart-controls'>
         <div className='CameraControlTitle'>
             <div>
-                <strong>{chinese ? '智能调节' : 'Smart controls'}</strong>
+                <div className='CameraControlTitleHeading'>
+                    <strong>{chinese ? '智能调节' : 'Smart controls'}</strong>
+                    {trial.phase === 'trial' && <span className='CameraDebugBadge'>
+                        {chinese ? '调试中' : 'Debugging'}
+                    </span>}
+                </div>
                 <span>{chinese ? '四项独立试调；到相机参数确认下发' : 'Four independent trials; confirm apply in Camera parameters'}</span>
             </div>
             <button type='button' disabled={!!running && running !== 'probe'} onClick={closePanel} aria-label={chinese ? '关闭相机控制' : 'Close camera controls'}>×</button>
-        </div>
-
-        <div className={`CameraTrialState ${trial.phase}`}>
-            <strong>{!controls
-                ? (error
-                    ? (chinese ? '状态读取失败 · 正在重试' : 'State unavailable · retrying')
-                    : (chinese ? '正在读取相机状态' : 'Reading camera state'))
-                : trial.phase === 'trial'
-                ? (chinese ? '试调中 · 临时生效' : 'Trial active · temporary')
-                : trial.phase === 'applied'
-                    ? (chinese ? '已在相机参数中确认下发' : 'Applied from Camera parameters')
-                    : (chinese ? '测试模式 · 尚未修改' : 'Test mode · unchanged')}</strong>
-            <span>{!controls
-                ? (chinese ? '相机忙碌时会自动重试，读取成功后才能操作' : 'Retries automatically while the camera is busy; controls unlock after a successful read')
-                : trial.phase === 'trial'
-                ? (chinese ? '可逐项取消或撤销全部；切换面板不会丢失试调' : 'Disable one by one or revert all; switching panels keeps the trial')
-                : (chinese ? '点击任一按钮开始可撤销试调' : 'Select any control to start a reversible trial')}</span>
         </div>
 
         {running === 'probe' && <div className='CameraControlLoading'><span/>{busyText}</div>}

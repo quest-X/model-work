@@ -110,7 +110,7 @@ describe('CameraControlPanel', () => {
         });
 
         const focusButton = screen.getByRole('button', {name: '自动对焦'});
-        expect(screen.getByText('状态读取失败 · 正在重试')).toBeInTheDocument();
+        expect(screen.getByText('该相机正在执行自动调节，请稍后再试')).toBeInTheDocument();
         expect(focusButton).toBeDisabled();
         fireEvent.click(focusButton);
         expect(service.autoFocus).not.toHaveBeenCalled();
@@ -121,7 +121,8 @@ describe('CameraControlPanel', () => {
         });
 
         expect(service.controls).toHaveBeenCalledTimes(2);
-        expect(screen.getByText('测试模式 · 尚未修改')).toBeInTheDocument();
+        expect(screen.queryByText('该相机正在执行自动调节，请稍后再试')).not.toBeInTheDocument();
+        expect(screen.queryByText('调试中')).not.toBeInTheDocument();
         expect(focusButton).not.toBeDisabled();
     });
 
@@ -143,11 +144,12 @@ describe('CameraControlPanel', () => {
         } as any);
         render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
 
-        await screen.findByText('测试模式 · 尚未修改');
+        await screen.findByText('1800');
         const exposureButton = screen.getByRole('button', {name: '自动曝光'});
         await waitFor(() => expect(exposureButton).not.toBeDisabled());
         fireEvent.click(exposureButton);
-        expect(await screen.findByText('试调中 · 临时生效')).toBeInTheDocument();
+        expect(await screen.findByText('调试中')).toHaveClass('CameraDebugBadge');
+        expect(screen.queryByText('试调中 · 临时生效')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', {name: '应用到相机'})).not.toBeInTheDocument();
         expect(screen.queryByRole('button', {name: '撤销全部试调'})).not.toBeInTheDocument();
     });
@@ -211,7 +213,7 @@ describe('CameraControlPanel', () => {
         });
         render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={onClose}/>);
 
-        await screen.findByText('试调中 · 临时生效');
+        await screen.findByText('调试中');
         fireEvent.click(screen.getByRole('button', {name: '关闭相机控制'}));
 
         await waitFor(() => expect(trialService.revert).toHaveBeenCalledWith('resource-1'));

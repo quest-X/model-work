@@ -10,6 +10,7 @@ jest.mock('../../../../services/CameraResourceService', () => ({
         autoExposure: jest.fn(),
         autoFocus: jest.fn(),
         restoreExposure: jest.fn(),
+        restoreFocus: jest.fn(),
     },
 }));
 
@@ -29,6 +30,10 @@ const state = {
 const controlledExposureState = {
     ...state,
     exposure: {...state.exposure, mode: 'manual' as const},
+};
+const controlledFocusState = {
+    ...state,
+    focus: {...state.focus, mode: 'manual' as const},
 };
 
 describe('CameraControlPanel', () => {
@@ -81,21 +86,35 @@ describe('CameraControlPanel', () => {
         expect(exposureButton).toHaveAttribute('aria-pressed', 'false');
     });
 
-    it('runs one-push autofocus and reports the focus delta', async () => {
+    it('independently enables autofocus and restores the camera default', async () => {
         service.autoFocus.mockResolvedValue({
             action: 'auto_focus',
             message: '自动对焦已完成',
             after: {...metrics, focus_score: 2300},
             before: metrics,
             improvement: 500,
+            state: controlledFocusState,
+        });
+        service.restoreFocus.mockResolvedValue({
+            action: 'restore_auto_focus',
+            message: '已恢复相机原生自动对焦',
+            after: metrics,
             state,
         });
         render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
 
         await screen.findByText('1800');
-        fireEvent.click(screen.getByRole('button', {name: '开始自动对焦'}));
+        const focusButton = screen.getByRole('button', {name: '自动对焦'});
+        expect(focusButton).toHaveAttribute('aria-pressed', 'false');
+        fireEvent.click(focusButton);
 
         await waitFor(() => expect(service.autoFocus).toHaveBeenCalledWith('resource-1'));
         expect(await screen.findByText('清晰度变化: +500')).toBeInTheDocument();
+        expect(focusButton).toHaveAttribute('aria-pressed', 'true');
+
+        fireEvent.click(focusButton);
+        await waitFor(() => expect(service.restoreFocus).toHaveBeenCalledWith('resource-1'));
+        expect(await screen.findByText('已恢复相机原生自动对焦')).toBeInTheDocument();
+        expect(focusButton).toHaveAttribute('aria-pressed', 'false');
     });
 });

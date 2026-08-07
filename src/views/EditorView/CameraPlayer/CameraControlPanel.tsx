@@ -14,7 +14,7 @@ interface IProps {
     onClose: () => void;
 }
 
-type RunningAction = 'probe' | 'exposure' | 'focus' | 'restore' | null;
+type RunningAction = 'probe' | 'exposure' | 'focus' | 'restoreExposure' | 'restoreFocus' | null;
 
 const percent = (value: number): string => `${Math.round(value * 100)}%`;
 
@@ -64,11 +64,16 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose}) =
         setError('');
         setLastResult(null);
         try {
-            const result = action === 'exposure'
-                ? await CameraResourceService.autoExposure(resourceId, targetLuma)
-                : action === 'focus'
-                    ? await CameraResourceService.autoFocus(resourceId)
-                    : await CameraResourceService.restoreExposure(resourceId);
+            let result: CameraControlResult;
+            if (action === 'exposure') {
+                result = await CameraResourceService.autoExposure(resourceId, targetLuma);
+            } else if (action === 'focus') {
+                result = await CameraResourceService.autoFocus(resourceId);
+            } else if (action === 'restoreExposure') {
+                result = await CameraResourceService.restoreExposure(resourceId);
+            } else {
+                result = await CameraResourceService.restoreFocus(resourceId);
+            }
             applyResult(result);
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : String(reason));
@@ -81,10 +86,11 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose}) =
         ? (chinese ? '正在自动曝光…' : 'Auto exposing…')
         : running === 'focus'
             ? (chinese ? '正在自动对焦…' : 'Auto focusing…')
-            : running === 'restore'
+            : running === 'restoreExposure' || running === 'restoreFocus'
                 ? (chinese ? '正在恢复…' : 'Restoring…')
                 : (chinese ? '正在读取相机能力…' : 'Reading camera controls…');
     const exposureActive = controls?.state.exposure.mode === 'manual';
+    const focusActive = controls?.state.focus.mode === 'manual';
 
     return <aside className='CameraControlPanel' id='camera-smart-controls'>
         <div className='CameraControlTitle'>
@@ -113,7 +119,7 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose}) =
         <section className='CameraControlSection'>
             <div className='CameraControlSectionHeader'>
                 <div><strong>{chinese ? '自动曝光' : 'Auto exposure'}</strong><span>AEC</span></div>
-                <em>{controls?.state.exposure.mode === 'manual' ? (chinese ? '已锁定' : 'Locked') : (chinese ? '相机自动' : 'Camera auto')}</em>
+                <em>{exposureActive ? (chinese ? '已激活' : 'Active') : (chinese ? '未激活' : 'Inactive')}</em>
             </div>
             <label className='CameraTargetSlider'>
                 <span>{chinese ? '目标亮度' : 'Target luma'} <b>{percent(targetLuma)}</b></span>
@@ -137,9 +143,9 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose}) =
                     className={exposureActive ? 'active' : ''}
                     aria-pressed={exposureActive}
                     disabled={!!running || (!exposureActive && controls?.capabilities.auto_exposure === false)}
-                    onClick={() => execute(exposureActive ? 'restore' : 'exposure')}
+                    onClick={() => execute(exposureActive ? 'restoreExposure' : 'exposure')}
                 >
-                    {running === 'exposure' || running === 'restore'
+                    {running === 'exposure' || running === 'restoreExposure'
                         ? busyText
                         : (chinese ? '自动曝光' : 'Auto exposure')}
                 </button>
@@ -149,14 +155,24 @@ const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose}) =
         <section className='CameraControlSection'>
             <div className='CameraControlSectionHeader'>
                 <div><strong>{chinese ? '自动对焦' : 'Auto focus'}</strong><span>AF</span></div>
-                <em>{controls?.state.focus.mode === 'manual' ? (chinese ? '手动' : 'Manual') : (chinese ? '设备一键聚焦' : 'One-push')}</em>
+                <em>{focusActive ? (chinese ? '已激活' : 'Active') : (chinese ? '未激活' : 'Inactive')}</em>
             </div>
             <p>{chinese
                 ? '触发镜头自动搜索清晰位置，并用 Tenengrad 指标验证结果。'
                 : 'Runs lens one-push focus and verifies the result with a Tenengrad score.'}</p>
-            <button type='button' className='CameraFocusButton' disabled={!!running || controls?.capabilities.auto_focus === false} onClick={() => execute('focus')}>
-                {running === 'focus' ? busyText : (chinese ? '开始自动对焦' : 'Start auto focus')}
-            </button>
+            <div className='CameraControlButtons'>
+                <button
+                    type='button'
+                    className={focusActive ? 'active' : ''}
+                    aria-pressed={focusActive}
+                    disabled={!!running || (!focusActive && controls?.capabilities.auto_focus === false)}
+                    onClick={() => execute(focusActive ? 'restoreFocus' : 'focus')}
+                >
+                    {running === 'focus' || running === 'restoreFocus'
+                        ? busyText
+                        : (chinese ? '自动对焦' : 'Auto focus')}
+                </button>
+            </div>
         </section>
 
         {running && running !== 'probe' && <div className='CameraControlProgress'><span/><b>{busyText}</b></div>}

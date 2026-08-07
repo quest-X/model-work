@@ -132,8 +132,7 @@
   gap: 7px;
 }
 
-.CameraControlButtons button,
-.CameraFocusButton {
+.CameraControlButtons button {
   height: 31px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 4px;
@@ -142,8 +141,7 @@
   cursor: pointer;
   font-size: 9px;
 
-  &.active,
-  &.CameraFocusButton {
+  &.active {
     border-color: rgba(0, 158, 253, 0.55);
     background: rgba(0, 158, 253, 0.16);
     color: #b9e2fb;
@@ -152,8 +150,6 @@
   &:hover:not(:disabled) { border-color: $primaryColor; color: #fff; }
   &:disabled { cursor: wait; opacity: 0.45; }
 }
-
-.CameraFocusButton { width: 100%; }
 
 .CameraControlMessage {
   display: flex;

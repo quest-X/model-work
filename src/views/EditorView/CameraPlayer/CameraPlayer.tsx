@@ -119,11 +119,9 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                     className={controlsOpen ? 'active' : ''}
                     aria-controls='camera-smart-controls'
                     aria-expanded={controlsOpen}
-                    onClick={() => setControlsOpen(value => !value)}
+                    onClick={() => setControlsOpen(true)}
                 >
-                    {controlsOpen
-                        ? (chinese ? '关闭智能调节' : 'Close smart controls')
-                        : (chinese ? '打开智能调节' : 'Open smart controls')}
+                    {chinese ? '智能调节' : 'Smart controls'}
                 </button>
                 <button type='button' onClick={reconnect}>{chinese ? '重新连接' : 'Reconnect'}</button>
             </div>

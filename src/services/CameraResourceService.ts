@@ -77,7 +77,7 @@ export type CameraControls = {
 };
 
 export type CameraControlResult = {
-    action: 'auto_exposure' | 'auto_focus' | 'restore_auto_exposure';
+    action: 'auto_exposure' | 'auto_focus' | 'restore_auto_exposure' | 'restore_auto_focus';
     message: string;
     before?: CameraImageMetrics;
     after: CameraImageMetrics;
@@ -155,6 +155,15 @@ export class CameraResourceService {
     public static async restoreExposure(resourceId: string): Promise<CameraControlResult> {
         const response = await fetch(
             `${cameraBaseUrl()}/resources/${encodeURIComponent(resourceId)}/controls/exposure/restore`,
+            {method: 'POST'},
+        );
+        if (!response.ok) throw new Error(await errorDetail(response));
+        return response.json();
+    }
+
+    public static async restoreFocus(resourceId: string): Promise<CameraControlResult> {
+        const response = await fetch(
+            `${cameraBaseUrl()}/resources/${encodeURIComponent(resourceId)}/controls/focus/restore`,
             {method: 'POST'},
         );
         if (!response.ok) throw new Error(await errorDetail(response));

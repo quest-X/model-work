@@ -506,19 +506,6 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
         {error && <div className='CameraParametersMessage error'>{error}</div>}
 
         {comparison && <div className='CameraParametersBody'>
-            <div className='CameraParametersSnapshotMeta'>
-                <div className='original'>
-                    <span>{chinese ? '左侧基准' : 'Left baseline'}</span>
-                    <small>{comparison.original.source === 'connection'
-                        ? (chinese ? '接入时快照' : 'Connection snapshot')
-                        : (chinese ? '首次读取快照' : 'First-read snapshot')} · {time(comparison.original.captured_at)}</small>
-                </div>
-                <div className={comparison.current.live ? 'current live' : 'current stale'}>
-                    <span>{chinese ? '右侧实时' : 'Right live'}</span>
-                    <small>{time(comparison.current.captured_at)}</small>
-                </div>
-            </div>
-
             {advancedExpanded && comparison.original.advanced_control_captured_at && <div className='CameraParametersMessage notice'>
                 {chinese
                     ? `新增高级字段的原始值于 ${time(comparison.original.advanced_control_captured_at)} 首次锁定，已有原始字段未被覆盖。`

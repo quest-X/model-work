@@ -87,31 +87,6 @@
   padding: 12px;
 }
 
-.CameraParametersSnapshotMeta {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
-  margin-bottom: 10px;
-
-  > div {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 2px 8px;
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-radius: 5px;
-    background: rgba(255, 255, 255, 0.025);
-    padding: 9px 10px;
-
-    &.original { border-color: rgba(0, 158, 253, 0.3); }
-    &.live { border-color: rgba(79, 193, 117, 0.3); }
-    &.stale { border-color: rgba(224, 163, 74, 0.35); }
-  }
-
-  span { color: rgba(255, 255, 255, 0.45); font-size: 9px; }
-  strong { color: rgba(255, 255, 255, 0.9); font-size: 11px; text-align: right; }
-  small { grid-column: 1 / -1; color: rgba(255, 255, 255, 0.34); font-size: 9px; }
-}
-
 .CameraParametersExpand {
   margin-top: 8px;
 

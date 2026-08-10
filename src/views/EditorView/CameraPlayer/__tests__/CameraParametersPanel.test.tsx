@@ -80,22 +80,22 @@ describe('CameraParametersPanel', () => {
         });
     });
 
-    it('shows original and current values side by side and marks changes', async () => {
+    it('shows original and current values side by side without redundant snapshot cards', async () => {
         render(<CameraParametersPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
 
-        expect(await screen.findByText('左侧基准')).toBeInTheDocument();
-        expect(screen.getByText('右侧实时')).toBeInTheDocument();
+        expect(await screen.findByText('原始值')).toBeInTheDocument();
+        expect(screen.queryByText('左侧基准')).not.toBeInTheDocument();
+        expect(screen.queryByText('右侧实时')).not.toBeInTheDocument();
         expect(screen.queryByText('原始参数 · 已锁定')).not.toBeInTheDocument();
         expect(screen.queryByText('当前参数 · 实时读取')).not.toBeInTheDocument();
-        expect(screen.getByText(/接入时快照/)).toBeInTheDocument();
-        expect(screen.getByText('原始值')).toBeInTheDocument();
+        expect(screen.queryByText(/接入时快照/)).not.toBeInTheDocument();
         expect(screen.getByText(/当前值 ·/)).toBeInTheDocument();
         expect(screen.getByText('1/100s (10000 μs)')).toBeInTheDocument();
         expect(screen.getByText('1/200s (5000 μs)')).toBeInTheDocument();
         expect(screen.getAllByText('已修改').length).toBeGreaterThanOrEqual(3);
     });
 
-    it('keeps the first-read source label without showing a persistent legacy notice', async () => {
+    it('hides snapshot metadata and the persistent legacy notice', async () => {
         (CameraParameterService.compare as jest.Mock).mockResolvedValue({
             original: {...snapshot, source: 'first_read'},
             current: {...snapshot, source: 'live', live: true},
@@ -104,14 +104,15 @@ describe('CameraParametersPanel', () => {
 
         render(<CameraParametersPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
 
-        expect(await screen.findByText(/首次读取快照/)).toBeInTheDocument();
+        expect(await screen.findByText('原始值')).toBeInTheDocument();
+        expect(screen.queryByText(/首次读取快照/)).not.toBeInTheDocument();
         expect(screen.queryByText(/该相机早于参数快照功能创建/)).not.toBeInTheDocument();
     });
 
     it('shows common parameters by default and expands all parameters from the bottom', async () => {
         render(<CameraParametersPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
 
-        await screen.findByText('左侧基准');
+        await screen.findByText('原始值');
         expect(screen.queryByRole('tab', {name: /常用参数/})).not.toBeInTheDocument();
         expect(screen.getByText('曝光与对焦')).toBeInTheDocument();
         expect(screen.queryByText('设备信息')).not.toBeInTheDocument();
@@ -153,7 +154,7 @@ describe('CameraParametersPanel', () => {
         await act(async () => {
             await Promise.resolve();
         });
-        expect(screen.getByText('左侧基准')).toBeInTheDocument();
+        expect(screen.getByText('原始值')).toBeInTheDocument();
         expect(screen.queryByRole('button', {name: '刷新当前值'})).not.toBeInTheDocument();
         expect(screen.getByText('自动刷新')).toBeInTheDocument();
         expect(CameraParameterService.compare).toHaveBeenCalledTimes(1);
@@ -167,7 +168,7 @@ describe('CameraParametersPanel', () => {
 
     it('edits only supported live camera controls and keeps device facts read-only', async () => {
         render(<CameraParametersPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
-        await screen.findByText('左侧基准');
+        await screen.findByText('原始值');
 
         expect(screen.queryByRole('button', {name: '编辑设备名称'})).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', {name: '编辑增益等级'}));

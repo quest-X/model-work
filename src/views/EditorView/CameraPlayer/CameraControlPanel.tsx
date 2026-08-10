@@ -132,10 +132,26 @@ const CameraControlPanel: React.FC<IProps> = ({
     };
 
     const updatePreview = () => {
-        if (!draft || !localDirty) return;
+        if (!draft || !localDirty || saving) return;
         void run(
             () => CameraPreviewService.update(resourceId, draft),
             chinese ? '已更新 1012 调参预览' : 'Updated the 1012 adjusted preview',
+            true,
+        );
+    };
+
+    const applyToCamera = () => {
+        if (!draft || saving || (!localDirty && !preview?.dirty)) return;
+        const confirmed = window.confirm(chinese
+            ? '确认将当前参数应用到物理相机？\n系统将先备份、写后回读，失败时自动恢复。'
+            : 'Apply the current settings to the physical camera?\nOpenSight will back up, verify, and roll back on failure.');
+        if (!confirmed) return;
+        void run(
+            async () => {
+                if (localDirty) await CameraPreviewService.update(resourceId, draft);
+                return CameraPreviewService.dispatch(resourceId);
+            },
+            chinese ? '已将当前参数应用到物理相机' : 'Applied the current settings to the physical camera',
             true,
         );
     };
@@ -205,12 +221,12 @@ const CameraControlPanel: React.FC<IProps> = ({
                 <div className='CameraControlTitleHeading'>
                     <strong>{chinese ? '智能调参' : 'Smart controls'}</strong>
                     <span className='CameraPreviewSafeBadge'>
-                        {chinese ? '物理相机未修改' : 'Physical camera unchanged'}
+                        {chinese ? '预览未下发' : 'Preview not dispatched'}
                     </span>
                 </div>
                 <span>{chinese
-                    ? '自动调参和高级微调均只作用于 1012 软件分支'
-                    : 'Automatic and manual adjustments affect only software branch 1012'}</span>
+                    ? '调参先预览于 1012，确认后可应用到物理相机'
+                    : 'Preview adjustments on 1012, then apply them to the physical camera'}</span>
             </div>
             <button type='button' disabled={saving} onClick={onClose} aria-label={chinese ? '关闭相机控制' : 'Close camera controls'}>×</button>
         </div>
@@ -294,33 +310,29 @@ const CameraControlPanel: React.FC<IProps> = ({
                                 ...draft,
                                 [definition.field]: Number(event.target.value),
                             })}
+                            onPointerUp={updatePreview}
+                            onKeyUp={updatePreview}
+                            onBlur={updatePreview}
                         />
                     </label>)}
                 </div>
                 <div className='CameraPreviewActions'>
-                    <button type='button' disabled={saving || !localDirty} onClick={updatePreview}>
-                        {saving ? (chinese ? '正在重建逻辑流…' : 'Rebuilding streams…') : (chinese ? '更新调参预览' : 'Update preview')}
-                    </button>
-                    <button type='button' disabled={saving || !preview?.dirty} onClick={() => void run(
-                        () => CameraPreviewService.apply(resourceId),
-                        chinese ? '已保存为 OpenSight 方案' : 'Saved as the OpenSight preset',
-                        false,
-                    )}>
-                        {chinese ? '保存当前方案' : 'Save current preset'}
-                    </button>
-                    <button type='button' disabled={saving || !preview?.dirty} onClick={() => void run(
-                        () => CameraPreviewService.revert(resourceId),
-                        chinese ? '已恢复上次保存方案' : 'Restored the saved preset',
-                        true,
-                    )}>
-                        {chinese ? '恢复已保存' : 'Restore saved'}
-                    </button>
                     <button type='button' disabled={saving} onClick={() => void run(
                         () => CameraPreviewService.reset(resourceId),
-                        chinese ? '已恢复中性软件参数' : 'Restored neutral software settings',
+                        chinese ? '已恢复全部软件参数' : 'Restored all software settings',
                         true,
                     )}>
-                        {chinese ? '中性参数' : 'Neutral settings'}
+                        {chinese ? '恢复全部参数' : 'Restore all settings'}
+                    </button>
+                    <button
+                        type='button'
+                        className='danger'
+                        disabled={saving || (!localDirty && !preview?.dirty)}
+                        onClick={applyToCamera}
+                    >
+                        {saving
+                            ? (chinese ? '正在处理…' : 'Working…')
+                            : (chinese ? '应用到相机' : 'Apply to camera')}
                     </button>
                 </div>
             </div>}

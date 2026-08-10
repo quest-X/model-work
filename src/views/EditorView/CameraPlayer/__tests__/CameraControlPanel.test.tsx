@@ -1,5 +1,5 @@
 import React from 'react';
-import {fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {Language} from '../../../../data/LanguageConfig';
 import {CameraPreviewService, CameraPreviewState} from '../../../../services/CameraPreviewService';
 import CameraControlPanel from '../CameraControlPanel';
@@ -9,6 +9,7 @@ jest.mock('../../../../services/CameraPreviewService', () => ({
         get: jest.fn(),
         update: jest.fn(),
         apply: jest.fn(),
+        dispatch: jest.fn(),
         revert: jest.fn(),
         reset: jest.fn(),
         autoAdjust: jest.fn(),
@@ -40,6 +41,11 @@ describe('CameraControlPanel', () => {
         service.get.mockResolvedValue(state());
         service.update.mockImplementation(async (_id, payload) => state({...neutral, ...payload}, true));
         service.apply.mockResolvedValue(state({...neutral, brightness: 0.2}, false));
+        service.dispatch.mockResolvedValue({
+            ...state(),
+            dispatch: {action: 'dispatch_preview_settings', message: '已下发', applied: {}},
+            resource_id: 'resource-1',
+        });
         service.revert.mockResolvedValue(state());
         service.reset.mockResolvedValue(state());
         service.autoAdjust.mockImplementation(async (_id, action) => {
@@ -75,7 +81,7 @@ describe('CameraControlPanel', () => {
         render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
 
         expect(await screen.findByRole('button', {name: '自动曝光'})).toBeInTheDocument();
-        expect(screen.getByText('物理相机未修改')).toBeInTheDocument();
+        expect(screen.getByText('预览未下发')).toBeInTheDocument();
         expect(screen.getByText('1011')).toBeInTheDocument();
         expect(screen.getByText('1012')).toBeInTheDocument();
         expect(screen.getByText('原始对照')).toBeInTheDocument();
@@ -85,7 +91,12 @@ describe('CameraControlPanel', () => {
         expect(screen.getByRole('button', {name: '自动宽动态'})).toBeInTheDocument();
         expect(screen.getByRole('button', {name: '自动日夜'})).toBeInTheDocument();
         expect(screen.queryByRole('slider')).not.toBeInTheDocument();
-        expect(screen.queryByText('下发到相机')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', {name: '高级微调'}));
+        expect(screen.getByRole('button', {name: '恢复全部参数'})).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '应用到相机'})).toHaveClass('danger');
+        expect(screen.queryByRole('button', {name: '更新调参预览'})).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: '保存当前方案'})).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: '恢复已保存'})).not.toBeInTheDocument();
     });
 
     it('keeps automatic controls independent so all four can be enabled together', async () => {
@@ -121,14 +132,14 @@ describe('CameraControlPanel', () => {
         expect(dayNight).toHaveAttribute('aria-pressed', 'true');
     });
 
-    it('updates only the 1012 software preview and reconnects the logical streams', async () => {
+    it('updates only the 1012 software preview when a slider interaction finishes', async () => {
         const onStreamChanged = jest.fn();
         render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()} onStreamChanged={onStreamChanged}/>);
         fireEvent.click(await screen.findByRole('button', {name: '高级微调'}));
         const brightness = screen.getByRole('slider', {name: '亮度'});
 
         fireEvent.change(brightness, {target: {value: '0.25'}});
-        fireEvent.click(screen.getByRole('button', {name: '更新调参预览'}));
+        await act(async () => { fireEvent.pointerUp(brightness); });
 
         await waitFor(() => expect(service.update).toHaveBeenCalledWith('resource-1', {
             brightness: 0.25,
@@ -142,27 +153,46 @@ describe('CameraControlPanel', () => {
         expect(await screen.findByText('已更新 1012 调参预览')).toBeInTheDocument();
     });
 
-    it('saves a preset without writing the camera and restores with a stream rebuild', async () => {
+    it('restores all software parameters with a stream rebuild', async () => {
         const dirtyState = state({...neutral, brightness: 0.2}, true);
         service.get.mockResolvedValue(dirtyState);
-        service.apply.mockResolvedValue({...dirtyState, saved: dirtyState.current, dirty: false});
         const onStreamChanged = jest.fn();
-        const first = render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()} onStreamChanged={onStreamChanged}/>);
+        render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()} onStreamChanged={onStreamChanged}/>);
 
         fireEvent.click(await screen.findByRole('button', {name: '高级微调'}));
         await screen.findByRole('slider', {name: '亮度'});
-        fireEvent.click(screen.getByRole('button', {name: '保存当前方案'}));
-        await waitFor(() => expect(service.apply).toHaveBeenCalledWith('resource-1'));
-        expect(onStreamChanged).not.toHaveBeenCalled();
-        first.unmount();
-
-        service.get.mockResolvedValue(dirtyState);
-        render(<CameraControlPanel resourceId='resource-2' language={Language.CHINESE} onClose={jest.fn()} onStreamChanged={onStreamChanged}/>);
-        fireEvent.click(await screen.findByRole('button', {name: '高级微调'}));
-        await screen.findByRole('slider', {name: '亮度'});
-        fireEvent.click(screen.getByRole('button', {name: '恢复已保存'}));
-        await waitFor(() => expect(service.revert).toHaveBeenCalledWith('resource-2'));
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', {name: '恢复全部参数'}));
+        });
+        await waitFor(() => expect(service.reset).toHaveBeenCalledWith('resource-1'));
         await waitFor(() => expect(onStreamChanged).toHaveBeenCalledTimes(1));
-        expect(await screen.findByText('已恢复上次保存方案')).toBeInTheDocument();
+        expect(await screen.findByText('已恢复全部软件参数')).toBeInTheDocument();
+    });
+
+    it('syncs the latest draft before applying it to the physical camera', async () => {
+        const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+        const onStreamChanged = jest.fn();
+        render(<CameraControlPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()} onStreamChanged={onStreamChanged}/>);
+
+        fireEvent.click(await screen.findByRole('button', {name: '高级微调'}));
+        fireEvent.change(screen.getByRole('slider', {name: '亮度'}), {target: {value: '0.25'}});
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', {name: '应用到相机'}));
+        });
+
+        await waitFor(() => expect(service.update).toHaveBeenCalledWith('resource-1', {
+            brightness: 0.25,
+            contrast: 1,
+            gamma: 1,
+            saturation: 1,
+            sharpness: 0,
+            denoise: 0,
+        }));
+        await waitFor(() => expect(service.dispatch).toHaveBeenCalledWith('resource-1'));
+        expect(service.update.mock.invocationCallOrder[0]).toBeLessThan(service.dispatch.mock.invocationCallOrder[0]);
+        expect(confirm).toHaveBeenCalledTimes(1);
+        expect(onStreamChanged).toHaveBeenCalledTimes(1);
+        expect(await screen.findByText('已将当前参数应用到物理相机')).toBeInTheDocument();
+        confirm.mockRestore();
     });
 });

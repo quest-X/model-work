@@ -296,8 +296,8 @@
 }
 
 .CameraPreviewActions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 7px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding: 11px 13px 13px;
@@ -311,10 +311,17 @@
     cursor: pointer;
     font-size: 9px;
 
-    &:first-child {
-      border-color: rgba(0, 158, 253, 0.55);
-      background: rgba(0, 158, 253, 0.14);
-      color: #b9e2fb;
+    &.danger {
+      border-color: rgba(226, 78, 78, 0.78);
+      background: rgba(196, 48, 48, 0.34);
+      color: #ffb0b0;
+      font-weight: 600;
+    }
+
+    &.danger:hover:not(:disabled) {
+      border-color: rgba(255, 105, 105, 0.95);
+      background: rgba(210, 52, 52, 0.48);
+      color: #fff;
     }
 
     &:hover:not(:disabled) { border-color: $primaryColor; color: #fff; }

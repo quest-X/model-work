@@ -46,11 +46,13 @@ const CameraControlPanel: React.FC<IProps> = ({
     const [preview, setPreview] = useState<CameraPreviewState | null>(null);
     const [draft, setDraft] = useState<CameraPreviewSettings | null>(null);
     const [metrics, setMetrics] = useState<CameraPreviewMetrics | null>(null);
-    const [lastAutoAction, setLastAutoAction] = useState<CameraPreviewAutoAction | null>(null);
     const [advancedOpen, setAdvancedOpen] = useState(false);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [runningAuto, setRunningAuto] = useState<CameraPreviewAutoAction | null>(null);
+    const [runningAuto, setRunningAuto] = useState<{
+        action: CameraPreviewAutoAction;
+        disabling: boolean;
+    } | null>(null);
     const [error, setError] = useState('');
     const [message, setMessage] = useState('');
 
@@ -99,19 +101,27 @@ const CameraControlPanel: React.FC<IProps> = ({
         }
     };
 
-    const runAuto = async (action: CameraPreviewAutoAction) => {
+    const toggleAuto = async (action: CameraPreviewAutoAction, label: string) => {
         if (saving) return;
+        const disabling = preview?.active_automations[action] === true;
         setSaving(true);
-        setRunningAuto(action);
+        setRunningAuto({action, disabling});
         setError('');
         setMessage('');
         try {
-            const value = await CameraPreviewService.autoAdjust(resourceId, action);
+            const value = disabling
+                ? await CameraPreviewService.disableAuto(resourceId, action)
+                : await CameraPreviewService.autoAdjust(resourceId, action);
             setPreview(value);
             setDraft(value.current);
-            setMetrics(value.auto_adjustment.metrics);
-            setLastAutoAction(action);
-            setMessage(value.auto_adjustment.message);
+            if (!disabling && 'auto_adjustment' in value) {
+                setMetrics(value.auto_adjustment.metrics);
+                setMessage(value.auto_adjustment.message);
+            } else {
+                setMessage(chinese
+                    ? `已关闭${label}，其他自动项保持开启`
+                    : `Disabled ${label}; other automatic controls remain active`);
+            }
             onStreamChanged?.();
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : String(reason));
@@ -179,11 +189,13 @@ const CameraControlPanel: React.FC<IProps> = ({
         },
     ] : [];
 
-    const busyText = runningAuto === 'exposure'
+    const busyText = runningAuto?.disabling
+        ? (chinese ? '正在关闭该自动项…' : 'Disabling automatic control…')
+        : runningAuto?.action === 'exposure'
         ? (chinese ? '正在分析画面并自动曝光…' : 'Analyzing automatic exposure…')
-        : runningAuto === 'focus'
+        : runningAuto?.action === 'focus'
             ? (chinese ? '正在分析清晰度并增强…' : 'Analyzing software focus…')
-            : runningAuto === 'wdr'
+            : runningAuto?.action === 'wdr'
                 ? (chinese ? '正在分析高亮与暗部…' : 'Analyzing software WDR…')
                 : (chinese ? '正在判断日夜场景…' : 'Detecting day/night scene…');
 
@@ -221,15 +233,17 @@ const CameraControlPanel: React.FC<IProps> = ({
             </div>}
 
             <div className='CameraAutoControlList'>
-                {autoCards.map(card => <section
-                    className={`CameraAutoControlSection${lastAutoAction === card.action ? ' active' : ''}`}
-                    key={card.action}
-                >
+                {autoCards.map(card => {
+                    const active = preview?.active_automations[card.action] === true;
+                    return <section
+                        className={`CameraAutoControlSection${active ? ' active' : ''}`}
+                        key={card.action}
+                    >
                     <div className='CameraAutoControlHeading'>
                         <span><strong>{card.label}</strong><i>{card.badge}</i></span>
-                        <em>{lastAutoAction === card.action
-                            ? (chinese ? '已完成' : 'Applied')
-                            : (chinese ? '软件调参' : 'Software')}</em>
+                        <em>{active
+                            ? (chinese ? '已开启' : 'Enabled')
+                            : (chinese ? '未开启' : 'Disabled')}</em>
                     </div>
                     <p>{card.description}</p>
                     <div className='CameraAutoControlParameters'>
@@ -239,14 +253,15 @@ const CameraControlPanel: React.FC<IProps> = ({
                     </div>
                     <button
                         type='button'
-                        className={lastAutoAction === card.action ? 'active' : ''}
+                        className={active ? 'active' : ''}
                         aria-label={card.label}
+                        aria-pressed={active}
                         disabled={saving}
-                        onClick={() => void runAuto(card.action)}
+                        onClick={() => void toggleAuto(card.action, card.label)}
                     >
-                        {runningAuto === card.action ? busyText : card.label}
+                        {runningAuto?.action === card.action ? busyText : card.label}
                     </button>
-                </section>)}
+                </section>;})}
             </div>
 
             <button

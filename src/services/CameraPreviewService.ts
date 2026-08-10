@@ -13,6 +13,7 @@ export type CameraPreviewState = {
     logical_channels: {original: '1011'; adjusted: '1012'};
     saved: CameraPreviewSettings;
     current: CameraPreviewSettings;
+    active_automations: Record<CameraPreviewAutoAction, boolean>;
     dirty: boolean;
     created_at: string;
     updated_at: string | null;
@@ -101,6 +102,17 @@ export class CameraPreviewService {
         return CameraPreviewService.request(
             resourceId,
             `/auto/${encodeURIComponent(action)}`,
+            {method: 'POST'},
+        );
+    }
+
+    public static disableAuto(
+        resourceId: string,
+        action: CameraPreviewAutoAction,
+    ): Promise<CameraPreviewState> {
+        return CameraPreviewService.request(
+            resourceId,
+            `/auto/${encodeURIComponent(action)}/disable`,
             {method: 'POST'},
         );
     }

@@ -17,6 +17,7 @@ const preview = (current = neutral, dirty = false): CameraPreviewState => ({
     logical_channels: {original: '1011', adjusted: '1012'},
     saved: neutral,
     current,
+    active_automations: {exposure: false, focus: false, wdr: false, 'day-night': false},
     dirty,
     created_at: '2026-08-10T00:00:00Z',
     updated_at: null,

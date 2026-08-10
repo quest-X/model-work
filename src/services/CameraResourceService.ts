@@ -247,9 +247,15 @@ export class CameraResourceService {
         return `${cameraBaseUrl()}/resources/${encodeURIComponent(resourceId)}/snapshot${query}`;
     }
 
-    public static streamUrl(resourceId: string, channelId?: string, nonce?: number): string {
+    public static streamUrl(
+        resourceId: string,
+        channelId?: string,
+        nonce?: number,
+        branch: 'original' | 'adjusted' = 'adjusted',
+    ): string {
         const params = new URLSearchParams({fps: '10'});
         if (channelId) params.set('channel_id', channelId);
+        params.set('branch', branch);
         if (nonce) params.set('_', String(nonce));
         return `${cameraBaseUrl()}/resources/${encodeURIComponent(resourceId)}/mjpeg?${params}`;
     }

@@ -1,344 +1,179 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {Language} from '../../../data/LanguageConfig';
-import {CameraImageMetrics, CameraResourceService} from '../../../services/CameraResourceService';
 import {
-    CameraControlsWithTrial,
-    CameraSmartControlResult,
-    CameraTrialService,
-    CameraTrialStatus,
-} from '../../../services/CameraTrialService';
+    CameraPreviewService,
+    CameraPreviewSettings,
+    CameraPreviewState,
+} from '../../../services/CameraPreviewService';
 import './CameraControlPanel.scss';
 
 interface IProps {
     resourceId: string;
     language: Language;
     onClose: () => void;
-    onBeforeAction?: () => void;
+    onStreamChanged?: () => void;
 }
 
-type RunningAction = 'probe' | 'exposure' | 'focus' | 'wdr' | 'dayNight' | 'restoreExposure' | 'restoreFocus' | 'restoreWdr' | 'restoreDayNight' | 'close' | null;
-type ToggleAction = Exclude<RunningAction, 'probe' | 'close' | null>;
+type PreviewField = keyof CameraPreviewSettings;
 
-const DEFAULT_TARGET_LUMA = 0.35;
-const CONTROL_RETRY_INTERVAL_MS = 1500;
-const INACTIVE = {
-    auto_exposure: false,
-    auto_focus: false,
-    auto_wdr: false,
-    auto_day_night: false,
-};
-const IDLE_TRIAL: CameraTrialStatus = {
-    phase: 'idle',
-    dirty: false,
-    active: INACTIVE,
-    started_at: null,
-    expires_at: null,
-    applied_at: null,
-};
+const FIELD_DEFINITIONS: Array<{
+    field: PreviewField;
+    chinese: string;
+    english: string;
+    min: number;
+    max: number;
+    step: number;
+    unit?: string;
+}> = [
+    {field: 'brightness', chinese: '亮度', english: 'Brightness', min: -1, max: 1, step: 0.05},
+    {field: 'contrast', chinese: '对比度', english: 'Contrast', min: 0, max: 3, step: 0.05},
+    {field: 'gamma', chinese: 'Gamma', english: 'Gamma', min: 0.1, max: 3, step: 0.05},
+    {field: 'saturation', chinese: '饱和度', english: 'Saturation', min: 0, max: 3, step: 0.05},
+    {field: 'sharpness', chinese: '锐度', english: 'Sharpness', min: 0, max: 5, step: 0.1},
+    {field: 'denoise', chinese: '降噪', english: 'Denoise', min: 0, max: 10, step: 0.25},
+];
 
-const percent = (value: number): string => `${Math.round(value * 100)}%`;
-const formatShutter = (microseconds: number | undefined): string => {
-    if (!microseconds || microseconds <= 0) return '—';
-    if (microseconds < 1_000_000) return `1/${Math.max(1, Math.round(1_000_000 / microseconds))}s`;
-    const seconds = microseconds / 1_000_000;
-    return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`;
-};
-const formatParameter = (value: number | null | undefined): string =>
-    value === null || value === undefined ? '—' : String(value);
-
-const CameraControlPanel: React.FC<IProps> = ({resourceId, language, onClose, onBeforeAction}) => {
+const CameraControlPanel: React.FC<IProps> = ({
+    resourceId,
+    language,
+    onClose,
+    onStreamChanged,
+}) => {
     const chinese = language === Language.CHINESE;
-    const [controls, setControls] = useState<CameraControlsWithTrial | null>(null);
-    const [metrics, setMetrics] = useState<CameraImageMetrics | null>(null);
-    const [lastResult, setLastResult] = useState<CameraSmartControlResult | null>(null);
-    const [running, setRunning] = useState<RunningAction>('probe');
+    const [preview, setPreview] = useState<CameraPreviewState | null>(null);
+    const [draft, setDraft] = useState<CameraPreviewSettings | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
-    const trialRef = useRef<CameraTrialStatus>(IDLE_TRIAL);
-
-    const applyResult = (result: CameraSmartControlResult) => {
-        const trial = result.trial ?? trialRef.current;
-        trialRef.current = trial;
-        setLastResult(result);
-        setMetrics(result.after);
-        setControls(previous => previous ? {
-            ...previous,
-            trial,
-            active: result.active ?? trial.active ?? previous.active ?? INACTIVE,
-            state: result.state,
-            metrics: result.after,
-        } : previous);
-    };
+    const [message, setMessage] = useState('');
 
     useEffect(() => {
         let active = true;
-        let retryTimer: number | undefined;
-        const loadControls = async () => {
-            if (!active) return;
-            setRunning('probe');
-            try {
-                const value = await CameraResourceService.controls(resourceId);
+        CameraPreviewService.get(resourceId)
+            .then(value => {
                 if (!active) return;
-                const smartControls = value as CameraControlsWithTrial;
-                setControls(smartControls);
-                trialRef.current = smartControls.trial ?? IDLE_TRIAL;
-                setMetrics(value.metrics);
+                setPreview(value);
+                setDraft(value.current);
                 setError('');
-            } catch (reason) {
-                if (!active) return;
-                setError(reason instanceof Error ? reason.message : String(reason));
-                retryTimer = window.setTimeout(loadControls, CONTROL_RETRY_INTERVAL_MS);
-            } finally {
-                if (active) setRunning(null);
-            }
-        };
-        void loadControls();
-        return () => {
-            active = false;
-            if (retryTimer !== undefined) window.clearTimeout(retryTimer);
-        };
+            })
+            .catch(reason => {
+                if (active) setError(reason instanceof Error ? reason.message : String(reason));
+            })
+            .finally(() => {
+                if (active) setLoading(false);
+            });
+        return () => { active = false; };
     }, [resourceId]);
 
-    const execute = async (action: ToggleAction) => {
-        if (running || !controls) return;
-        if (['exposure', 'focus', 'wdr', 'dayNight'].includes(action)) onBeforeAction?.();
-        setRunning(action);
+    const localDirty = useMemo(() => {
+        if (!preview || !draft) return false;
+        return FIELD_DEFINITIONS.some(({field}) => draft[field] !== preview.current[field]);
+    }, [draft, preview]);
+
+    const run = async (
+        action: () => Promise<CameraPreviewState>,
+        success: string,
+        reconnect: boolean,
+    ) => {
+        if (saving) return;
+        setSaving(true);
         setError('');
-        setLastResult(null);
+        setMessage('');
         try {
-            let result: CameraSmartControlResult;
-            switch (action) {
-                case 'exposure':
-                    result = await CameraResourceService.autoExposure(resourceId, DEFAULT_TARGET_LUMA) as unknown as CameraSmartControlResult;
-                    break;
-                case 'focus':
-                    result = await CameraResourceService.autoFocus(resourceId) as unknown as CameraSmartControlResult;
-                    break;
-                case 'wdr':
-                    result = await CameraTrialService.autoWdr(resourceId);
-                    break;
-                case 'dayNight':
-                    result = await CameraTrialService.autoDayNight(resourceId);
-                    break;
-                case 'restoreExposure':
-                    result = await CameraResourceService.restoreExposure(resourceId) as unknown as CameraSmartControlResult;
-                    break;
-                case 'restoreFocus':
-                    result = await CameraResourceService.restoreFocus(resourceId) as unknown as CameraSmartControlResult;
-                    break;
-                case 'restoreWdr':
-                    result = await CameraTrialService.restoreWdr(resourceId);
-                    break;
-                case 'restoreDayNight':
-                    result = await CameraTrialService.restoreDayNight(resourceId);
-                    break;
-                default:
-                    return;
-            }
-            applyResult(result);
+            const value = await action();
+            setPreview(value);
+            setDraft(value.current);
+            setMessage(success);
+            if (reconnect) onStreamChanged?.();
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : String(reason));
         } finally {
-            setRunning(null);
+            setSaving(false);
         }
     };
 
-    const closePanel = async () => {
-        if (running && running !== 'probe') return;
-        if (trialRef.current.phase !== 'trial') {
-            onClose();
-            return;
-        }
-        setRunning('close');
-        setError('');
-        try {
-            applyResult(await CameraTrialService.revert(resourceId));
-            onClose();
-        } catch (reason) {
-            setError(reason instanceof Error ? reason.message : String(reason));
-        } finally {
-            setRunning(null);
-        }
+    const updatePreview = () => {
+        if (!draft || !localDirty) return;
+        void run(
+            () => CameraPreviewService.update(resourceId, draft),
+            chinese ? '已更新 1012 调参预览' : 'Updated the 1012 adjusted preview',
+            true,
+        );
     };
 
-    const busyText = running === 'exposure'
-        ? (chinese ? '正在自动曝光…' : 'Auto exposing…')
-        : running === 'focus'
-            ? (chinese ? '正在自动对焦…' : 'Auto focusing…')
-            : running === 'wdr'
-                ? (chinese ? '正在开启自动宽动态…' : 'Enabling auto WDR…')
-                : running === 'dayNight'
-                    ? (chinese ? '正在开启自动日夜…' : 'Enabling auto day/night…')
-                    : running?.startsWith('restore')
-                        ? (chinese ? '正在恢复…' : 'Restoring…')
-                        : running === 'close'
-                            ? (chinese ? '正在撤销试调…' : 'Reverting trial…')
-                            : (chinese ? '正在读取相机能力…' : 'Reading camera controls…');
-    const active = controls?.active ?? INACTIVE;
-    const trial = controls?.trial ?? IDLE_TRIAL;
-    const modeLabel = (mode: string | undefined): string => {
-        if (!mode) return '—';
-        const labels: Record<string, string> = chinese ? {
-            auto: '自动',
-            manual: '手动',
-            semi_auto: '半自动',
-            open: '开启',
-            close: '关闭',
-            day: '白天',
-            night: '夜间',
-            schedule: '定时',
-            unknown: '未知',
-        } : {
-            auto: 'Auto',
-            manual: 'Manual',
-            semi_auto: 'Semi-auto',
-            open: 'Open',
-            close: 'Closed',
-            day: 'Day',
-            night: 'Night',
-            schedule: 'Schedule',
-            unknown: 'Unknown',
-        };
-        return labels[mode] ?? mode;
-    };
-    const cards: Array<{
-        key: string;
-        label: string;
-        badge: string;
-        active: boolean;
-        capability: boolean | undefined;
-        enable: ToggleAction;
-        disable: ToggleAction;
-        description: string;
-        parameters: Array<{label: string; value: string}>;
-    }> = [
-        {
-            key: 'exposure',
-            label: chinese ? '自动曝光' : 'Auto exposure',
-            badge: 'AEC',
-            active: active.auto_exposure,
-            capability: controls?.capabilities.auto_exposure,
-            enable: 'exposure',
-            disable: 'restoreExposure',
-            description: chinese ? '根据画面亮度自动计算快门与增益。' : 'Calculates shutter and gain from scene brightness.',
-            parameters: [
-                {label: chinese ? '模式' : 'Mode', value: modeLabel(controls?.state.exposure.mode)},
-                {label: chinese ? '快门' : 'Shutter', value: formatShutter(controls?.state.exposure.shutter_us)},
-                {label: chinese ? '增益' : 'Gain', value: formatParameter(controls?.state.exposure.gain_level)},
-            ],
-        },
-        {
-            key: 'focus',
-            label: chinese ? '自动对焦' : 'Auto focus',
-            badge: 'AF',
-            active: active.auto_focus,
-            capability: controls?.capabilities.auto_focus,
-            enable: 'focus',
-            disable: 'restoreFocus',
-            description: chinese ? '自动搜索清晰位置，并用清晰度指标验证结果。' : 'Searches for a sharp lens position and verifies the result.',
-            parameters: [
-                {label: chinese ? '模式' : 'Mode', value: modeLabel(controls?.state.focus.mode)},
-                {label: chinese ? '镜头位置' : 'Position', value: formatParameter(controls?.state.focus.position)},
-                {label: chinese ? '速度级别' : 'Speed', value: formatParameter(controls?.state.focus.speed_level)},
-            ],
-        },
-        {
-            key: 'wdr',
-            label: chinese ? '自动宽动态' : 'Auto WDR',
-            badge: 'WDR',
-            active: active.auto_wdr,
-            capability: controls?.capabilities.auto_wdr,
-            enable: 'wdr',
-            disable: 'restoreWdr',
-            description: chinese ? '自动平衡高亮与暗部细节，适合逆光场景。' : 'Balances highlights and shadows for backlit scenes.',
-            parameters: [
-                {label: chinese ? '模式' : 'Mode', value: modeLabel(controls?.state.wdr?.mode)},
-                {label: chinese ? '强度' : 'Level', value: formatParameter(controls?.state.wdr?.level)},
-            ],
-        },
-        {
-            key: 'day-night',
-            label: chinese ? '自动日夜' : 'Auto day/night',
-            badge: 'D/N',
-            active: active.auto_day_night,
-            capability: controls?.capabilities.auto_day_night,
-            enable: 'dayNight',
-            disable: 'restoreDayNight',
-            description: chinese ? '根据环境光线自动切换日间与夜间成像。' : 'Switches day and night imaging from ambient light.',
-            parameters: [
-                {label: chinese ? '模式' : 'Mode', value: modeLabel(controls?.state.day_night?.mode)},
-                {
-                    label: chinese ? '控制来源' : 'Control',
-                    value: active.auto_day_night
-                        ? (chinese ? '平台试调' : 'Platform trial')
-                        : (chinese ? '相机原设' : 'Camera default'),
-                },
-            ],
-        },
-    ];
-
-    return <aside className='CameraControlPanel' id='camera-smart-controls'>
+    return <aside className='CameraControlPanel CameraPreviewControlPanel' id='camera-smart-controls'>
         <div className='CameraControlTitle'>
             <div>
                 <div className='CameraControlTitleHeading'>
-                    <strong>{chinese ? '智能调参' : 'Smart controls'}</strong>
-                    {trial.phase === 'trial' && <span className='CameraDebugBadge'>
-                        {chinese ? '调试中' : 'Debugging'}
-                    </span>}
+                    <strong>{chinese ? '实时调参' : 'Live adjustments'}</strong>
+                    <span className='CameraPreviewSafeBadge'>
+                        {chinese ? '物理相机未修改' : 'Physical camera unchanged'}
+                    </span>
                 </div>
-                <span>{chinese ? '四项独立试调；到相机参数确认下发' : 'Four independent trials; confirm apply in Camera parameters'}</span>
+                <span>{chinese
+                    ? '同一路物理码流：1011 原始 LIVE / 1012 软件调参 LIVE'
+                    : 'Same physical source: original LIVE 1011 / software-adjusted LIVE 1012'}</span>
             </div>
-            <button type='button' disabled={!!running && running !== 'probe'} onClick={closePanel} aria-label={chinese ? '关闭相机控制' : 'Close camera controls'}>×</button>
+            <button type='button' disabled={saving} onClick={onClose} aria-label={chinese ? '关闭相机控制' : 'Close camera controls'}>×</button>
         </div>
 
-        {running === 'probe' && <div className='CameraControlLoading'><span/>{busyText}</div>}
+        {loading && <div className='CameraControlLoading'><span/>{chinese ? '正在读取预览方案…' : 'Reading preview preset…'}</div>}
         {error && <div className='CameraControlMessage error'>{error}</div>}
-        {lastResult && <div className='CameraControlMessage success'>
-            {lastResult.message}
-            {lastResult.action === 'auto_focus' && typeof lastResult.improvement === 'number' &&
-                <small>{chinese ? '清晰度变化' : 'Focus delta'}: {lastResult.improvement > 0 ? '+' : ''}{lastResult.improvement.toFixed(0)}</small>}
-        </div>}
+        {message && <div className='CameraControlMessage success'>{message}</div>}
 
-        {metrics && <div className='CameraMetricGrid'>
-            <div><span>{chinese ? '画面亮度' : 'Luma'}</span><strong>{percent(metrics.luma)}</strong></div>
-            <div><span>{chinese ? '过曝区域' : 'Clipped'}</span><strong>{percent(metrics.saturation_ratio)}</strong></div>
-            <div><span>{chinese ? '清晰度' : 'Sharpness'}</span><strong>{Math.round(metrics.focus_score)}</strong></div>
-            <div><span>{chinese ? '控制画面' : 'Control frame'}</span><strong>{metrics.width}×{metrics.height}</strong></div>
-        </div>}
-
-        <div className='CameraAutoControlList'>
-            {cards.map(card => <section
-                className={`CameraAutoControlSection${card.active ? ' active' : ''}`}
-                key={card.key}
-            >
-                <div className='CameraAutoControlHeading'>
-                    <span><strong>{card.label}</strong><i>{card.badge}</i></span>
-                    <em>{card.capability === false
-                        ? (chinese ? '设备不支持' : 'Unsupported')
-                        : card.active
-                            ? (chinese ? '已激活' : 'Active')
-                            : (chinese ? '未激活' : 'Inactive')}</em>
-                </div>
-                <p>{card.description}</p>
-                <div className='CameraAutoControlParameters'>
-                    {card.parameters.map(parameter => <span key={parameter.label}>
-                        <small>{parameter.label}</small>
-                        <b>{parameter.value}</b>
-                    </span>)}
-                </div>
-                <button
-                    type='button'
-                    className={card.active ? 'active' : ''}
-                    aria-label={card.label}
-                    aria-pressed={card.active}
-                    disabled={!controls || !!running || (!card.active && card.capability === false)}
-                    onClick={() => execute(card.active ? card.disable : card.enable)}
-                >
-                    {card.label}
+        {draft && <>
+            <div className='CameraLogicalStreamSummary'>
+                <div><span>1011</span><strong>{chinese ? '原始对照' : 'Original'}</strong><em>LIVE</em></div>
+                <div><span>1012</span><strong>{chinese ? '调参效果' : 'Adjusted'}</strong><em>LIVE</em></div>
+            </div>
+            <div className='CameraPreviewSliders'>
+                {FIELD_DEFINITIONS.map(definition => <label key={definition.field}>
+                    <span>
+                        <strong>{chinese ? definition.chinese : definition.english}</strong>
+                        <code>{draft[definition.field].toFixed(definition.step < 0.1 ? 2 : 1)}{definition.unit || ''}</code>
+                    </span>
+                    <input
+                        type='range'
+                        aria-label={chinese ? definition.chinese : definition.english}
+                        min={definition.min}
+                        max={definition.max}
+                        step={definition.step}
+                        value={draft[definition.field]}
+                        disabled={saving}
+                        onChange={event => setDraft({
+                            ...draft,
+                            [definition.field]: Number(event.target.value),
+                        })}
+                    />
+                </label>)}
+            </div>
+            <div className='CameraPreviewActions'>
+                <button type='button' disabled={saving || !localDirty} onClick={updatePreview}>
+                    {saving ? (chinese ? '正在重建逻辑流…' : 'Rebuilding streams…') : (chinese ? '更新调参预览' : 'Update preview')}
                 </button>
-            </section>)}
-        </div>
-
-        {running && running !== 'probe' && <div className='CameraControlProgress'><span/><b>{busyText}</b></div>}
+                <button type='button' disabled={saving || !preview?.dirty} onClick={() => void run(
+                    () => CameraPreviewService.apply(resourceId),
+                    chinese ? '已保存为 OpenSight 方案' : 'Saved as the OpenSight preset',
+                    false,
+                )}>
+                    {chinese ? '保存当前方案' : 'Save current preset'}
+                </button>
+                <button type='button' disabled={saving || !preview?.dirty} onClick={() => void run(
+                    () => CameraPreviewService.revert(resourceId),
+                    chinese ? '已恢复上次保存方案' : 'Restored the saved preset',
+                    true,
+                )}>
+                    {chinese ? '恢复已保存' : 'Restore saved'}
+                </button>
+                <button type='button' disabled={saving} onClick={() => void run(
+                    () => CameraPreviewService.reset(resourceId),
+                    chinese ? '已恢复中性软件参数' : 'Restored neutral software settings',
+                    true,
+                )}>
+                    {chinese ? '中性参数' : 'Neutral settings'}
+                </button>
+            </div>
+        </>}
     </aside>;
 };
 

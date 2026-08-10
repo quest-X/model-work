@@ -1,25 +1,34 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Language} from '../../../data/LanguageConfig';
 import {
-    CameraManualParameterUpdate,
     CameraParameterComparison,
     CameraParameterService,
     CameraParameterSnapshot,
 } from '../../../services/CameraParameterService';
-import {CameraTrialService} from '../../../services/CameraTrialService';
-import type {CameraTrialStatus} from '../../../services/CameraTrialService';
+import {
+    CameraPreviewService,
+    CameraPreviewSettingsUpdate,
+} from '../../../services/CameraPreviewService';
 import './CameraParametersPanel.scss';
 
 interface IProps {
     resourceId: string;
     language: Language;
     onClose: () => void;
+    onStreamChanged?: () => void;
 }
 
 const AUTO_REFRESH_INTERVAL_MS = 5000;
-const SHUTTER_STEPS_US = [100, 250, 500, 1000, 1333, 2000, 2500, 3333, 4000, 5000, 5714, 6667, 8000, 10000];
+const NEUTRAL_PREVIEW_SETTINGS = {
+    brightness: 0,
+    contrast: 1,
+    gamma: 1,
+    saturation: 1,
+    sharpness: 0,
+    denoise: 0,
+} as const;
 
-type EditableField = keyof CameraManualParameterUpdate;
+type EditableField = keyof CameraPreviewSettingsUpdate;
 type ParameterSource = 'HCNetSDK' | 'ISAPI' | 'OpenSight' | '资源配置' | 'HCNetSDK + ISAPI';
 type EditorOption = {value: string; label: string};
 type ParameterEditor = {
@@ -28,7 +37,6 @@ type ParameterEditor = {
     options?: EditorOption[];
     min?: number;
     max?: number;
-    requiresManualExposure?: boolean;
 };
 
 type ParameterRow = {
@@ -158,7 +166,22 @@ const rows = (
         format,
         source: 'HCNetSDK',
     });
+    const previewOriginal = NEUTRAL_PREVIEW_SETTINGS;
+    const previewCurrent = comparison.preview.current;
     return [
+        {
+            title: chinese ? '软件预览调参（1012）' : 'Software preview adjustments (1012)',
+            common: true,
+            source: 'OpenSight',
+            rows: [
+                {label: chinese ? '亮度' : 'Brightness', original: previewOriginal.brightness, current: previewCurrent.brightness, path: 'preview.current.brightness', format: number(2), editor: {field: 'brightness', type: 'number', min: -1, max: 1}},
+                {label: chinese ? '对比度' : 'Contrast', original: previewOriginal.contrast, current: previewCurrent.contrast, path: 'preview.current.contrast', format: number(2), editor: {field: 'contrast', type: 'number', min: 0, max: 3}},
+                {label: 'Gamma', original: previewOriginal.gamma, current: previewCurrent.gamma, path: 'preview.current.gamma', format: number(2), editor: {field: 'gamma', type: 'number', min: 0.1, max: 3}},
+                {label: chinese ? '饱和度' : 'Saturation', original: previewOriginal.saturation, current: previewCurrent.saturation, path: 'preview.current.saturation', format: number(2), editor: {field: 'saturation', type: 'number', min: 0, max: 3}},
+                {label: chinese ? '锐度' : 'Sharpness', original: previewOriginal.sharpness, current: previewCurrent.sharpness, path: 'preview.current.sharpness', format: number(2), editor: {field: 'sharpness', type: 'number', min: 0, max: 5}},
+                {label: chinese ? '降噪' : 'Denoise', original: previewOriginal.denoise, current: previewCurrent.denoise, path: 'preview.current.denoise', format: number(2), editor: {field: 'denoise', type: 'number', min: 0, max: 10}},
+            ],
+        },
         {
             title: chinese ? '连接参数' : 'Connection',
             common: false,
@@ -194,17 +217,17 @@ const rows = (
             ],
         },
         {
-            title: chinese ? '曝光与对焦' : 'Exposure and focus',
+            title: chinese ? '物理相机曝光与对焦（只读）' : 'Physical exposure and focus (read only)',
             common: true,
             source: 'HCNetSDK + ISAPI',
             rows: [
-                {label: chinese ? '曝光模式' : 'Exposure mode', original: beforeExposure?.mode, current: afterExposure?.mode, path: 'controls.state.exposure.mode', editor: {field: 'exposure_mode', type: 'select', requiresManualExposure: true, options: [{value: 'auto', label: chinese ? '自动' : 'Auto'}, {value: 'manual', label: chinese ? '手动' : 'Manual'}]}},
-                {label: chinese ? '快门' : 'Shutter', original: beforeExposure?.shutter_us, current: afterExposure?.shutter_us, path: 'controls.state.exposure.shutter_us', format: shutter, editor: {field: 'shutter_us', type: 'select', requiresManualExposure: true, options: SHUTTER_STEPS_US.map(value => ({value: String(value), label: shutter(value)}))}},
-                {label: chinese ? '增益等级' : 'Gain level', original: beforeExposure?.gain_level, current: afterExposure?.gain_level, path: 'controls.state.exposure.gain_level', editor: {field: 'gain_level', type: 'number', min: 0, max: 100, requiresManualExposure: true}},
-                {label: chinese ? '对焦模式' : 'Focus mode', original: beforeFocus?.mode, current: afterFocus?.mode, path: 'controls.state.focus.mode', editor: {field: 'focus_mode', type: 'select', options: [{value: 'auto', label: chinese ? '自动' : 'Auto'}, {value: 'manual', label: chinese ? '手动' : 'Manual'}, {value: 'semi_auto', label: chinese ? '半自动' : 'Semi-auto'}]}},
+                {label: chinese ? '曝光模式' : 'Exposure mode', original: beforeExposure?.mode, current: afterExposure?.mode, path: 'controls.state.exposure.mode'},
+                {label: chinese ? '快门' : 'Shutter', original: beforeExposure?.shutter_us, current: afterExposure?.shutter_us, path: 'controls.state.exposure.shutter_us', format: shutter},
+                {label: chinese ? '增益等级' : 'Gain level', original: beforeExposure?.gain_level, current: afterExposure?.gain_level, path: 'controls.state.exposure.gain_level'},
+                {label: chinese ? '对焦模式' : 'Focus mode', original: beforeFocus?.mode, current: afterFocus?.mode, path: 'controls.state.focus.mode'},
                 {label: chinese ? '对焦位置' : 'Focus position', original: beforeFocus?.position, current: afterFocus?.position, path: 'controls.state.focus.position'},
                 {label: chinese ? '相对位置' : 'Relative position', original: beforeFocus?.relative_position, current: afterFocus?.relative_position, path: 'controls.state.focus.relative_position'},
-                {label: chinese ? '对焦速度' : 'Focus speed', original: beforeFocus?.speed_level, current: afterFocus?.speed_level, path: 'controls.state.focus.speed_level', editor: {field: 'focus_speed_level', type: 'select', options: [1, 2, 3].map(value => ({value: String(value), label: String(value)}))}},
+                {label: chinese ? '对焦速度' : 'Focus speed', original: beforeFocus?.speed_level, current: afterFocus?.speed_level, path: 'controls.state.focus.speed_level'},
             ],
         },
         {
@@ -339,7 +362,7 @@ const rows = (
 };
 
 // eslint-disable-next-line complexity
-const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}) => {
+const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose, onStreamChanged}) => {
     const chinese = language === Language.CHINESE;
     const [advancedExpanded, setAdvancedExpanded] = useState(false);
     const [comparison, setComparison] = useState<CameraParameterComparison | null>(null);
@@ -347,11 +370,10 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
     const [error, setError] = useState('');
     const [edit, setEdit] = useState<PendingEdit | null>(null);
     const [saving, setSaving] = useState(false);
-    const [trialAction, setTrialAction] = useState<'apply' | 'revert' | 'close' | null>(null);
+    const [trialAction, setTrialAction] = useState<'apply' | 'revert' | null>(null);
     const [confirmApply, setConfirmApply] = useState(false);
     const requestTokenRef = useRef(0);
     const pausePollingRef = useRef(false);
-    const trialRef = useRef<CameraTrialStatus | undefined>();
 
     const refresh = useCallback(async () => {
         const requestToken = ++requestTokenRef.current;
@@ -389,10 +411,7 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
         };
     }, [refresh]);
 
-    const trial = comparison?.current.controls?.trial;
-    useEffect(() => {
-        trialRef.current = trial;
-    }, [trial]);
+    const previewDirty = comparison?.preview.dirty === true;
 
     const startEdit = (row: ParameterRow) => {
         if (!row.editor || saving || trialAction) return;
@@ -413,17 +432,15 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
 
     const saveEdit = async () => {
         if (!edit || saving) return;
-        const rawValue = edit.editor.type === 'number' || edit.editor.field === 'shutter_us' || edit.editor.field === 'focus_speed_level'
-            ? Number(edit.value)
-            : edit.value;
-        const payload = {[edit.editor.field]: rawValue} as CameraManualParameterUpdate;
+        const payload = {[edit.editor.field]: Number(edit.value)} as CameraPreviewSettingsUpdate;
         pausePollingRef.current = true;
         setSaving(true);
         setError('');
         try {
-            trialRef.current = await CameraParameterService.update(resourceId, payload);
+            await CameraPreviewService.update(resourceId, payload);
             setEdit(null);
             await refresh();
+            onStreamChanged?.();
             pausePollingRef.current = false;
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : String(reason));
@@ -439,9 +456,11 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
         setTrialAction(action);
         setError('');
         try {
-            if (action === 'apply') await CameraTrialService.apply(resourceId);
-            else await CameraTrialService.revert(resourceId);
-            trialRef.current = undefined;
+            if (action === 'apply') await CameraPreviewService.apply(resourceId);
+            else {
+                await CameraPreviewService.revert(resourceId);
+                onStreamChanged?.();
+            }
             setConfirmApply(false);
             await refresh();
         } catch (reason) {
@@ -452,24 +471,8 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
         }
     };
 
-    const closePanel = async () => {
-        if (saving || trialAction) return;
-        if (trial?.phase !== 'trial') {
-            onClose();
-            return;
-        }
-        pausePollingRef.current = true;
-        setTrialAction('close');
-        setError('');
-        try {
-            await CameraTrialService.revert(resourceId, true);
-            trialRef.current = undefined;
-            onClose();
-        } catch (reason) {
-            setError(reason instanceof Error ? reason.message : String(reason));
-            setTrialAction(null);
-            pausePollingRef.current = false;
-        }
+    const closePanel = () => {
+        if (!saving && !trialAction) onClose();
     };
 
     const sections = useMemo(
@@ -481,7 +484,17 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
     const visibleSections = useMemo(() => advancedExpanded
         ? [...commonSections, ...advancedSections]
         : commonSections, [advancedExpanded, commonSections, advancedSections]);
-    const changed = useMemo(() => new Set(comparison?.changed_paths || []), [comparison]);
+    const changed = useMemo(() => {
+        const values = new Set(comparison?.changed_paths || []);
+        if (comparison) {
+            Object.keys(comparison.preview.current).forEach(field => {
+                const name = field as keyof typeof comparison.preview.current;
+                const neutral = NEUTRAL_PREVIEW_SETTINGS[name];
+                if (comparison.preview.current[name] !== neutral) values.add(`preview.current.${name}`);
+            });
+        }
+        return values;
+    }, [comparison]);
     const isChanged = (path: string) => path.split('|').some(candidate => candidate === 'connection'
         ? Array.from(changed).some(item => item.startsWith('connection.'))
         : changed.has(candidate) || Array.from(changed).some(item => item.startsWith(`${candidate}.`)));
@@ -492,7 +505,7 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
                 <strong>{chinese ? '相机参数' : 'Camera parameters'}</strong>
                 <span>{advancedExpanded
                     ? (chinese ? '已展开设备当前可读取的全部参数；原始值始终锁定' : 'All currently readable parameters are expanded; originals stay locked')
-                    : (chinese ? '常用调参与画面判断；原始值始终锁定' : 'Everyday tuning and image evaluation; originals stay locked')}</span>
+                    : (chinese ? '常用软件预览调参；物理相机参数只读' : 'Everyday software preview tuning; physical camera parameters are read only')}</span>
             </div>
             <div className='CameraParametersActions'>
                 <span className={`CameraParametersAutoRefresh${loading ? ' loading' : ''}`} role='status'>
@@ -513,28 +526,28 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
             </div>}
             {comparison.current.errors.map(message => <div className='CameraParametersMessage warning' key={message}>{message}</div>)}
 
-            {trial?.phase === 'trial' && <div className='CameraParameterTrialBar'>
+            {previewDirty && <div className='CameraParameterTrialBar'>
                 {!confirmApply ? <>
                     <div>
-                        <strong>{chinese ? '当前参数仅处于临时试调' : 'Parameters are temporarily under trial'}</strong>
-                        <span>{chinese ? '未确认下发会自动恢复；下发属于谨慎操作。' : 'Unconfirmed changes auto-revert; applying requires care.'}</span>
+                        <strong>{chinese ? '当前为 1012 软件预览参数' : 'Current values belong to software preview 1012'}</strong>
+                        <span>{chinese ? '不会写入物理相机；可恢复或保存为 OpenSight 方案。' : 'They never write to the physical camera; restore or save as an OpenSight preset.'}</span>
                     </div>
                     <button type='button' disabled={!!trialAction || saving} onClick={() => finishTrial('revert')}>
                         {trialAction === 'revert' ? (chinese ? '正在撤销…' : 'Reverting…') : (chinese ? '撤销修改' : 'Revert')}
                     </button>
-                    <button type='button' className='danger' disabled={!!trialAction || saving || !trial.dirty} onClick={() => setConfirmApply(true)}>
-                        {chinese ? '下发到相机' : 'Apply to camera'}
+                    <button type='button' className='primary' disabled={!!trialAction || saving} onClick={() => setConfirmApply(true)}>
+                        {chinese ? '保存当前方案' : 'Save current preset'}
                     </button>
                 </> : <div className='CameraParameterApplyConfirm'>
                     <div>
-                        <strong>{chinese ? '确认下发当前参数？' : 'Apply the current parameters?'}</strong>
-                        <span>{chinese ? '确认后相机会保留当前设置，平台将停止自动恢复。' : 'The camera will keep these settings and automatic rollback will stop.'}</span>
+                        <strong>{chinese ? '确认保存 OpenSight 调参方案？' : 'Save this OpenSight adjustment preset?'}</strong>
+                        <span>{chinese ? '仅保存 1012 处理参数，不改变相机 SDK 参数。' : 'Only 1012 processing values are saved; camera SDK parameters stay unchanged.'}</span>
                     </div>
                     <button type='button' disabled={!!trialAction || saving} onClick={() => setConfirmApply(false)}>
                         {chinese ? '取消' : 'Cancel'}
                     </button>
-                    <button type='button' className='danger confirm' disabled={!!trialAction || saving} onClick={() => finishTrial('apply')}>
-                        {trialAction === 'apply' ? (chinese ? '正在下发…' : 'Applying…') : (chinese ? '确认下发' : 'Confirm apply')}
+                    <button type='button' className='primary confirm' disabled={!!trialAction || saving} onClick={() => finishTrial('apply')}>
+                        {trialAction === 'apply' ? (chinese ? '正在保存…' : 'Saving…') : (chinese ? '确认保存' : 'Confirm save')}
                     </button>
                 </div>}
             </div>}
@@ -550,8 +563,7 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose}
                 {section.rows.map(row => {
                     const format = row.format || text;
                     const changedRow = isChanged(row.path);
-                    const canEdit = !!row.editor && !!comparison.current.controls && comparison.current.live
-                        && (!row.editor.requiresManualExposure || comparison.current.controls.capabilities.manual_exposure !== false);
+                    const canEdit = !!row.editor;
                     const editing = edit?.path === row.path;
                     const supported = row.current !== null && row.current !== undefined && row.current !== '';
                     return <div className={`CameraParameterRow${changedRow ? ' changed' : ''}${supported ? '' : ' unsupported'}`} key={row.path}>

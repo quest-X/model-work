@@ -1,20 +1,18 @@
 import React from 'react';
-import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, fireEvent, render, screen} from '@testing-library/react';
 import {Language} from '../../../../data/LanguageConfig';
-import {CameraResourceService} from '../../../../services/CameraResourceService';
 import {QueueItem} from '../../../../store/queue/types';
 import {CanvasMultiViewStore} from '../../MultiView/CanvasMultiViewStore';
 import CameraPlayer from '../CameraPlayer';
 
 jest.mock('../../../../services/CameraResourceService', () => ({
     CameraResourceService: {
-        streamUrl: (_resourceId: string, _channelId: string, nonce: number) => `http://camera.test/live?nonce=${nonce}`,
-        controls: jest.fn(() => new Promise(() => undefined)),
-        autoExposure: jest.fn(),
-        autoFocus: jest.fn(),
-        restoreExposure: jest.fn(),
-        restoreFocus: jest.fn(),
+        streamUrl: (_resourceId: string, _channelId: string, nonce: number, branch: string) => `http://camera.test/live?branch=${branch}&nonce=${nonce}`,
     },
+}));
+
+jest.mock('../../../../services/CameraPreviewService', () => ({
+    CameraPreviewService: {get: () => new Promise(() => undefined)},
 }));
 
 jest.mock('../../../../services/CameraParameterService', () => ({
@@ -54,8 +52,6 @@ describe('CameraPlayer', () => {
     beforeEach(() => {
         act(() => CanvasMultiViewStore.setLayout('1x1'));
         drawImage.mockClear();
-        (CameraResourceService.controls as jest.Mock).mockReset().mockImplementation(() => new Promise(() => undefined));
-        (CameraResourceService.autoExposure as jest.Mock).mockReset();
         jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
     });
 
@@ -104,54 +100,18 @@ describe('CameraPlayer', () => {
         expect(screen.getByRole('button', {name: '关闭相机参数'})).toBeInTheDocument();
     });
 
-    it('locks the original frame on the left across live updates and layout changes', async () => {
-        const metrics = {luma: 0.3, saturation_ratio: 0.01, dark_ratio: 0.1, focus_score: 100, width: 640, height: 360};
-        const state = {
-            exposure: {mode: 'auto', shutter_us: 10000, gain_level: 20},
-            focus: {mode: 'auto', position: 0, relative_position: 0, speed_level: 1},
-        };
-        (CameraResourceService.controls as jest.Mock).mockResolvedValue({
-            capabilities: {auto_exposure: true, manual_exposure: true, exposure_metrics: true, auto_focus: true, focus_metrics: true},
-            active: {auto_exposure: false, auto_focus: false},
-            state,
-            metrics,
-        });
-        (CameraResourceService.autoExposure as jest.Mock).mockResolvedValue({
-            action: 'auto_exposure',
-            message: 'ok',
-            active: {auto_exposure: true, auto_focus: false},
-            state,
-            after: metrics,
-        });
+    it('shows two independent LIVE logical branches in comparison mode', () => {
         act(() => CanvasMultiViewStore.setLayout('1x2'));
         render(<CameraPlayer item={item} language={Language.CHINESE}/>);
 
         expect(screen.getByText('原始画面')).toBeInTheDocument();
         expect(screen.getByText('调参效果')).toBeInTheDocument();
-        const liveImage = screen.getByRole('img', {name: 'Camera 01 调参效果画面'});
-        Object.defineProperty(liveImage, 'naturalWidth', {configurable: true, value: 640});
-        Object.defineProperty(liveImage, 'naturalHeight', {configurable: true, value: 360});
-        fireEvent.load(liveImage);
-
-        await waitFor(() => expect(drawImage).toHaveBeenCalledWith(liveImage, 0, 0, 640, 360));
-        await waitFor(() => expect(screen.getByLabelText('Camera 01 原始画面')).toHaveClass('visible'));
-        expect(screen.getByText('已锁定')).toBeInTheDocument();
-
-        fireEvent.load(liveImage);
-        act(() => CanvasMultiViewStore.setLayout('1x1'));
-        act(() => CanvasMultiViewStore.setLayout('1x2'));
-
-        expect(screen.getByLabelText('Camera 01 原始画面')).toHaveClass('visible');
-        expect(screen.queryByRole('button', {name: '更新原始画面'})).not.toBeInTheDocument();
-        expect(drawImage).toHaveBeenCalledTimes(1);
-
-        fireEvent.click(screen.getByRole('button', {name: '智能调参'}));
-        const exposureButton = await screen.findByRole('button', {name: '自动曝光'});
-        await waitFor(() => expect(exposureButton).not.toBeDisabled());
-        fireEvent.click(exposureButton);
-        await waitFor(() => expect(CameraResourceService.autoExposure).toHaveBeenCalled());
-        await screen.findByText('ok');
-        expect(drawImage).toHaveBeenCalledTimes(1);
+        expect(screen.getByText('1011 · LIVE')).toBeInTheDocument();
+        expect(screen.getByText('1012 · LIVE')).toBeInTheDocument();
+        expect(screen.getByRole('img', {name: 'Camera 01 原始实时画面'})).toHaveAttribute('src', expect.stringContaining('branch=original'));
+        expect(screen.getByRole('img', {name: 'Camera 01 调参效果画面'})).toHaveAttribute('src', expect.stringContaining('branch=adjusted'));
+        expect(screen.queryByText('已锁定')).not.toBeInTheDocument();
+        expect(drawImage).not.toHaveBeenCalled();
     });
 
     it('freezes the current frame on pause and reconnects to the latest frame on resume', () => {

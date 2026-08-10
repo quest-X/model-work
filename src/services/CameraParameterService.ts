@@ -1,5 +1,6 @@
 import {CameraChannel, CameraDevice} from './CameraResourceService';
 import type {CameraControlsWithTrial, CameraTrialStatus} from './CameraTrialService';
+import type {CameraPreviewState} from './CameraPreviewService';
 import {getExtensionEngineBaseUrl} from '../utils/DefaultBackendUrl';
 
 export type CameraParameterSnapshot = {
@@ -25,6 +26,7 @@ export type CameraParameterComparison = {
     original: CameraParameterSnapshot;
     current: CameraParameterSnapshot;
     changed_paths: string[];
+    preview: CameraPreviewState;
 };
 
 export type CameraManualParameterUpdate = {

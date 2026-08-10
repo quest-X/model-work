@@ -215,3 +215,84 @@
 @keyframes camera-control-spin {
   to { transform: rotate(360deg); }
 }
+
+.CameraPreviewSafeBadge {
+  border: 1px solid rgba(70, 190, 111, 0.4);
+  border-radius: 3px;
+  background: rgba(70, 190, 111, 0.12);
+  padding: 2px 6px;
+  color: #83d7a0;
+  font-size: 8px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.CameraLogicalStreamSummary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.08);
+
+  > div {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 6px;
+    background: #202020;
+    padding: 10px 12px;
+  }
+
+  span { color: #62c1fa; font-size: 10px; font-weight: 700; }
+  strong { color: rgba(255, 255, 255, 0.75); font-size: 9px; font-weight: 500; }
+  em { color: #70cd90; font-size: 7px; font-style: normal; font-weight: 700; }
+}
+
+.CameraPreviewSliders {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px;
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  label > span {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  strong { color: rgba(255, 255, 255, 0.7); font-size: 9px; font-weight: 500; }
+  code { color: #82c9f5; font-size: 9px; }
+  input { width: 100%; accent-color: $primaryColor; cursor: pointer; }
+}
+
+.CameraPreviewActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 11px 13px 13px;
+
+  button {
+    min-height: 31px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.72);
+    cursor: pointer;
+    font-size: 9px;
+
+    &:first-child {
+      border-color: rgba(0, 158, 253, 0.55);
+      background: rgba(0, 158, 253, 0.14);
+      color: #b9e2fb;
+    }
+
+    &:hover:not(:disabled) { border-color: $primaryColor; color: #fff; }
+    &:disabled { cursor: not-allowed; opacity: 0.38; }
+  }
+}

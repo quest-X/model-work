@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Language} from '../../../data/LanguageConfig';
 import {CameraResourceService} from '../../../services/CameraResourceService';
 import {QueueItem} from '../../../store/queue/types';
@@ -17,8 +17,9 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     const chinese = language === Language.CHINESE;
     const cameraDisplayName = item.cameraHost || item.name;
     const imageRef = useRef<HTMLImageElement>(null);
+    const originalImageRef = useRef<HTMLImageElement>(null);
     const frozenFrameRef = useRef<HTMLCanvasElement>(null);
-    const baselineFrameRef = useRef<HTMLCanvasElement>(null);
+    const originalFrozenFrameRef = useRef<HTMLCanvasElement>(null);
     const sourceIdentity = `${item.cameraResourceId || ''}:${item.cameraChannelId || ''}`;
     const previousSourceIdentityRef = useRef(sourceIdentity);
     const activePlaybackStartedAtRef = useRef<number | null>(null);
@@ -30,12 +31,18 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     const [controlsOpen, setControlsOpen] = useState(false);
     const [parametersOpen, setParametersOpen] = useState(false);
     const [canvasLayout, setCanvasLayout] = useState(CanvasMultiViewStore.get().layout);
-    const [baselineReady, setBaselineReady] = useState(false);
     const comparisonMode = canvasLayout === '1x2';
-    const streamUrl = useMemo(() => CameraResourceService.streamUrl(
+    const adjustedStreamUrl = useMemo(() => CameraResourceService.streamUrl(
         item.cameraResourceId || '',
         item.cameraChannelId,
         nonce,
+        'adjusted',
+    ), [item.cameraResourceId, item.cameraChannelId, nonce]);
+    const originalStreamUrl = useMemo(() => CameraResourceService.streamUrl(
+        item.cameraResourceId || '',
+        item.cameraChannelId,
+        nonce,
+        'original',
     ), [item.cameraResourceId, item.cameraChannelId, nonce]);
 
     useEffect(() => CanvasMultiViewStore.subscribe(value => setCanvasLayout(value.layout)), []);
@@ -48,7 +55,6 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
         setElapsedSeconds(0);
         setIsPaused(false);
         setState('loading');
-        setBaselineReady(false);
         setNonce(previous => previous + 1);
     }, [sourceIdentity]);
 
@@ -63,29 +69,6 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
         const timer = window.setInterval(updateElapsed, 250);
         return () => window.clearInterval(timer);
     }, [state, isPaused]);
-
-    const captureBaseline = useCallback(() => {
-        if (baselineReady) return;
-        const image = imageRef.current;
-        const canvas = baselineFrameRef.current;
-        if (state !== 'playing' || isPaused || !image || !canvas || !image.naturalWidth || !image.naturalHeight) return;
-        const context = canvas.getContext('2d');
-        if (!context) return;
-        try {
-            canvas.width = image.naturalWidth;
-            canvas.height = image.naturalHeight;
-            context.drawImage(image, 0, 0, canvas.width, canvas.height);
-            setBaselineReady(true);
-        } catch (_) {
-            setBaselineReady(false);
-        }
-    }, [baselineReady, isPaused, state]);
-
-    useEffect(() => {
-        if (!comparisonMode || baselineReady || state !== 'playing' || isPaused) return undefined;
-        const frame = window.requestAnimationFrame(captureBaseline);
-        return () => window.cancelAnimationFrame(frame);
-    }, [baselineReady, captureBaseline, comparisonMode, isPaused, nonce, state]);
 
     const reconnect = () => {
         activePlaybackStartedAtRef.current = null;
@@ -106,6 +89,25 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
         const context = canvas.getContext('2d');
         if (!context) return;
         context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const originalImage = originalImageRef.current;
+        const originalCanvas = originalFrozenFrameRef.current;
+        if (
+            comparisonMode
+            && originalImage
+            && originalCanvas
+            && originalImage.naturalWidth
+            && originalImage.naturalHeight
+        ) {
+            originalCanvas.width = originalImage.naturalWidth;
+            originalCanvas.height = originalImage.naturalHeight;
+            originalCanvas.getContext('2d')?.drawImage(
+                originalImage,
+                0,
+                0,
+                originalCanvas.width,
+                originalCanvas.height,
+            );
+        }
         const startedAt = activePlaybackStartedAtRef.current;
         if (startedAt !== null) {
             accumulatedPlaybackSecondsRef.current += (performance.now() - startedAt) / 1000;
@@ -178,21 +180,25 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
             <div className={`CameraComparePane original ${comparisonMode ? '' : 'hidden'}`}>
                 <div className='CameraCompareLabel'>
                     <strong>{chinese ? '原始画面' : 'Original'}</strong>
-                    <span>{baselineReady ? (chinese ? '已锁定' : 'LOCKED') : (chinese ? '保存中' : 'CAPTURING')}</span>
+                    <span>1011 · {isPaused ? (chinese ? '已暂停' : 'PAUSED') : 'LIVE'}</span>
                 </div>
                 <canvas
-                    ref={baselineFrameRef}
-                    className={baselineReady ? 'CameraBaselineFrame visible' : 'CameraBaselineFrame'}
-                    aria-label={chinese ? `${item.name} 原始画面` : `${item.name} original frame`}
+                    ref={originalFrozenFrameRef}
+                    className={isPaused ? 'CameraBaselineFrame visible' : 'CameraBaselineFrame'}
+                    aria-label={chinese ? `${item.name} 原始暂停画面` : `${item.name} paused original frame`}
                 />
-                {!baselineReady && <div className='CameraBaselineNotice'>
-                    {chinese ? '正在保存调参前画面…' : 'Capturing the pre-adjustment frame…'}
-                </div>}
+                {!isPaused && <img
+                    ref={originalImageRef}
+                    key={`original-${nonce}`}
+                    src={originalStreamUrl}
+                    alt={chinese ? `${item.name} 原始实时画面` : `${item.name} original live stream`}
+                    draggable={false}
+                />}
             </div>
             <div className='CameraComparePane effect'>
                 {comparisonMode && <div className='CameraCompareLabel'>
                     <strong>{chinese ? '调参效果' : 'Adjusted result'}</strong>
-                    <span>LIVE</span>
+                    <span>1012 · {isPaused ? (chinese ? '已暂停' : 'PAUSED') : 'LIVE'}</span>
                 </div>}
                 {state === 'loading' && <div className='CameraPlayerNotice'>
                     <span className='CameraPlayerSpinner'/>
@@ -211,7 +217,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                 {!isPaused && <img
                     ref={imageRef}
                     key={nonce}
-                    src={streamUrl}
+                    src={adjustedStreamUrl}
                     alt={comparisonMode
                         ? (chinese ? `${item.name} 调参效果画面` : `${item.name} adjusted live stream`)
                         : (chinese ? `${item.name} 实时画面` : `${item.name} live stream`)}
@@ -227,12 +233,13 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                 {controlsOpen && item.cameraResourceId && <CameraControlPanel
                     resourceId={item.cameraResourceId}
                     language={language}
-                    onBeforeAction={captureBaseline}
+                    onStreamChanged={reconnect}
                     onClose={() => setControlsOpen(false)}
                 />}
                 {parametersOpen && item.cameraResourceId && <CameraParametersPanel
                     resourceId={item.cameraResourceId}
                     language={language}
+                    onStreamChanged={reconnect}
                     onClose={() => setParametersOpen(false)}
                 />}
             </div>

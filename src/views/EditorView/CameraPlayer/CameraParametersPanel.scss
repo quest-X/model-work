@@ -216,8 +216,8 @@
     cursor: pointer;
     font-size: 9px;
 
-    &.danger { border-color: rgba(223, 99, 79, 0.55); background: rgba(223, 99, 79, 0.13); color: #ffc1b6; }
-    &.confirm { background: rgba(223, 99, 79, 0.22); }
+    &.primary { border-color: rgba(44, 152, 218, 0.58); background: rgba(44, 152, 218, 0.14); color: #9bdcff; }
+    &.confirm { background: rgba(44, 152, 218, 0.24); }
     &:disabled { cursor: wait; opacity: 0.45; }
   }
 }
@@ -230,7 +230,7 @@
   gap: 8px;
 
   > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-  strong { color: #ffb5a8; }
+  strong { color: #9bdcff; }
 }
 
 .CameraParametersSection {

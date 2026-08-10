@@ -9,7 +9,7 @@ jest.mock('../../../../services/CameraParameterService', () => ({
     CameraParameterService: {compare: jest.fn()},
 }));
 jest.mock('../../../../services/CameraPreviewService', () => ({
-    CameraPreviewService: {update: jest.fn(), apply: jest.fn(), revert: jest.fn()},
+    CameraPreviewService: {update: jest.fn(), apply: jest.fn(), dispatch: jest.fn(), revert: jest.fn()},
 }));
 
 const neutral = {brightness: 0, contrast: 1, gamma: 1, saturation: 1, sharpness: 0, denoise: 0};
@@ -22,6 +22,7 @@ const preview = (current = neutral, dirty = false): CameraPreviewState => ({
     created_at: '2026-08-10T00:00:00Z',
     updated_at: null,
     applied_at: null,
+    last_dispatched_at: null,
     physical_camera_unchanged: true,
 });
 const snapshot = {
@@ -63,6 +64,13 @@ describe('CameraParametersPanel', () => {
         (CameraParameterService.compare as jest.Mock).mockResolvedValue(comparison());
         (CameraPreviewService.update as jest.Mock).mockResolvedValue(preview({...neutral, brightness: 0.25}, true));
         (CameraPreviewService.apply as jest.Mock).mockResolvedValue(preview({...neutral, brightness: 0.25}, false));
+        (CameraPreviewService.dispatch as jest.Mock).mockResolvedValue({
+            ...preview(neutral, false),
+            last_dispatched_at: '2026-08-10T08:00:00Z',
+            physical_camera_unchanged: false,
+            dispatch: {action: 'dispatch_preview_settings', message: 'ok', applied: {}},
+            resource_id: 'resource-1',
+        });
         (CameraPreviewService.revert as jest.Mock).mockResolvedValue(preview());
     });
     afterEach(() => jest.useRealTimers());
@@ -117,7 +125,7 @@ describe('CameraParametersPanel', () => {
         (CameraParameterService.compare as jest.Mock).mockResolvedValue(comparison(preview({...neutral, brightness: 0.25}, true)));
         render(<CameraParametersPanel resourceId='resource-1' language={Language.CHINESE} onClose={onClose}/>);
 
-        expect(await screen.findByText('当前为 1012 软件预览参数')).toBeInTheDocument();
+        expect(await screen.findByText('当前为待下发的 1012 软件参数')).toBeInTheDocument();
         const brightnessRow = screen.getByRole('button', {name: '编辑亮度'}).closest('.CameraParameterRow')!;
         expect(brightnessRow).toHaveTextContent('0.00');
         expect(brightnessRow).toHaveTextContent('0.25');
@@ -126,16 +134,19 @@ describe('CameraParametersPanel', () => {
         expect(CameraPreviewService.revert).not.toHaveBeenCalled();
     });
 
-    it('requires confirmation before saving an OpenSight preset and never offers physical dispatch', async () => {
+    it('requires red confirmation before dispatching preview parameters to the physical camera', async () => {
+        const onStreamChanged = jest.fn();
         (CameraParameterService.compare as jest.Mock).mockResolvedValue(comparison(preview({...neutral, brightness: 0.25}, true)));
-        render(<CameraParametersPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()}/>);
+        render(<CameraParametersPanel resourceId='resource-1' language={Language.CHINESE} onClose={jest.fn()} onStreamChanged={onStreamChanged}/>);
 
-        fireEvent.click(await screen.findByRole('button', {name: '保存当前方案'}));
-        expect(CameraPreviewService.apply).not.toHaveBeenCalled();
-        expect(screen.getByText('确认保存 OpenSight 调参方案？')).toBeInTheDocument();
-        expect(screen.queryByRole('button', {name: /下发到相机/})).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', {name: '确认保存'}));
-        await waitFor(() => expect(CameraPreviewService.apply).toHaveBeenCalledWith('resource-1'));
-        await waitFor(() => expect(screen.queryByText('确认保存 OpenSight 调参方案？')).not.toBeInTheDocument());
+        const dispatch = await screen.findByRole('button', {name: '参数下发到相机'});
+        expect(dispatch).toHaveClass('danger');
+        fireEvent.click(dispatch);
+        expect(CameraPreviewService.dispatch).not.toHaveBeenCalled();
+        expect(screen.getByText('确认将参数下发到物理相机？')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', {name: '确认下发'}));
+        await waitFor(() => expect(CameraPreviewService.dispatch).toHaveBeenCalledWith('resource-1'));
+        await waitFor(() => expect(onStreamChanged).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(screen.queryByText('确认将参数下发到物理相机？')).not.toBeInTheDocument());
     });
 });

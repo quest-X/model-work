@@ -18,7 +18,22 @@ export type CameraPreviewState = {
     created_at: string;
     updated_at: string | null;
     applied_at: string | null;
-    physical_camera_unchanged: true;
+    last_dispatched_at: string | null;
+    physical_camera_unchanged: boolean;
+};
+
+export type CameraPreviewDispatchState = CameraPreviewState & {
+    dispatch: {
+        action: 'dispatch_preview_settings';
+        message: string;
+        applied: Record<string, {
+            requested: number;
+            before: unknown;
+            target: unknown;
+            after: unknown;
+        }>;
+    };
+    resource_id: string;
 };
 
 export type CameraPreviewAutoAction = 'exposure' | 'focus' | 'wdr' | 'day-night';
@@ -85,6 +100,14 @@ export class CameraPreviewService {
 
     public static apply(resourceId: string): Promise<CameraPreviewState> {
         return CameraPreviewService.request(resourceId, '/apply', {method: 'POST'});
+    }
+
+    public static dispatch(resourceId: string): Promise<CameraPreviewDispatchState> {
+        return CameraPreviewService.request<CameraPreviewDispatchState>(
+            resourceId,
+            '/dispatch',
+            {method: 'POST'},
+        );
     }
 
     public static revert(resourceId: string): Promise<CameraPreviewState> {

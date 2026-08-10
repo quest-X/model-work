@@ -27,6 +27,7 @@ const state = (current = neutral, dirty = false): CameraPreviewState => ({
     created_at: '2026-08-10T00:00:00Z',
     updated_at: null,
     applied_at: null,
+    last_dispatched_at: null,
     physical_camera_unchanged: true,
 });
 

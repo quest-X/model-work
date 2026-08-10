@@ -216,8 +216,18 @@
     cursor: pointer;
     font-size: 9px;
 
-    &.primary { border-color: rgba(44, 152, 218, 0.58); background: rgba(44, 152, 218, 0.14); color: #9bdcff; }
-    &.confirm { background: rgba(44, 152, 218, 0.24); }
+    &.danger {
+      border-color: rgba(226, 78, 78, 0.72);
+      background: rgba(196, 48, 48, 0.28);
+      color: #ffb0b0;
+      font-weight: 600;
+    }
+    &.danger:hover:not(:disabled) {
+      border-color: rgba(255, 105, 105, 0.92);
+      background: rgba(210, 52, 52, 0.42);
+      color: #fff;
+    }
+    &.confirm { background: rgba(196, 48, 48, 0.42); }
     &:disabled { cursor: wait; opacity: 0.45; }
   }
 }
@@ -230,7 +240,7 @@
   gap: 8px;
 
   > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-  strong { color: #9bdcff; }
+  strong { color: #ffb0b0; }
 }
 
 .CameraParametersSection {

@@ -370,8 +370,8 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose,
     const [error, setError] = useState('');
     const [edit, setEdit] = useState<PendingEdit | null>(null);
     const [saving, setSaving] = useState(false);
-    const [trialAction, setTrialAction] = useState<'apply' | 'revert' | null>(null);
-    const [confirmApply, setConfirmApply] = useState(false);
+    const [trialAction, setTrialAction] = useState<'dispatch' | 'revert' | null>(null);
+    const [confirmDispatch, setConfirmDispatch] = useState(false);
     const requestTokenRef = useRef(0);
     const pausePollingRef = useRef(false);
 
@@ -450,18 +450,21 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose,
         }
     };
 
-    const finishTrial = async (action: 'apply' | 'revert') => {
+    const finishTrial = async (action: 'dispatch' | 'revert') => {
         if (saving || trialAction) return;
         pausePollingRef.current = true;
         setTrialAction(action);
         setError('');
         try {
-            if (action === 'apply') await CameraPreviewService.apply(resourceId);
+            if (action === 'dispatch') {
+                await CameraPreviewService.dispatch(resourceId);
+                onStreamChanged?.();
+            }
             else {
                 await CameraPreviewService.revert(resourceId);
                 onStreamChanged?.();
             }
-            setConfirmApply(false);
+            setConfirmDispatch(false);
             await refresh();
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : String(reason));
@@ -505,7 +508,7 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose,
                 <strong>{chinese ? '相机参数' : 'Camera parameters'}</strong>
                 <span>{advancedExpanded
                     ? (chinese ? '已展开设备当前可读取的全部参数；原始值始终锁定' : 'All currently readable parameters are expanded; originals stay locked')
-                    : (chinese ? '常用软件预览调参；物理相机参数只读' : 'Everyday software preview tuning; physical camera parameters are read only')}</span>
+                    : (chinese ? '常用软件预览调参；确认后可下发物理相机' : 'Preview software adjustments, then dispatch them to the camera')}</span>
             </div>
             <div className='CameraParametersActions'>
                 <span className={`CameraParametersAutoRefresh${loading ? ' loading' : ''}`} role='status'>
@@ -527,27 +530,27 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose,
             {comparison.current.errors.map(message => <div className='CameraParametersMessage warning' key={message}>{message}</div>)}
 
             {previewDirty && <div className='CameraParameterTrialBar'>
-                {!confirmApply ? <>
+                {!confirmDispatch ? <>
                     <div>
-                        <strong>{chinese ? '当前为 1012 软件预览参数' : 'Current values belong to software preview 1012'}</strong>
-                        <span>{chinese ? '不会写入物理相机；可恢复或保存为 OpenSight 方案。' : 'They never write to the physical camera; restore or save as an OpenSight preset.'}</span>
+                        <strong>{chinese ? '当前为待下发的 1012 软件参数' : 'Current 1012 adjustments are ready to dispatch'}</strong>
+                        <span>{chinese ? '确认后将映射并写入物理相机；成功后软件滤镜恢复中性。' : 'Confirmation writes mapped values to the camera, then resets the software filter.'}</span>
                     </div>
                     <button type='button' disabled={!!trialAction || saving} onClick={() => finishTrial('revert')}>
                         {trialAction === 'revert' ? (chinese ? '正在撤销…' : 'Reverting…') : (chinese ? '撤销修改' : 'Revert')}
                     </button>
-                    <button type='button' className='primary' disabled={!!trialAction || saving} onClick={() => setConfirmApply(true)}>
-                        {chinese ? '保存当前方案' : 'Save current preset'}
+                    <button type='button' className='danger' disabled={!!trialAction || saving} onClick={() => setConfirmDispatch(true)}>
+                        {chinese ? '参数下发到相机' : 'Dispatch to camera'}
                     </button>
                 </> : <div className='CameraParameterApplyConfirm'>
                     <div>
-                        <strong>{chinese ? '确认保存 OpenSight 调参方案？' : 'Save this OpenSight adjustment preset?'}</strong>
-                        <span>{chinese ? '仅保存 1012 处理参数，不改变相机 SDK 参数。' : 'Only 1012 processing values are saved; camera SDK parameters stay unchanged.'}</span>
+                        <strong>{chinese ? '确认将参数下发到物理相机？' : 'Dispatch these parameters to the physical camera?'}</strong>
+                        <span>{chinese ? '这会改变相机成像参数；系统将先备份、写后回读，失败时自动恢复。' : 'This changes camera imaging settings; OpenSight backs up, verifies, and rolls back on failure.'}</span>
                     </div>
-                    <button type='button' disabled={!!trialAction || saving} onClick={() => setConfirmApply(false)}>
+                    <button type='button' disabled={!!trialAction || saving} onClick={() => setConfirmDispatch(false)}>
                         {chinese ? '取消' : 'Cancel'}
                     </button>
-                    <button type='button' className='primary confirm' disabled={!!trialAction || saving} onClick={() => finishTrial('apply')}>
-                        {trialAction === 'apply' ? (chinese ? '正在保存…' : 'Saving…') : (chinese ? '确认保存' : 'Confirm save')}
+                    <button type='button' className='danger confirm' disabled={!!trialAction || saving} onClick={() => finishTrial('dispatch')}>
+                        {trialAction === 'dispatch' ? (chinese ? '正在下发…' : 'Dispatching…') : (chinese ? '确认下发' : 'Confirm dispatch')}
                     </button>
                 </div>}
             </div>}

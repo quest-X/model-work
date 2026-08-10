@@ -20,6 +20,29 @@ export type CameraPreviewState = {
     physical_camera_unchanged: true;
 };
 
+export type CameraPreviewAutoAction = 'exposure' | 'focus' | 'wdr' | 'day-night';
+
+export type CameraPreviewMetrics = {
+    luma: number;
+    dark_ratio: number;
+    clipped_ratio: number;
+    focus_score: number;
+    saturation: number;
+    width: number;
+    height: number;
+};
+
+export type CameraPreviewAutoResult = CameraPreviewState & {
+    auto_adjustment: {
+        action: CameraPreviewAutoAction;
+        mode: string | null;
+        metrics: CameraPreviewMetrics;
+        message: string;
+        software_branch_only: true;
+        physical_camera_unchanged: true;
+    };
+};
+
 export type CameraPreviewSettingsUpdate = Partial<CameraPreviewSettings>;
 
 const cameraBaseUrl = (): string =>
@@ -31,11 +54,11 @@ const errorDetail = async (response: Response): Promise<string> => {
 };
 
 export class CameraPreviewService {
-    private static async request(
+    private static async request<T = CameraPreviewState>(
         resourceId: string,
         suffix: string,
         init?: RequestInit,
-    ): Promise<CameraPreviewState> {
+    ): Promise<T> {
         const response = await fetch(
             `${cameraBaseUrl()}/resources/${encodeURIComponent(resourceId)}/preview-settings${suffix}`,
             init,
@@ -69,5 +92,16 @@ export class CameraPreviewService {
 
     public static reset(resourceId: string): Promise<CameraPreviewState> {
         return CameraPreviewService.request(resourceId, '/reset', {method: 'POST'});
+    }
+
+    public static autoAdjust(
+        resourceId: string,
+        action: CameraPreviewAutoAction,
+    ): Promise<CameraPreviewAutoResult> {
+        return CameraPreviewService.request(
+            resourceId,
+            `/auto/${encodeURIComponent(action)}`,
+            {method: 'POST'},
+        );
     }
 }

@@ -110,8 +110,29 @@ describe('CameraPlayer', () => {
         expect(screen.getByText('1012 · LIVE')).toBeInTheDocument();
         expect(screen.getByRole('img', {name: 'Camera 01 原始实时画面'})).toHaveAttribute('src', expect.stringContaining('branch=original'));
         expect(screen.getByRole('img', {name: 'Camera 01 调参效果画面'})).toHaveAttribute('src', expect.stringContaining('branch=adjusted'));
+        expect(screen.getByText('正在建立原始画面…')).toBeInTheDocument();
+        expect(screen.getByText('正在建立调参画面…')).toBeInTheDocument();
         expect(screen.queryByText('已锁定')).not.toBeInTheDocument();
         expect(drawImage).not.toHaveBeenCalled();
+
+        fireEvent.load(screen.getByRole('img', {name: 'Camera 01 原始实时画面'}));
+        expect(screen.queryByText('正在建立原始画面…')).not.toBeInTheDocument();
+        expect(screen.getByText('正在建立调参画面…')).toBeInTheDocument();
+
+        fireEvent.load(screen.getByRole('img', {name: 'Camera 01 调参效果画面'}));
+        expect(screen.queryByText('正在建立调参画面…')).not.toBeInTheDocument();
+    });
+
+    it('reports original and adjusted stream failures independently', () => {
+        act(() => CanvasMultiViewStore.setLayout('1x2'));
+        render(<CameraPlayer item={item} language={Language.CHINESE}/>);
+
+        fireEvent.error(screen.getByRole('img', {name: 'Camera 01 原始实时画面'}));
+        expect(screen.getByText('原始画面连接失败')).toBeInTheDocument();
+        expect(screen.getByText('正在建立调参画面…')).toBeInTheDocument();
+
+        fireEvent.error(screen.getByRole('img', {name: 'Camera 01 调参效果画面'}));
+        expect(screen.getByText('调参画面连接失败')).toBeInTheDocument();
     });
 
     it('freezes the current frame on pause and reconnects to the latest frame on resume', () => {

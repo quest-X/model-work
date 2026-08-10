@@ -140,6 +140,7 @@ export class ProjectRestoreService {
                 || queueItems.find(item => item.id === storedProject.videoRecovery?.sourceQueueItemId)
                 || queueItems[0];
             const isVideoProject = this.isVideoProject(storedProject, activeQueueItem);
+            const isCameraProject = activeQueueItem?.type === QueueItemType.CAMERA;
 
             onProgress?.('正在校验恢复数据...');
             let restoredImages = this.buildRestoredImages(
@@ -164,7 +165,7 @@ export class ProjectRestoreService {
                     restoredImages = this.reconcileVideoTimeline([], metadata.totalFrames, queueId);
                 }
             }
-            if (restoredImages.length === 0) {
+            if (restoredImages.length === 0 && !isCameraProject) {
                 throw new Error(isVideoProject ? '视频时间轴数据为空' : '没有可恢复的图像文件');
             }
 

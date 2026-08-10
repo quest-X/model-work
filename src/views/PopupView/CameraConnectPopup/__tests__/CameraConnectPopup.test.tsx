@@ -105,18 +105,17 @@ describe('CameraConnectPopup LAN discovery', () => {
         (CameraResourceService.open as jest.Mock).mockResolvedValue(undefined);
     });
 
-    it('fills editable saved credentials and updates the existing camera after confirmation', async () => {
+    it('shows saved cameras without rescanning and updates the selected camera after confirmation', async () => {
         render(<CameraConnectPopup language={Language.CHINESE} imagesData={[]} />);
 
-        await waitFor(() => expect(CameraResourceService.list).toHaveBeenCalledTimes(1));
+        const savedCamera = await screen.findByRole('button', {
+            name: '使用已保存相机 IP CAMERA 192.168.10.12',
+        });
+        expect(CameraResourceService.list).toHaveBeenCalledTimes(1);
+        expect(CameraResourceService.discover).not.toHaveBeenCalled();
+        expect(screen.getByText('上次使用的相机')).toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('button', {name: '扫描局域网'}));
-
-        await waitFor(() => expect(screen.getByText('IP CAMERA')).toBeInTheDocument());
-        expect(CameraResourceService.discover).toHaveBeenCalledTimes(1);
-        expect(screen.getByText(/发现 1 台相机/)).toBeInTheDocument();
-
-        fireEvent.click(screen.getByText('IP CAMERA').closest('button') as HTMLButtonElement);
+        fireEvent.click(savedCamera);
 
         await waitFor(() => {
             expect(CameraResourceService.credentials).toHaveBeenCalledWith(savedResource.id);
@@ -127,7 +126,7 @@ describe('CameraConnectPopup LAN discovery', () => {
         expect(ports[0]).toHaveValue(80);
         expect(ports[1]).toHaveValue(554);
         expect(screen.queryByText('已记住')).not.toBeInTheDocument();
-        expect(screen.getByText('已保存')).toBeInTheDocument();
+        expect(screen.getByText('已选择')).toBeInTheDocument();
         expect(screen.queryByText('填入表单')).not.toBeInTheDocument();
         expect(screen.queryByText('已记住此相机')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', {name: '使用已保存连接'})).not.toBeInTheDocument();

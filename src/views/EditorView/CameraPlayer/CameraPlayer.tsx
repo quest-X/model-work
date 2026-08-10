@@ -26,6 +26,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     const accumulatedPlaybackSecondsRef = useRef(0);
     const [nonce, setNonce] = useState(Date.now());
     const [state, setState] = useState<'loading' | 'playing' | 'error'>('loading');
+    const [originalState, setOriginalState] = useState<'loading' | 'playing' | 'error'>('loading');
     const [isPaused, setIsPaused] = useState(false);
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
     const [controlsOpen, setControlsOpen] = useState(false);
@@ -55,6 +56,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
         setElapsedSeconds(0);
         setIsPaused(false);
         setState('loading');
+        setOriginalState('loading');
         setNonce(previous => previous + 1);
     }, [sourceIdentity]);
 
@@ -76,6 +78,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
         setElapsedSeconds(0);
         setIsPaused(false);
         setState('loading');
+        setOriginalState('loading');
         setNonce(previous => previous + 1);
     };
 
@@ -120,6 +123,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     const resume = () => {
         setIsPaused(false);
         setState('loading');
+        setOriginalState('loading');
         setNonce(previous => previous + 1);
     };
 
@@ -182,6 +186,15 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                     <strong>{chinese ? '原始画面' : 'Original'}</strong>
                     <span>1011 · {isPaused ? (chinese ? '已暂停' : 'PAUSED') : 'LIVE'}</span>
                 </div>
+                {originalState === 'loading' && !isPaused && <div className='CameraPlayerNotice'>
+                    <span className='CameraPlayerSpinner'/>
+                    {chinese ? '正在建立原始画面…' : 'Opening original stream…'}
+                </div>}
+                {originalState === 'error' && !isPaused && <div className='CameraPlayerNotice error'>
+                    <strong>{chinese ? '原始画面连接失败' : 'Unable to open original stream'}</strong>
+                    <span>{chinese ? '请检查相机网络、RTSP 端口和码流通道。' : 'Check the camera network, RTSP port, and stream channel.'}</span>
+                    <button type='button' onClick={reconnect}>{chinese ? '重试' : 'Retry'}</button>
+                </div>}
                 <canvas
                     ref={originalFrozenFrameRef}
                     className={isPaused ? 'CameraBaselineFrame visible' : 'CameraBaselineFrame'}
@@ -192,6 +205,8 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                     key={`original-${nonce}`}
                     src={originalStreamUrl}
                     alt={chinese ? `${item.name} 原始实时画面` : `${item.name} original live stream`}
+                    onLoad={() => setOriginalState('playing')}
+                    onError={() => setOriginalState('error')}
                     draggable={false}
                 />}
             </div>
@@ -202,10 +217,14 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                 </div>}
                 {state === 'loading' && <div className='CameraPlayerNotice'>
                     <span className='CameraPlayerSpinner'/>
-                    {chinese ? '正在建立实时画面…' : 'Opening live stream…'}
+                    {comparisonMode
+                        ? (chinese ? '正在建立调参画面…' : 'Opening adjusted stream…')
+                        : (chinese ? '正在建立实时画面…' : 'Opening live stream…')}
                 </div>}
                 {state === 'error' && <div className='CameraPlayerNotice error'>
-                    <strong>{chinese ? '实时画面连接失败' : 'Unable to open live stream'}</strong>
+                    <strong>{comparisonMode
+                        ? (chinese ? '调参画面连接失败' : 'Unable to open adjusted stream')
+                        : (chinese ? '实时画面连接失败' : 'Unable to open live stream')}</strong>
                     <span>{chinese ? '请检查相机网络、RTSP 端口和码流通道。' : 'Check the camera network, RTSP port, and stream channel.'}</span>
                     <button type='button' onClick={reconnect}>{chinese ? '重试' : 'Retry'}</button>
                 </div>}

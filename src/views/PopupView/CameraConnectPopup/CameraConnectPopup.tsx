@@ -69,6 +69,8 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
     const [discovery, setDiscovery] = useState<CameraDiscoveryResponse | null>(null);
     const [savedResources, setSavedResources] = useState<CameraResource[]>([]);
     const [savedResource, setSavedResource] = useState<CameraResource | null>(null);
+    const [loadingSavedResources, setLoadingSavedResources] = useState(true);
+    const [savedResourcesError, setSavedResourcesError] = useState('');
     const [loadingCredentials, setLoadingCredentials] = useState(false);
 
     useEffect(() => () => {
@@ -81,23 +83,31 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
             .then(resources => {
                 if (active) setSavedResources(resources);
             })
-            .catch(() => {
-                // Remembered connections are optional; manual entry must remain available.
+            .catch(resourceError => {
+                if (active) {
+                    setSavedResourcesError(resourceError instanceof Error
+                        ? resourceError.message
+                        : String(resourceError));
+                }
+            })
+            .finally(() => {
+                if (active) setLoadingSavedResources(false);
             });
         return () => {
             active = false;
         };
     }, []);
 
+    const orderedSavedResources = useMemo(() => [...savedResources]
+        .sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at)), [savedResources]);
+
     const savedByHost = useMemo(() => {
         const remembered = new Map<string, CameraResource>();
-        [...savedResources]
-            .sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at))
-            .forEach(resource => {
+        orderedSavedResources.forEach(resource => {
                 if (!remembered.has(resource.host)) remembered.set(resource.host, resource);
             });
         return remembered;
-    }, [savedResources]);
+    }, [orderedSavedResources]);
 
     const requestBody = useMemo(() => ({
         scheme,
@@ -286,6 +296,57 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
                     ? '使用 ISAPI Digest 验证海康网络摄像机。首次确认后会自动记住连接方式；下次选择相机时直接填入账号密码，可自行修改。'
                     : 'Connect with Hikvision ISAPI Digest. Confirmed settings are remembered and filled into the editable form when the camera is selected again.'}
             </div>
+
+            <section className='CameraSavedPanel' aria-label={chinese ? '已保存的相机' : 'Saved cameras'}>
+                <div className='CameraSavedHeader'>
+                    <div>
+                        <strong>{chinese ? '上次使用的相机' : 'Previously used cameras'}</strong>
+                        <span>{chinese
+                            ? '选择后会读取已加密保存的连接信息，无需重新扫描局域网。'
+                            : 'Select a camera to load its encrypted saved connection without scanning the LAN again.'}</span>
+                    </div>
+                    <span className='CameraSavedCount'>{orderedSavedResources.length}</span>
+                </div>
+                {loadingSavedResources && <div className='CameraDiscoverySummary'>
+                    {chinese ? '正在读取已保存相机…' : 'Loading saved cameras…'}
+                </div>}
+                {savedResourcesError && <div className='CameraDiscoveryError'>
+                    {chinese ? `读取已保存相机失败：${savedResourcesError}` : `Unable to load saved cameras: ${savedResourcesError}`}
+                </div>}
+                {!loadingSavedResources && !savedResourcesError && orderedSavedResources.length === 0 &&
+                    <div className='CameraDiscoveryEmpty'>
+                        {chinese ? '暂无已保存相机，可手动填写或扫描局域网。' : 'No saved cameras. Enter one manually or scan the LAN.'}
+                    </div>}
+                {orderedSavedResources.length > 0 && <div className='CameraDiscoveryResults CameraSavedResults'>
+                    {orderedSavedResources.map(resource => {
+                        const selected = savedResource?.id === resource.id;
+                        return <button
+                            type='button'
+                            className={`CameraDiscoveryRow CameraSavedRow remembered${selected ? ' selected' : ''}`}
+                            key={resource.id}
+                            onClick={() => void useSavedResource(resource)}
+                            disabled={loadingCredentials}
+                            aria-label={`${chinese ? '使用已保存相机' : 'Use saved camera'} ${resource.name} ${resource.host}`}
+                            aria-pressed={selected}
+                        >
+                            <span className='CameraDiscoveryDot confirmed'/>
+                            <span className='CameraDiscoveryIdentity'>
+                                <strong>{resource.name}</strong>
+                                <span>{resource.device.model || (chinese ? '网络相机' : 'Network camera')}</span>
+                            </span>
+                            <code>{resource.host}</code>
+                            <span className='CameraDiscoveryPorts'>
+                                {chinese ? '通道' : 'Channel'} {resource.channel_id} · RTSP {resource.rtsp_port}
+                            </span>
+                            <span className='CameraDiscoveryStatus saved'>
+                                {selected
+                                    ? (chinese ? '已选择' : 'Selected')
+                                    : (chinese ? '使用' : 'Use')}
+                            </span>
+                        </button>;
+                    })}
+                </div>}
+            </section>
 
             {result && <div className='CameraBanner success CameraConnectionSuccess'>
                 {chinese ? '相机连接成功' : 'Camera connected'}

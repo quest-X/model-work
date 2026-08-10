@@ -184,7 +184,8 @@ const App: React.FC<IProps> = (
                                 <span className="info-value">{storedDataInfo.isVideoProject ? '视频' : '图像'}</span>
                             </div>
                         )}
-                        {storedDataInfo.validImageCount !== undefined && (
+                        {storedDataInfo.validImageCount !== undefined &&
+                         (storedDataInfo.imageCount ?? 0) > 0 && (
                             <div className="info-row">
                                 <span className={storedDataInfo.validImageCount === 0 ? 'info-label warn' : 'info-label'}>
                                     {storedDataInfo.isVideoProject ? '已标注帧' : '已标注图像'}

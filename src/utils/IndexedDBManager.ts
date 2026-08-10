@@ -256,6 +256,7 @@ const getRecoveryLabelCount = (
 const hasRecoverableProjectData = (
     projectData: StoredProjectData,
     isVideoProject: boolean,
+    hasCameraState: boolean,
     byteBackedImages: StoredImageData[],
     queueFrames: RecoverableQueueFrame[],
     reconstructableTimelineFrameCount: number,
@@ -265,7 +266,8 @@ const hasRecoverableProjectData = (
         projectData.videoRecovery ||
         projectData.extractionMetadata,
     );
-    return hasVideoState ||
+    return hasCameraState ||
+        hasVideoState ||
         reconstructableTimelineFrameCount > 0 ||
         byteBackedImages.length > 0 ||
         queueFrames.some(({recoverable}) => recoverable);
@@ -592,6 +594,9 @@ export class IndexedDBManager {
         const activeQueueItem = projectData.activeQueueItemId
             ? queueItems.get(projectData.activeQueueItemId)
             : undefined;
+        const hasCameraState = Array.from(queueItems.values()).some(item =>
+            item.type === QueueItemType.CAMERA && Boolean(item.cameraResourceId)
+        );
         const isVideoProject = Boolean(
             projectData.videoRecovery ||
             projectData.isVideoProject ||
@@ -623,6 +628,7 @@ export class IndexedDBManager {
             hasRecoverableProject: hasRecoverableProjectData(
                 projectData,
                 isVideoProject,
+                hasCameraState,
                 byteBackedImages,
                 queueFrames,
                 reconstructableTimelineFrameCount,
@@ -945,16 +951,32 @@ export class IndexedDBManager {
             this.activeReadLastModified = null;
             return null;
         }
+        // Recheck only legacy "empty" metadata. This lets new recovery rules
+        // (for example camera-only workspaces with zero image bytes) repair an
+        // older false-negative without weakening the exact revision pinned by
+        // an already recoverable prompt.
+        let currentMeta = location.meta;
+        if (!currentMeta.hasRecoverableProject && currentMeta.imageCount === 0) {
+            const storedProject = location.legacyProject || await this.readProjectById(location.projectId);
+            if (storedProject) {
+                currentMeta = this.publicMeta(this.buildMeta(
+                    storedProject,
+                    location.workspaceId || 'legacy',
+                    location.projectId,
+                    storedProject.lastModified || location.meta.lastModified,
+                ));
+            }
+        }
         // Pin the exact workspace/project pair displayed by the recovery prompt.
         // loadProject() must not run latest-selection again after user confirmation.
         this.pinnedReadLocation = {
             ...location,
-            meta: {...location.meta},
+            meta: {...currentMeta},
         };
         this.activeReadProjectId = location.projectId;
         this.activeReadWorkspaceId = location.workspaceId;
-        this.activeReadLastModified = location.meta.lastModified;
-        return location.meta;
+        this.activeReadLastModified = currentMeta.lastModified;
+        return currentMeta;
     }
 
     public static async hasStoredProject(): Promise<boolean> {

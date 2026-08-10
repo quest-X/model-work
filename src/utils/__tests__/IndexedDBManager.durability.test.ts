@@ -599,6 +599,50 @@ describe('IndexedDBManager durability', () => {
         expect(loaded).toEqual(expect.objectContaining({version: 'A', workspaceId: 'tab-local'}));
     });
 
+    it('reclassifies legacy empty metadata when the stored project is a camera workspace', async () => {
+        const location = {
+            projectId: 'workspace:tab-camera',
+            workspaceId: 'tab-camera',
+            meta: {
+                imageCount: 0,
+                validImageCount: 0,
+                labelCount: 0,
+                isVideoProject: false,
+                hasRecoverableProject: false,
+                lastModified: 10,
+            },
+        };
+        const cameraProject: StoredProjectData = {
+            ...project(),
+            id: location.projectId,
+            workspaceId: location.workspaceId,
+            lastModified: 10,
+            queueItems: [{
+                id: 'camera-resource-1',
+                name: 'North gate',
+                type: QueueItemType.CAMERA,
+                status: QueueItemStatus.COMPLETED,
+                uploadedAt: 1,
+                cameraResourceId: 'resource-1',
+                cameraChannelId: '101',
+            }],
+            activeQueueItemId: 'camera-resource-1',
+        };
+        (IndexedDBManager as any).db = {};
+        (IndexedDBManager as any).workspaceId = 'tab-camera';
+        jest.spyOn(IndexedDBManager as any, 'resolveProjectLocation').mockResolvedValue(location);
+        const readProject = jest.spyOn(IndexedDBManager as any, 'readProjectById')
+            .mockResolvedValue(cameraProject);
+
+        await expect(IndexedDBManager.getProjectMeta()).resolves.toEqual(expect.objectContaining({
+            imageCount: 0,
+            validImageCount: 0,
+            hasRecoverableProject: true,
+            lastModified: 10,
+        }));
+        expect(readProject).toHaveBeenCalledWith(location.projectId);
+    });
+
     it('rejects when the pinned workspace row advances before confirmation', async () => {
         const pinnedLocation = {
             projectId: 'workspace:tab-a',
@@ -789,6 +833,37 @@ describe('IndexedDBManager durability', () => {
             imageCount: 1,
             validImageCount: 1,
             labelCount: 1,
+            hasRecoverableProject: true,
+        }));
+    });
+
+    it('treats a saved camera queue as recoverable without image bytes', () => {
+        const cameraProject: StoredProjectData = {
+            ...project(),
+            images: [],
+            queueItems: [{
+                id: 'camera-resource-1',
+                name: 'North gate',
+                type: QueueItemType.CAMERA,
+                status: QueueItemStatus.COMPLETED,
+                uploadedAt: 1,
+                cameraResourceId: 'resource-1',
+                cameraChannelId: '101',
+                cameraHost: '192.168.10.12',
+            }],
+            activeQueueItemId: 'camera-resource-1',
+        };
+
+        const meta = (IndexedDBManager as any).buildMeta(
+            cameraProject,
+            'tab-camera',
+            'workspace:tab-camera',
+            10,
+        );
+
+        expect(meta).toEqual(expect.objectContaining({
+            imageCount: 0,
+            validImageCount: 0,
             hasRecoverableProject: true,
         }));
     });

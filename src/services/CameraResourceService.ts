@@ -281,10 +281,12 @@ export class CameraResourceService {
             {store},
             {QueueActions},
             {addQueueItem, updateQueueItem},
+            {AutoSaveService},
         ] = await Promise.all([
             import('../index'),
             import('../logic/actions/QueueActions'),
             import('../store/queue/actionCreators'),
+            import('./AutoSaveService'),
         ]);
         const item = CameraResourceService.toQueueItem(resource);
         const existing = store.getState().queue.items.find(candidate => candidate.id === item.id);
@@ -294,5 +296,9 @@ export class CameraResourceService {
             store.dispatch(addQueueItem(item));
         }
         await QueueActions.switchToQueueItem(existing ? {...existing, ...item} : item, imagesData);
+        // A camera has no local image bytes, so persist its queue identity as
+        // soon as the live workspace opens instead of relying on the regular
+        // edit debounce or a best-effort beforeunload write.
+        await AutoSaveService.saveCurrentState(true);
     }
 }

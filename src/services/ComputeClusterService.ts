@@ -76,6 +76,8 @@ export type ComputeClusterStatus = {
         allowed_task_types: string[];
         resource_orchestration?: boolean;
         work_agent_execution?: boolean;
+        resource_knowledge_graph?: boolean;
+        graph_schema?: 'resource-knowledge-graph.v1';
         evidence_projection?: 'metadata-only-v1';
         placement_modes?: ('automatic' | 'manual')[];
     };
@@ -172,6 +174,56 @@ export type ComputeSchedulerResponse = {
     }[];
 };
 
+export type ComputeResourceGraphEntity = {
+    entity_id: string;
+    kind: 'compute_group' | 'compute_node' | 'compute_resource' | 'work_agent' | 'managed_device';
+    label: string;
+    state: 'available' | 'degraded' | 'unavailable';
+    callable: boolean;
+    node_id?: string | null;
+    task_type?: ComputeTaskType | null;
+    capability?: string | null;
+    category?: 'diagnostic' | 'information' | null;
+    platform?: string | null;
+    architecture?: string | null;
+    cpu_logical?: number | null;
+    memory_available_bytes?: number | null;
+    disk_free_bytes?: number | null;
+    gpu_count?: number | null;
+    modes: ComputeTaskMode[];
+    available_node_count?: number | null;
+    provider?: string | null;
+    device_kind?: string | null;
+    device_status?: string | null;
+    channels?: number | null;
+};
+
+export type ComputeResourceGraphRelation = {
+    relation_id: string;
+    kind: 'contains' | 'provides' | 'can_execute' | 'manages';
+    source_id: string;
+    target_id: string;
+    active: boolean;
+    reason: 'available' | 'node_offline' | 'capability_missing' | 'not_console_allowlisted';
+};
+
+export type ComputeResourceGraph = {
+    schema_version: 'resource-knowledge-graph.v1';
+    group_id: string;
+    generated_at: number;
+    summary: {
+        entities: number;
+        relations: number;
+        online_nodes: number;
+        compute_resources: number;
+        managed_devices: number;
+        work_agents: number;
+        callable_work_agents: number;
+    };
+    entities: ComputeResourceGraphEntity[];
+    relations: ComputeResourceGraphRelation[];
+};
+
 const baseUrl = (): string =>
     `${getExtensionEngineBaseUrl()}/extensions/compute-cluster`;
 
@@ -207,6 +259,10 @@ export class ComputeClusterService {
 
     public static scheduler(signal?: AbortSignal): Promise<ComputeSchedulerResponse> {
         return request('/scheduler', signal);
+    }
+
+    public static resourceGraph(signal?: AbortSignal): Promise<ComputeResourceGraph> {
+        return request('/resource-graph', signal);
     }
 
     public static submitTask(

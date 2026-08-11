@@ -6,6 +6,7 @@ import {
     ComputeClusterNode,
     ComputeClusterService,
     ComputeClusterStatus,
+    ComputeResourceGraph,
     ComputeSchedulerResponse,
     ComputeTask,
     ComputeTaskMode,
@@ -14,6 +15,7 @@ import {
 } from '../../../services/ComputeClusterService';
 import {AppState} from '../../../store';
 import './ComputeClusterPopup.scss';
+import {ResourceKnowledgeGraph} from './ResourceKnowledgeGraph';
 
 interface IProps {
     language: Language;
@@ -235,6 +237,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     const [status, setStatus] = useState<ComputeClusterStatus | null>(null);
     const [tasks, setTasks] = useState<ComputeTask[]>([]);
     const [scheduler, setScheduler] = useState<ComputeSchedulerResponse | null>(null);
+    const [resourceGraph, setResourceGraph] = useState<ComputeResourceGraph | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState('');
@@ -284,15 +287,19 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             }
             if (nextStatus.task_control?.enabled) {
                 try {
-                    const [response, schedulerResponse] = await Promise.all([
+                    const [response, schedulerResponse, graphResponse] = await Promise.all([
                         ComputeClusterService.tasks(signal),
                         nextStatus.task_control.resource_orchestration
                             ? ComputeClusterService.scheduler(signal)
+                            : Promise.resolve(null),
+                        nextStatus.task_control.resource_knowledge_graph
+                            ? ComputeClusterService.resourceGraph(signal)
                             : Promise.resolve(null),
                     ]);
                     if (mounted.current) {
                         setTasks(response.tasks);
                         setScheduler(schedulerResponse);
+                        setResourceGraph(graphResponse);
                         setTaskError('');
                     }
                     const now = Date.now();
@@ -313,6 +320,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             } else if (mounted.current) {
                 setTasks([]);
                 setScheduler(null);
+                setResourceGraph(null);
             }
         } catch (reason) {
             if ((reason as {name?: string})?.name !== 'AbortError') {
@@ -442,8 +450,8 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     <span className='ComputeClusterEyebrow'>OpenSight · model-work-node</span>
                     <h2>{zh ? '计算群' : 'Compute Cluster'}</h2>
                     <p>{zh
-                        ? '第四阶段：把公开信息任务分发给跨地域 work agents，并回传脱敏证据摘要。'
-                        : 'Phase 4: dispatch public-information jobs to cross-region work agents and return redacted evidence metadata.'}</p>
+                        ? '第五阶段：把跨地域节点、算力、设备与可调用 work agents 组织为资源知识图谱。'
+                        : 'Phase 5: organize cross-region nodes, compute, devices, and callable work agents as a resource knowledge graph.'}</p>
                 </div>
                 <div className='ComputeClusterHeaderActions'>
                     <span className={`ComputeClusterServiceState ${error ? 'error' : 'ready'}`}>
@@ -478,6 +486,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         : 'Mint a one-time enrollment token, then run model-work-node cluster join on the target machine.'}</p>
                     <code>model-work-node cluster join --control-url &lt;OpenSight URL&gt; --enrollment-token-file &lt;secret file&gt;</code>
                 </div>}
+                {!loading && resourceGraph && <ResourceKnowledgeGraph graph={resourceGraph} zh={zh}/>}
                 {!loading && orchestrationEnabled && scheduler && <section className='ComputeSchedulerPanel'>
                     <div className='ComputeSchedulerHeading'>
                         <div>

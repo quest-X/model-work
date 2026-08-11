@@ -11,6 +11,7 @@ jest.mock('../../../../logic/actions/PopupActions', () => ({
 jest.mock('../../../../services/ComputeClusterService', () => ({
     ComputeClusterService: {
         status: jest.fn(), nodes: jest.fn(), tasks: jest.fn(), scheduler: jest.fn(),
+        resourceGraph: jest.fn(),
         submitTask: jest.fn(), controlTask: jest.fn(),
     },
 }));
@@ -58,9 +59,51 @@ describe('ComputeClusterPopup', () => {
             available: {cpu_cores: 16, memory_bytes: 48 * 1024 ** 3, disk_bytes: 700 * 1024 ** 3, gpu_count: 1, gpu_memory_mb: 23540},
             active_allocations: 0, allocations: [],
         });
+        service.resourceGraph.mockResolvedValue({
+            schema_version: 'resource-knowledge-graph.v1', group_id: 'group-1', generated_at: 1,
+            summary: {
+                entities: 5, relations: 4, online_nodes: 1, compute_resources: 1,
+                managed_devices: 0, work_agents: 2, callable_work_agents: 2,
+            },
+            entities: [{
+                entity_id: 'group:group-1', kind: 'compute_group', label: 'cross-region-lab',
+                state: 'available', callable: true, modes: [],
+            }, {
+                entity_id: 'node:node-12345678', kind: 'compute_node', label: 'edge-01',
+                state: 'available', callable: true, node_id: 'node-12345678', modes: [],
+            }, {
+                entity_id: 'compute-resource:node-12345678', kind: 'compute_resource', label: 'edge-01 compute',
+                state: 'available', callable: true, node_id: 'node-12345678', modes: [],
+                platform: 'linux', architecture: 'x86_64', cpu_logical: 16,
+                memory_available_bytes: 48 * 1024 ** 3, disk_free_bytes: 700 * 1024 ** 3, gpu_count: 1,
+            }, {
+                entity_id: 'work-agent:system.wait', kind: 'work_agent', label: 'system.wait',
+                state: 'available', callable: true, task_type: 'system.wait',
+                capability: 'task.system.wait.v1', category: 'diagnostic',
+                modes: ['online', 'background'], available_node_count: 1,
+            }, {
+                entity_id: 'work-agent:information.web_fetch', kind: 'work_agent', label: 'information.web_fetch',
+                state: 'available', callable: true, task_type: 'information.web_fetch',
+                capability: 'task.information.web_fetch.v1', category: 'information',
+                modes: ['background'], available_node_count: 1,
+            }],
+            relations: [{
+                relation_id: 'contains:1', kind: 'contains', source_id: 'group:group-1',
+                target_id: 'node:node-12345678', active: true, reason: 'available',
+            }, {
+                relation_id: 'provides:1', kind: 'provides', source_id: 'node:node-12345678',
+                target_id: 'compute-resource:node-12345678', active: true, reason: 'available',
+            }, {
+                relation_id: 'can-execute:1', kind: 'can_execute', source_id: 'node:node-12345678',
+                target_id: 'work-agent:system.wait', active: true, reason: 'available',
+            }, {
+                relation_id: 'can-execute:2', kind: 'can_execute', source_id: 'node:node-12345678',
+                target_id: 'work-agent:information.web_fetch', active: true, reason: 'available',
+            }],
+        });
     });
 
-    it('shows node, aggregate resources, and the phase-four boundary', async () => {
+    it('shows node, aggregate resources, and the phase-five boundary', async () => {
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByText('edge-01')).toBeInTheDocument();
@@ -70,10 +113,38 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('2 个通道')).toBeInTheDocument();
         expect(screen.getByText('已归属')).toBeInTheDocument();
         expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
-        expect(screen.getByText('第四阶段：把公开信息任务分发给跨地域 work agents，并回传脱敏证据摘要。')).toBeInTheDocument();
+        expect(screen.getByText('第五阶段：把跨地域节点、算力、设备与可调用 work agents 组织为资源知识图谱。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
         expect(screen.getAllByText('在线')).toHaveLength(2);
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
+    });
+
+    it('renders the authoritative callable-resource knowledge graph', async () => {
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.1.0', protocol_version: 1,
+            admin_configured: true,
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['system.wait', 'information.web_fetch'],
+                resource_orchestration: true,
+                work_agent_execution: true,
+                resource_knowledge_graph: true,
+                graph_schema: 'resource-knowledge-graph.v1',
+                placement_modes: ['automatic', 'manual'],
+            },
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        expect(await screen.findByText('可调用资源图谱')).toBeInTheDocument();
+        expect(screen.getByText('阶段 5 · 资源知识图谱')).toBeInTheDocument();
+        expect(screen.getByText('cross-region-lab')).toBeInTheDocument();
+        expect(screen.getByText('resource-knowledge-graph.v1')).toBeInTheDocument();
+        expect(screen.getAllByText('公开信息采集 agent').length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText('等待诊断 agent').length).toBeGreaterThanOrEqual(1);
+        expect(screen.getByText('2/2')).toBeInTheDocument();
+        await waitFor(() => expect(service.resourceGraph).toHaveBeenCalledTimes(1));
     });
 
     it('shows task dispatch, durable progress, and controls when enabled', async () => {

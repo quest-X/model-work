@@ -190,6 +190,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
 
                     <footer>
                         <span>Tailscale: {node.network.online ? (zh ? '已连接' : 'Connected') : (zh ? '未连接' : 'Disconnected')}</span>
+                        <span className={node.network.ssh_available ? 'ssh-ready' : ''}>SSH: {node.network.ssh_available
+                            ? (zh ? '可连接' : 'Ready')
+                            : (zh ? '未就绪' : 'Unavailable')}</span>
                         <span>Agent v{node.agent_version}</span>
                         <span>{node.capabilities.length} {zh ? '项能力' : 'capabilities'}</span>
                     </footer>

@@ -264,6 +264,7 @@
   padding: 8px 15px;
   color: rgba(255, 255, 255, 0.36);
   font-size: 8px;
+  .ssh-ready { color: #7bd694; }
 }
 
 @keyframes compute-spin { to { transform: rotate(360deg); } }

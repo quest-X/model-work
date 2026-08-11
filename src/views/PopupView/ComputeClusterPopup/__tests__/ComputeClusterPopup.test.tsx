@@ -23,7 +23,10 @@ describe('ComputeClusterPopup', () => {
         service.nodes.mockResolvedValue([{
             node_id: 'node-12345678', installation_id: 'install-1', name: 'edge-01',
             agent_version: '0.1.0', capabilities: ['system.health.v1'],
-            network: {provider: 'tailscale', installed: true, online: true, addresses: ['100.64.0.1']},
+            network: {
+                provider: 'tailscale', installed: true, online: true, ssh_available: true,
+                addresses: ['100.64.0.1'],
+            },
             resources: {
                 captured_at: 1, platform: 'linux', architecture: 'x86_64', cpu_logical: 16,
                 load_average_1m: 0.5, memory_total_bytes: 64 * 1024 ** 3,
@@ -52,6 +55,7 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('DS-2CD2686FWDA2-IZS')).toBeInTheDocument();
         expect(screen.getByText('2 个通道')).toBeInTheDocument();
         expect(screen.getByText('已归属')).toBeInTheDocument();
+        expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
         expect(screen.getByText('汇总灵析节点的计算资源与心跳状态；0.1 阶段仅监控，不开放远程命令。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
         expect(screen.getAllByText('在线')).toHaveLength(2);

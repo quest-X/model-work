@@ -49,6 +49,7 @@ export type ComputeClusterNode = {
         provider: 'tailscale';
         installed: boolean;
         online: boolean;
+        ssh_available?: boolean;
         backend_state?: string | null;
         self_name?: string | null;
         addresses: string[];
@@ -68,6 +69,7 @@ export type ComputeClusterStatus = {
     state: string;
     version: string;
     protocol_version: number;
+    group_id?: string;
     admin_configured: boolean;
     nodes: {total: number; online: number; gpu_total: number; device_total: number};
 };

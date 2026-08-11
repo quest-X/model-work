@@ -71,12 +71,30 @@ export type ComputeClusterStatus = {
     protocol_version: number;
     group_id?: string;
     admin_configured: boolean;
-    task_control?: {enabled: boolean; allowed_task_types: string[]};
+    task_control?: {
+        enabled: boolean;
+        allowed_task_types: string[];
+        resource_orchestration?: boolean;
+        placement_modes?: ('automatic' | 'manual')[];
+    };
     nodes: {total: number; online: number; gpu_total: number; device_total: number};
 };
 
 export type ComputeTaskMode = 'online' | 'background';
 export type ComputeTaskState = 'queued' | 'running' | 'paused' | 'succeeded' | 'failed' | 'cancelled';
+
+export type ComputeResourceRequest = {
+    cpu_cores: number;
+    memory_bytes: number;
+    disk_bytes: number;
+    gpu_count: number;
+    gpu_memory_mb: number;
+    required_capabilities?: string[];
+    required_labels?: Record<string, string>;
+};
+
+export type ComputeResourceCapacity = Pick<ComputeResourceRequest,
+    'cpu_cores' | 'memory_bytes' | 'disk_bytes' | 'gpu_count' | 'gpu_memory_mb'>;
 
 export type ComputeTask = {
     task_id: string;
@@ -96,6 +114,13 @@ export type ComputeTask = {
     error?: string | null;
     attempt: number;
     parameters: {seconds?: number};
+    resources?: Partial<ComputeResourceRequest>;
+    placement?: {
+        mode: 'automatic' | 'manual';
+        policy?: 'most-available-v1' | null;
+        reserved: boolean;
+        created_at?: number | null;
+    };
 };
 
 export type ComputeTasksResponse = {
@@ -105,6 +130,25 @@ export type ComputeTasksResponse = {
     total: number;
     counts: Partial<Record<ComputeTaskState, number>>;
     nodes: {node_id: string; available: boolean; error?: string | null}[];
+};
+
+export type ComputeSchedulerResponse = {
+    version: number;
+    group_id: string;
+    policy: 'most-available-v1';
+    online_nodes: number;
+    totals: ComputeResourceCapacity;
+    reserved: ComputeResourceCapacity;
+    available: ComputeResourceCapacity;
+    active_allocations: number;
+    allocations: {
+        task_id: string;
+        node_id: string;
+        node_name?: string | null;
+        node_online: boolean;
+        request: ComputeResourceRequest;
+        created_at: number;
+    }[];
 };
 
 const baseUrl = (): string =>
@@ -140,8 +184,18 @@ export class ComputeClusterService {
         return request('/tasks', signal);
     }
 
+    public static scheduler(signal?: AbortSignal): Promise<ComputeSchedulerResponse> {
+        return request('/scheduler', signal);
+    }
+
     public static submitTask(
-        input: {node_id: string; mode: ComputeTaskMode; seconds: number; lease_seconds?: number},
+        input: {
+            node_id?: string;
+            mode: ComputeTaskMode;
+            seconds: number;
+            lease_seconds?: number;
+            resources?: ComputeResourceCapacity;
+        },
         signal?: AbortSignal,
     ): Promise<ComputeTask> {
         return request('/tasks', signal, {

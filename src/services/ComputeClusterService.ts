@@ -22,6 +22,23 @@ export type ComputeNodeResources = {
     gpus: ComputeGpuResource[];
 };
 
+export type ComputeManagedDevice = {
+    device_id: string;
+    kind: 'camera';
+    provider: 'camera-connect';
+    name: string;
+    model?: string | null;
+    status: 'registered' | 'online' | 'offline' | 'unavailable';
+    channels: number;
+    capabilities: string[];
+};
+
+export type ComputeDeviceInventory = {
+    state: 'disabled' | 'ready' | 'unavailable';
+    devices: ComputeManagedDevice[];
+    error?: string | null;
+};
+
 export type ComputeClusterNode = {
     node_id: string;
     installation_id: string;
@@ -39,6 +56,7 @@ export type ComputeClusterNode = {
         error?: string | null;
     };
     resources: ComputeNodeResources;
+    device_inventory: ComputeDeviceInventory;
     enrolled_at: number;
     last_seen_at: number;
     enabled: boolean;
@@ -51,7 +69,7 @@ export type ComputeClusterStatus = {
     version: string;
     protocol_version: number;
     admin_configured: boolean;
-    nodes: {total: number; online: number; gpu_total: number};
+    nodes: {total: number; online: number; gpu_total: number; device_total: number};
 };
 
 const baseUrl = (): string =>

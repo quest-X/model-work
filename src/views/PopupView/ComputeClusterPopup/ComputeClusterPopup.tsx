@@ -87,6 +87,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         total: status?.nodes.total ?? nodes.length,
         online: status?.nodes.online ?? nodes.filter(node => node.online).length,
         gpus: status?.nodes.gpu_total ?? nodes.reduce((sum, node) => sum + node.resources.gpus.length, 0),
+        devices: status?.nodes.device_total ?? nodes.reduce((sum, node) => sum + node.device_inventory.devices.length, 0),
         cpu: nodes.reduce((sum, node) => sum + node.resources.cpu_logical, 0),
     }), [nodes, status]);
 
@@ -116,6 +117,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                 <div><span>{zh ? '在线' : 'Online'}</span><strong className='online'>{totals.online}</strong></div>
                 <div><span>{zh ? '逻辑 CPU' : 'Logical CPUs'}</span><strong>{totals.cpu}</strong></div>
                 <div><span>GPU</span><strong>{totals.gpus}</strong></div>
+                <div><span>{zh ? '设备' : 'Devices'}</span><strong>{totals.devices}</strong></div>
             </div>
 
             {error && <div className='ComputeClusterError' role='alert'>{error}</div>}
@@ -159,6 +161,32 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                             </div>
                         </div>)}
                     </div>}
+
+                    <div className='ComputeNodeDeviceSection'>
+                        <div className='ComputeNodeDeviceHeading'>
+                            <strong>{zh ? '节点设备' : 'Node devices'}</strong>
+                            <span>{node.device_inventory.devices.length}</span>
+                            <small>{node.device_inventory.state === 'unavailable'
+                                ? (zh ? '设备源暂不可用' : 'Device source unavailable')
+                                : (zh ? '由本节点服务管理' : 'Managed by services on this node')}</small>
+                        </div>
+                        {node.device_inventory.devices.length > 0 && <div className='ComputeNodeDeviceList'>
+                            {node.device_inventory.devices.map(device => <div key={device.device_id}>
+                                <span className='ComputeDeviceKind'>{device.kind === 'camera' ? (zh ? '相机' : 'Camera') : device.kind}</span>
+                                <div>
+                                    <strong>{device.name}</strong>
+                                    <small>{device.model || (zh ? '型号未知' : 'Unknown model')}</small>
+                                </div>
+                                <div className='ComputeDeviceMeta'>
+                                    <span>{device.channels} {zh ? '个通道' : 'channels'}</span>
+                                    <small>{device.provider}</small>
+                                </div>
+                                <span className={`ComputeDeviceStatus ${device.status}`}>{device.status === 'registered'
+                                    ? (zh ? '已归属' : 'Assigned')
+                                    : device.status}</span>
+                            </div>)}
+                        </div>}
+                    </div>
 
                     <footer>
                         <span>Tailscale: {node.network.online ? (zh ? '已连接' : 'Connected') : (zh ? '未连接' : 'Disconnected')}</span>

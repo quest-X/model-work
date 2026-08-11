@@ -205,8 +205,24 @@
   padding: 10px;
   &.callable { border-left-color: #5aca80; }
   &.group { min-height: 78px; justify-content: center; border-color: rgba(193, 148, 255, 0.28); border-left-color: #b982f4; background: rgba(93, 57, 126, 0.24); }
-  &.agent { border-color: rgba(101, 191, 246, 0.17); }
+  &.agent {
+    width: 100%;
+    box-sizing: border-box;
+    appearance: none;
+    border-color: rgba(101, 191, 246, 0.17);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .16s ease, background .16s ease, transform .16s ease;
+    &:hover:not(:disabled) { border-color: rgba(101, 191, 246, 0.62); background: rgba(33, 73, 97, 0.42); transform: translateY(-1px); }
+    &:focus-visible { outline: 2px solid rgba(101, 191, 246, 0.84); outline-offset: 2px; }
+    &:disabled { cursor: not-allowed; opacity: .58; }
+    &.selected { border-color: rgba(101, 191, 246, 0.86); background: rgba(33, 86, 116, 0.48); box-shadow: 0 0 0 1px rgba(101, 191, 246, 0.18); }
+    > em { color: rgba(121, 201, 248, 0.72); font-size: 7px; font-style: normal; }
+  }
   &.capacity { padding: 8px 10px; }
+  &.dependency { padding: 8px 10px; }
   > span { color: rgba(255, 255, 255, 0.38); font-size: 8px; }
   > strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
   > small { color: rgba(255, 255, 255, 0.4); font-size: 8px; line-height: 1.4; }
@@ -354,6 +370,19 @@
     &:hover:not(:disabled) { background: #299bd7; }
     &:disabled { opacity: 0.42; cursor: wait; }
   }
+}
+
+.ComputeGraphSelection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(58, 132, 177, 0.14);
+  padding: 9px 16px;
+  strong { color: #8bd3ff; font-size: 9px; }
+  span { color: rgba(255, 255, 255, 0.6); font-size: 8px; }
+  span + span { border-left: 1px solid rgba(255, 255, 255, 0.1); padding-left: 12px; }
 }
 
 .ComputeTaskEvidence {

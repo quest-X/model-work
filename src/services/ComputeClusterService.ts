@@ -75,6 +75,8 @@ export type ComputeClusterStatus = {
         enabled: boolean;
         allowed_task_types: string[];
         resource_orchestration?: boolean;
+        work_agent_execution?: boolean;
+        evidence_projection?: 'metadata-only-v1';
         placement_modes?: ('automatic' | 'manual')[];
     };
     nodes: {total: number; online: number; gpu_total: number; device_total: number};
@@ -82,6 +84,25 @@ export type ComputeClusterStatus = {
 
 export type ComputeTaskMode = 'online' | 'background';
 export type ComputeTaskState = 'queued' | 'running' | 'paused' | 'succeeded' | 'failed' | 'cancelled';
+export type ComputeTaskType = 'system.wait' | 'information.web_fetch';
+
+export type ComputeWebFetchResult = {
+    schema_version: 'webfetch.console-result.v1';
+    request_id: string;
+    status: 'fetched' | 'partial' | 'blocked' | 'failed';
+    reason_code: string;
+    provider: string;
+    requested_url: string;
+    final_url: string;
+    fetched_at: string;
+    title: string;
+    author: string;
+    published_at: string;
+    meaningful_chars: number;
+    content_sha256: string;
+    warnings: string[];
+    attempt_count: number;
+};
 
 export type ComputeResourceRequest = {
     cpu_cores: number;
@@ -100,7 +121,7 @@ export type ComputeTask = {
     task_id: string;
     node_id: string;
     node_name: string;
-    task_type: 'system.wait' | string;
+    task_type: ComputeTaskType;
     mode: ComputeTaskMode;
     state: ComputeTaskState;
     created_at: number;
@@ -110,10 +131,10 @@ export type ComputeTask = {
     control_request?: 'pause' | 'cancel' | null;
     checkpoint?: Record<string, unknown> | null;
     progress?: {completed?: number; total?: number; unit?: string; percent?: number} | null;
-    result?: Record<string, unknown> | null;
+    result?: {elapsed_seconds: number} | ComputeWebFetchResult | null;
     error?: string | null;
     attempt: number;
-    parameters: {seconds?: number};
+    parameters: {seconds?: number; url?: string};
     resources?: Partial<ComputeResourceRequest>;
     placement?: {
         mode: 'automatic' | 'manual';
@@ -191,8 +212,10 @@ export class ComputeClusterService {
     public static submitTask(
         input: {
             node_id?: string;
+            task_type?: ComputeTaskType;
             mode: ComputeTaskMode;
-            seconds: number;
+            seconds?: number;
+            url?: string;
             lease_seconds?: number;
             resources?: ComputeResourceCapacity;
         },
@@ -202,7 +225,7 @@ export class ComputeClusterService {
             method: 'POST',
             body: JSON.stringify({
                 ...input,
-                task_type: 'system.wait',
+                task_type: input.task_type ?? 'system.wait',
                 lease_seconds: input.lease_seconds ?? 60,
             }),
         });

@@ -9,6 +9,8 @@ import {
     ComputeSchedulerResponse,
     ComputeTask,
     ComputeTaskMode,
+    ComputeTaskType,
+    ComputeWebFetchResult,
 } from '../../../services/ComputeClusterService';
 import {AppState} from '../../../store';
 import './ComputeClusterPopup.scss';
@@ -66,6 +68,24 @@ const taskProgress = (task: ComputeTask): number => {
     return total > 0 && Number.isFinite(elapsed) ? Math.max(0, Math.min(100, elapsed / total * 100)) : 0;
 };
 
+const webFetchResult = (task: ComputeTask): ComputeWebFetchResult | null => {
+    const result = task.result;
+    return result?.schema_version === 'webfetch.console-result.v1' ? result : null;
+};
+
+const publicUrlValid = (value: string): boolean => {
+    try {
+        const parsed = new URL(value);
+        return ['http:', 'https:'].includes(parsed.protocol)
+            && !parsed.username
+            && !parsed.password
+            && !parsed.hash
+            && value.length <= 4096;
+    } catch {
+        return false;
+    }
+};
+
 const resourceRequestValid = (
     cpu: number,
     memoryGb: number,
@@ -88,11 +108,15 @@ const TaskCard: React.FC<TaskCardProps> = ({task, zh, busy, onControl}) => {
     const progress = taskProgress(task);
     const active = task.state === 'queued' || task.state === 'running';
     const finished = ['succeeded', 'failed', 'cancelled'].includes(task.state);
+    const informationTask = task.task_type === 'information.web_fetch';
+    const evidence = webFetchResult(task);
     return <article className={`ComputeTaskCard ${task.state}`}>
         <div className='ComputeTaskIdentity'>
             <span className={`ComputeTaskState ${task.state}`}>{taskState(task.state, zh)}</span>
             <div>
-                <strong>{zh ? '等待测试' : 'Wait test'} · {task.node_name}</strong>
+                <strong>{informationTask
+                    ? (zh ? '公开信息抓取' : 'Public information fetch')
+                    : (zh ? '等待测试' : 'Wait test')} · {task.node_name}</strong>
                 <small>{task.mode === 'online' ? (zh ? '在线任务' : 'Online') : (zh ? '后台任务' : 'Background')} · {task.task_id.slice(0, 8)}</small>
                 {task.placement?.mode === 'automatic' && <small className='ComputeTaskPlacement'>
                     {zh ? '自动调度' : 'Auto placed'} · CPU {task.resources?.cpu_cores ?? 0} · {bytes(task.resources?.memory_bytes ?? 0, zh)}
@@ -103,13 +127,29 @@ const TaskCard: React.FC<TaskCardProps> = ({task, zh, busy, onControl}) => {
         <div className='ComputeTaskProgress'>
             <div><i style={{width: `${progress}%`}}/></div>
             <span>{progress.toFixed(0)}%</span>
-            <small>{Number(task.progress?.completed ?? task.checkpoint?.elapsed_seconds ?? 0).toFixed(1)} / {Number(task.parameters.seconds ?? task.progress?.total ?? 0).toFixed(1)} s</small>
+            <small>{informationTask
+                ? (evidence
+                    ? `${evidence.meaningful_chars} ${zh ? '有效字符' : 'meaningful chars'}`
+                    : (zh ? '节点执行并保存证据' : 'Node execution and evidence'))
+                : `${Number(task.progress?.completed ?? task.checkpoint?.elapsed_seconds ?? 0).toFixed(1)} / ${Number(task.parameters.seconds ?? task.progress?.total ?? 0).toFixed(1)} s`}</small>
         </div>
         <div className='ComputeTaskActions'>
-            {active && <button type='button' disabled={busy} onClick={() => onControl(task, 'pause')}>{zh ? '暂停' : 'Pause'}</button>}
-            {task.state === 'paused' && <button type='button' disabled={busy} onClick={() => onControl(task, 'resume')}>{zh ? '恢复' : 'Resume'}</button>}
+            {active && !informationTask && <button type='button' disabled={busy} onClick={() => onControl(task, 'pause')}>{zh ? '暂停' : 'Pause'}</button>}
+            {task.state === 'paused' && !informationTask && <button type='button' disabled={busy} onClick={() => onControl(task, 'resume')}>{zh ? '恢复' : 'Resume'}</button>}
             {!finished && <button type='button' className='danger' disabled={busy} onClick={() => onControl(task, 'cancel')}>{zh ? '取消' : 'Cancel'}</button>}
         </div>
+        {informationTask && <div className='ComputeTaskEvidence'>
+            <span className={`ComputeEvidenceState ${evidence?.status || 'pending'}`}>
+                {evidence?.status || (zh ? '等待证据' : 'Pending evidence')}
+            </span>
+            <div>
+                <strong>{evidence?.title || task.parameters.url || (zh ? '等待抓取结果' : 'Waiting for result')}</strong>
+                <small>{evidence
+                    ? `${evidence.provider || '—'} · ${evidence.reason_code} · ${evidence.attempt_count} ${zh ? '次尝试' : 'attempts'}`
+                    : (zh ? '正文与原始响应保留在执行节点' : 'Content and raw responses remain on the Node')}</small>
+            </div>
+            {evidence?.content_sha256 && <code title={evidence.content_sha256}>SHA-256 {evidence.content_sha256.slice(0, 12)}…</code>}
+        </div>}
         {task.error && <p>{task.error}</p>}
     </article>;
 };
@@ -200,8 +240,10 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     const [error, setError] = useState('');
     const [taskError, setTaskError] = useState('');
     const [selectedNode, setSelectedNode] = useState(AUTO_PLACEMENT);
-    const [taskMode, setTaskMode] = useState<ComputeTaskMode>('online');
+    const [taskType, setTaskType] = useState<ComputeTaskType>('information.web_fetch');
+    const [taskMode, setTaskMode] = useState<ComputeTaskMode>('background');
     const [taskSeconds, setTaskSeconds] = useState(20);
+    const [taskUrl, setTaskUrl] = useState('https://example.com/');
     const [taskCpu, setTaskCpu] = useState(1);
     const [taskMemoryGb, setTaskMemoryGb] = useState(1);
     const [taskDiskGb, setTaskDiskGb] = useState(0);
@@ -227,6 +269,10 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             if (mounted.current) {
                 setStatus(nextStatus);
                 setNodes(nextNodes);
+                if (!nextStatus.task_control?.allowed_task_types.includes('information.web_fetch')) {
+                    setTaskType('system.wait');
+                    setTaskMode('online');
+                }
                 setSelectedNode(current => {
                     if (nextStatus.task_control?.resource_orchestration) {
                         return current || AUTO_PLACEMENT;
@@ -295,19 +341,21 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
 
     const submitTask = useCallback(async () => {
         const automatic = selectedNode === AUTO_PLACEMENT;
+        const informationTask = taskType === 'information.web_fetch';
         if (
             !selectedNode
             || submitting
-            || taskSeconds < 0
-            || taskSeconds > 3600
+            || (informationTask ? !publicUrlValid(taskUrl) : taskSeconds < 0 || taskSeconds > 3600)
             || !resourceRequestValid(taskCpu, taskMemoryGb, taskDiskGb, taskGpu, taskGpuMemoryMb)
         ) return;
         setSubmitting(true);
         try {
             await ComputeClusterService.submitTask({
                 node_id: automatic ? undefined : selectedNode,
-                mode: taskMode,
-                seconds: taskSeconds,
+                task_type: taskType,
+                mode: informationTask ? 'background' : taskMode,
+                seconds: informationTask ? undefined : taskSeconds,
+                url: informationTask ? taskUrl : undefined,
                 lease_seconds: 60,
                 resources: automatic ? {
                     cpu_cores: taskCpu,
@@ -335,6 +383,8 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         taskMemoryGb,
         taskMode,
         taskSeconds,
+        taskType,
+        taskUrl,
     ]);
 
     const controlTask = useCallback(async (
@@ -366,6 +416,10 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     const taskControlEnabled = status?.task_control?.enabled === true;
     const orchestrationEnabled = taskControlEnabled
         && status?.task_control?.resource_orchestration === true;
+    const informationWorkAgentEnabled = taskControlEnabled
+        && status?.task_control?.work_agent_execution === true
+        && status.task_control.allowed_task_types.includes('information.web_fetch');
+    const informationTask = taskType === 'information.web_fetch';
     const automaticPlacement = selectedNode === AUTO_PLACEMENT;
     const selectedNodeOnline = automaticPlacement
         ? nodes.some(node => node.online)
@@ -377,6 +431,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         taskGpu,
         taskGpuMemoryMb,
     );
+    const taskInputValid = informationTask
+        ? informationWorkAgentEnabled && publicUrlValid(taskUrl)
+        : taskSeconds >= 0 && taskSeconds <= 3600;
 
     return <div className='ComputeClusterBackdrop'>
         <section className='ComputeClusterPopup' aria-label={zh ? '计算群' : 'Compute Cluster'}>
@@ -385,8 +442,8 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     <span className='ComputeClusterEyebrow'>OpenSight · model-work-node</span>
                     <h2>{zh ? '计算群' : 'Compute Cluster'}</h2>
                     <p>{zh
-                        ? '第三阶段：汇总跨地域资源，按任务需求自动选择节点、预留容量并在终态释放。'
-                        : 'Phase 3: aggregate cross-region capacity, auto-place tasks, reserve resources, and release at terminal state.'}</p>
+                        ? '第四阶段：把公开信息任务分发给跨地域 work agents，并回传脱敏证据摘要。'
+                        : 'Phase 4: dispatch public-information jobs to cross-region work agents and return redacted evidence metadata.'}</p>
                 </div>
                 <div className='ComputeClusterHeaderActions'>
                     <span className={`ComputeClusterServiceState ${error ? 'error' : 'ready'}`}>
@@ -446,20 +503,31 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                 {!loading && taskControlEnabled && <section className='ComputeTaskControl'>
                     <div className='ComputeTaskControlHeading'>
                         <div>
-                            <span>{zh ? '资源任务' : 'Resource-aware task'}</span>
-                            <h3>{zh ? '提交任务需求' : 'Submit task requirements'}</h3>
+                            <span>{zh ? '阶段 4 · work agent' : 'Phase 4 · Work agent'}</span>
+                            <h3>{zh ? '分发节点工作' : 'Dispatch node work'}</h3>
                             <p>{zh
-                                ? '默认由计算群自动选点；当前仍只运行可暂停的白名单等待任务，不执行 Shell。'
-                                : 'The group selects a node by default; only the pausable allowlisted wait task is enabled, never Shell.'}</p>
+                                ? '首个正式能力是公开信息抓取；私网地址、凭据、自由参数与 Shell 均被拒绝。'
+                                : 'The first production capability fetches public information; private targets, credentials, free-form payloads, and Shell are rejected.'}</p>
                         </div>
                         <div className='ComputeTaskModeHelp'>
-                            <strong>{taskMode === 'online' ? (zh ? '在线任务' : 'Online') : (zh ? '后台任务' : 'Background')}</strong>
-                            <span>{taskMode === 'online'
+                            <strong>{informationTask || taskMode === 'background' ? (zh ? '后台任务' : 'Background') : (zh ? '在线任务' : 'Online')}</strong>
+                            <span>{!informationTask && taskMode === 'online'
                                 ? (zh ? '关闭页面并超过租约后自动取消' : 'Cancels after the lease when this console closes')
-                                : (zh ? 'MacBook 离线后节点仍继续执行' : 'Keeps running when the MacBook is offline')}</span>
+                                : (zh ? '群主离线后节点仍继续执行' : 'Keeps running when the owner is offline')}</span>
                         </div>
                     </div>
                     <div className='ComputeTaskForm'>
+                        <label>
+                            <span>{zh ? '工作类型' : 'Work type'}</span>
+                            <select value={taskType} onChange={event => {
+                                const next = event.target.value as ComputeTaskType;
+                                setTaskType(next);
+                                setTaskMode(next === 'information.web_fetch' ? 'background' : 'online');
+                            }}>
+                                <option value='information.web_fetch' disabled={!informationWorkAgentEnabled}>{zh ? '公开信息抓取' : 'Public information fetch'}</option>
+                                <option value='system.wait'>{zh ? '等待测试' : 'Wait test'}</option>
+                            </select>
+                        </label>
                         <label>
                             <span>{zh ? '节点选择' : 'Node placement'}</span>
                             <select value={selectedNode} onChange={event => setSelectedNode(event.target.value)}>
@@ -471,24 +539,20 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         </label>
                         <label>
                             <span>{zh ? '运行方式' : 'Mode'}</span>
-                            <select value={taskMode} onChange={event => setTaskMode(event.target.value as ComputeTaskMode)}>
+                            <select value={informationTask ? 'background' : taskMode} disabled={informationTask} onChange={event => setTaskMode(event.target.value as ComputeTaskMode)}>
                                 <option value='online'>{zh ? '在线任务' : 'Online task'}</option>
                                 <option value='background'>{zh ? '后台任务' : 'Background task'}</option>
                             </select>
                         </label>
                         <label>
-                            <span>{zh ? '持续时间（秒）' : 'Duration (seconds)'}</span>
-                            <input
-                                type='number'
-                                min={0}
-                                max={3600}
-                                value={taskSeconds}
-                                onChange={event => setTaskSeconds(Number(event.target.value))}
-                            />
+                            <span>{informationTask ? (zh ? '公开信息 URL' : 'Public information URL') : (zh ? '持续时间（秒）' : 'Duration (seconds)')}</span>
+                            {informationTask
+                                ? <input type='url' value={taskUrl} onChange={event => setTaskUrl(event.target.value)} placeholder='https://example.com/article'/>
+                                : <input type='number' min={0} max={3600} value={taskSeconds} onChange={event => setTaskSeconds(Number(event.target.value))}/>}
                         </label>
                         <button
                             type='button'
-                            disabled={submitting || !selectedNode || !selectedNodeOnline || !resourcesValid}
+                            disabled={submitting || !selectedNode || !selectedNodeOnline || !resourcesValid || !taskInputValid}
                             onClick={() => void submitTask()}
                         >{submitting ? (zh ? '调度中…' : 'Scheduling…') : (automaticPlacement ? (zh ? '自动调度' : 'Auto place') : (zh ? '定向下发' : 'Dispatch'))}</button>
                     </div>
@@ -499,7 +563,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         <label><span>{zh ? '磁盘（GB）' : 'Disk (GB)'}</span><input type='number' min={0} step={1} value={taskDiskGb} onChange={event => setTaskDiskGb(Number(event.target.value))}/></label>
                         <label><span>GPU {zh ? '数量' : 'count'}</span><input type='number' min={0} step={1} value={taskGpu} onChange={event => setTaskGpu(Number(event.target.value))}/></label>
                         <label><span>{zh ? '显存（MB）' : 'VRAM (MB)'}</span><input type='number' min={0} step={256} value={taskGpuMemoryMb} onChange={event => setTaskGpuMemoryMb(Number(event.target.value))}/></label>
-                        <p>{zh ? '调度器会排除离线、过期、能力不匹配或资源不足的节点。' : 'Offline, stale, incompatible, or undersized nodes are excluded.'}</p>
+                        <p>{informationTask
+                            ? (zh ? '正文、原始响应和节点路径留在执行节点；控制台仅显示来源、状态与内容哈希。' : 'Content, raw responses, and paths stay on the Node; the console shows only source, status, and digest.')
+                            : (zh ? '调度器会排除离线、过期、能力不匹配或资源不足的节点。' : 'Offline, stale, incompatible, or undersized nodes are excluded.')}</p>
                     </div>}
 
                     <div className='ComputeTaskListHeading'>
@@ -507,7 +573,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         <span>{tasks.length}</span>
                     </div>
                     {tasks.length === 0 && <div className='ComputeTaskEmpty'>
-                        {zh ? '还没有任务。保留默认资源需求，点击“自动调度”即可验收。' : 'No tasks yet. Keep the defaults and click Auto place to validate scheduling.'}
+                        {zh ? '还没有任务。使用默认公开 URL，点击“自动调度”即可验收 work agent。' : 'No tasks yet. Keep the public URL and click Auto place to validate the work agent.'}
                     </div>}
                     {tasks.length > 0 && <div className='ComputeTaskList'>
                         {tasks.map(task => <TaskCard

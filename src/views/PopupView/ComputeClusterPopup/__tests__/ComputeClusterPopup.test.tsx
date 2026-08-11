@@ -60,7 +60,7 @@ describe('ComputeClusterPopup', () => {
         });
     });
 
-    it('shows node, aggregate resources, and the phase-three boundary', async () => {
+    it('shows node, aggregate resources, and the phase-four boundary', async () => {
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByText('edge-01')).toBeInTheDocument();
@@ -70,7 +70,7 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('2 个通道')).toBeInTheDocument();
         expect(screen.getByText('已归属')).toBeInTheDocument();
         expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
-        expect(screen.getByText('第三阶段：汇总跨地域资源，按任务需求自动选择节点、预留容量并在终态释放。')).toBeInTheDocument();
+        expect(screen.getByText('第四阶段：把公开信息任务分发给跨地域 work agents，并回传脱敏证据摘要。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
         expect(screen.getAllByText('在线')).toHaveLength(2);
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
@@ -107,7 +107,7 @@ describe('ComputeClusterPopup', () => {
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByText('计算群调度池')).toBeInTheDocument();
-        expect(screen.getByText('提交任务需求')).toBeInTheDocument();
+        expect(screen.getByText('分发节点工作')).toBeInTheDocument();
         expect(screen.getByText('等待测试 · edge-01')).toBeInTheDocument();
         expect(screen.getByText(/自动调度 · CPU 1 · 1.0 GB/)).toBeInTheDocument();
         expect(screen.getAllByText('25%').length).toBeGreaterThanOrEqual(1);
@@ -119,7 +119,68 @@ describe('ComputeClusterPopup', () => {
         await waitFor(() => expect(service.submitTask).toHaveBeenCalledWith(
             expect.objectContaining({
                 node_id: undefined,
+                task_type: 'system.wait',
                 resources: expect.objectContaining({cpu_cores: 1, memory_bytes: 1024 ** 3}),
+            }),
+        ));
+    });
+
+    it('dispatches the information work agent and renders redacted evidence metadata', async () => {
+        const user = userEvent.setup();
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.1.0', protocol_version: 1,
+            admin_configured: true,
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['system.wait', 'information.web_fetch'],
+                resource_orchestration: true,
+                work_agent_execution: true,
+                evidence_projection: 'metadata-only-v1',
+                placement_modes: ['automatic', 'manual'],
+            },
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+        service.tasks.mockResolvedValue({
+            version: 1, group_id: 'group-1', total: 1, counts: {succeeded: 1}, nodes: [],
+            tasks: [{
+                task_id: 'task-information', node_id: 'node-12345678', node_name: 'edge-01',
+                task_type: 'information.web_fetch', mode: 'background', state: 'succeeded',
+                created_at: 1, updated_at: 2, lease_seconds: 60, lease_expires_at: null,
+                control_request: null, checkpoint: null, progress: null,
+                result: {
+                    schema_version: 'webfetch.console-result.v1',
+                    request_id: 'request-1', status: 'fetched', reason_code: 'accepted',
+                    provider: 'direct', requested_url: 'https://example.com/article',
+                    final_url: 'https://example.com/article', fetched_at: '2026-08-11T20:00:00+08:00',
+                    title: 'Public evidence', author: '', published_at: '', meaningful_chars: 2048,
+                    content_sha256: 'a'.repeat(64), warnings: [], attempt_count: 1,
+                },
+                error: null, attempt: 1, parameters: {url: 'https://example.com/article'},
+                resources: {cpu_cores: 1, memory_bytes: 1024 ** 3, disk_bytes: 0, gpu_count: 0, gpu_memory_mb: 0},
+                placement: {mode: 'automatic', policy: 'most-available-v1', reserved: false, created_at: 1},
+            }],
+        });
+        service.submitTask.mockResolvedValue({} as never);
+
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        expect(await screen.findByText('公开信息抓取 · edge-01')).toBeInTheDocument();
+        expect(screen.getByText('Public evidence')).toBeInTheDocument();
+        expect(screen.getByText('direct · accepted · 1 次尝试')).toBeInTheDocument();
+        expect(screen.getByText(/SHA-256 aaaaaaaaaaaa/)).toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: '暂停'})).not.toBeInTheDocument();
+        expect(screen.getByText('正文、原始响应和节点路径留在执行节点；控制台仅显示来源、状态与内容哈希。')).toBeInTheDocument();
+
+        const urlInput = screen.getByDisplayValue('https://example.com/');
+        await user.clear(urlInput);
+        await user.type(urlInput, 'https://example.com/article');
+        await user.click(screen.getByRole('button', {name: '自动调度'}));
+        await waitFor(() => expect(service.submitTask).toHaveBeenCalledWith(
+            expect.objectContaining({
+                task_type: 'information.web_fetch',
+                mode: 'background',
+                url: 'https://example.com/article',
+                seconds: undefined,
             }),
         ));
     });

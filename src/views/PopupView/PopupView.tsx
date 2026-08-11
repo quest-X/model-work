@@ -32,6 +32,7 @@ import L2GRetrievalPopup from './L2GRetrievalPopup/L2GRetrievalPopup';
 import ModelInspectorPopup, {MODEL_INSPECTOR_ESCAPE_EVENT} from './ModelInspectorPopup/ModelInspectorPopup';
 import VisualSearchPopup from './VisualSearchPopup/VisualSearchPopup';
 import CameraConnectPopup from './CameraConnectPopup/CameraConnectPopup';
+import ComputeClusterPopup from './ComputeClusterPopup/ComputeClusterPopup';
 import {clearDatasetActionSelections} from '../../services/DatasetActionSelection';
 
 
@@ -101,6 +102,7 @@ const PopupView: React.FC<IProps> = ({ activePopupType }) => {
         [PopupWindowType.VISUAL_SEARCH]: () => <VisualSearchPopup />,
         [PopupWindowType.MODEL_INSPECTOR]: () => <ModelInspectorPopup />,
         [PopupWindowType.CAMERA_CONNECT]: () => <CameraConnectPopup />,
+        [PopupWindowType.COMPUTE_CLUSTER]: () => <ComputeClusterPopup />,
         [PopupWindowType.LOADER]: () => <ClipLoader size={50} color={CSSHelper.getLeadingColor()} loading={true} />,
     };
 

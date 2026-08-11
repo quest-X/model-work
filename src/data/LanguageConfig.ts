@@ -344,6 +344,7 @@ export interface LanguageTexts {
         vectorDb: string;
         l2gRetrieval: string;
         cameraConnect: string;
+        computeCluster: string;
         manage: string;
         noModels: string;
         noModelsHint: string;
@@ -860,6 +861,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
             vectorDb: '向量数据库',
             l2gRetrieval: '视觉检索',
             cameraConnect: '连接相机',
+            computeCluster: '计算群',
             manage: '管理',
             noModels: '暂无推理引擎',
             noModelsHint: '点击添加第一个推理引擎',
@@ -1351,6 +1353,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
             vectorDb: 'Vector Database',
             l2gRetrieval: 'Visual Retrieval',
             cameraConnect: 'Connect Camera',
+            computeCluster: 'Compute Cluster',
             manage: 'Manage',
             noModels: 'No Inference Engines',
             noModelsHint: 'Click to add your first inference engine',

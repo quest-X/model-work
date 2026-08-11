@@ -34,6 +34,7 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
     const [showActionsDropdown, setShowActionsDropdown] = useState(false);
     const [activeServicesDropdown, setActiveServicesDropdown] = useState<ServicesDropdown>(null);
     const [cameraConnectAvailable, setCameraConnectAvailable] = useState(false);
+    const [computeClusterAvailable, setComputeClusterAvailable] = useState(false);
     const renameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const activeQueueItem = props.queueItems.find(item => item.id === props.activeQueueItemId);
     const localChangeCount = props.queueItems.filter(
@@ -143,9 +144,15 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
         props.updateActivePopupTypeAction(PopupWindowType.CAMERA_CONNECT);
     };
 
+    const openComputeCluster = () => {
+        setActiveServicesDropdown(null);
+        props.updateActivePopupTypeAction(PopupWindowType.COMPUTE_CLUSTER);
+    };
+
     useEffect(() => {
         if (!props.hasExtensionEngine) {
             setCameraConnectAvailable(false);
+            setComputeClusterAvailable(false);
             return undefined;
         }
         const controller = new AbortController();
@@ -154,9 +161,14 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
             .then(health => {
                 const plugin = health?.plugins?.camera_connect;
                 setCameraConnectAvailable(Boolean(plugin?.enabled && plugin?.state === 'ready'));
+                const computeCluster = health?.plugins?.compute_cluster;
+                setComputeClusterAvailable(Boolean(computeCluster?.enabled && computeCluster?.state === 'ready'));
             })
             .catch(error => {
-                if (error?.name !== 'AbortError') setCameraConnectAvailable(false);
+                if (error?.name !== 'AbortError') {
+                    setCameraConnectAvailable(false);
+                    setComputeClusterAvailable(false);
+                }
             });
         return () => controller.abort();
     }, [props.hasExtensionEngine]);
@@ -315,6 +327,12 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                                         <div className='Marker'/>
                                         <img src='ico/camera.png' alt='camera-connect'/>
                                         {currentTexts.modelManagement.cameraConnect}
+                                    </div>}
+                                    {computeClusterAvailable && <div className='DropDownMenuContentOption active'
+                                        onClick={openComputeCluster}>
+                                        <div className='Marker'/>
+                                        <img src='ico/tasks.png' alt='compute-cluster'/>
+                                        {currentTexts.modelManagement.computeCluster}
                                     </div>}
                                 </div>
                             )}

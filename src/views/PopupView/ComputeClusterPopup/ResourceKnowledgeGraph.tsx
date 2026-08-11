@@ -2,11 +2,17 @@ import React, {useMemo} from 'react';
 import {
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
+    ComputeTaskType,
 } from '../../../services/ComputeClusterService';
 
 interface ResourceKnowledgeGraphProps {
     graph: ComputeResourceGraph;
     zh: boolean;
+    selectedTaskType?: ComputeTaskType;
+    onSelectWorkAgent: (
+        agent: ComputeResourceGraphEntity,
+        candidateNodeIds: string[],
+    ) => void;
 }
 
 const agentLabel = (
@@ -31,6 +37,7 @@ const reasonLabel = (reason: string, zh: boolean): string => {
         available: ['可调用', 'Callable'],
         node_offline: ['节点离线', 'Node offline'],
         capability_missing: ['能力未安装', 'Capability missing'],
+        dependency_unavailable: ['网络依赖不可用', 'Network dependency unavailable'],
         not_console_allowlisted: ['未接入控制台', 'Not console-enabled'],
     };
     return (labels[reason] || [reason, reason])[zh ? 0 : 1];
@@ -38,7 +45,12 @@ const reasonLabel = (reason: string, zh: boolean): string => {
 
 // Graph entity variants share one visual boundary so relation state stays consistent.
 // eslint-disable-next-line complexity
-export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({graph, zh}) => {
+export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
+    graph,
+    zh,
+    selectedTaskType,
+    onSelectWorkAgent,
+}) => {
     const index = useMemo(
         () => new Map(graph.entities.map(entity => [entity.entity_id, entity])),
         [graph.entities],
@@ -48,20 +60,22 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({g
     const resources = graph.entities.filter(entity => entity.kind === 'compute_resource');
     const agents = graph.entities.filter(entity => entity.kind === 'work_agent');
     const devices = graph.entities.filter(entity => entity.kind === 'managed_device');
+    const dependencies = graph.entities.filter(entity => entity.kind === 'network_dependency');
 
     return <section className='ComputeKnowledgePanel' aria-label={zh ? '资源知识图谱' : 'Resource knowledge graph'}>
         <div className='ComputeKnowledgeHeading'>
             <div>
-                <span>{zh ? '阶段 5 · 资源知识图谱' : 'Phase 5 · Resource knowledge graph'}</span>
-                <h3>{zh ? '可调用资源图谱' : 'Callable resource graph'}</h3>
+                <span>{zh ? '阶段 6 · 交互式资源编排' : 'Phase 6 · Interactive resource orchestration'}</span>
+                <h3>{zh ? '可交互资源图谱' : 'Interactive resource graph'}</h3>
                 <p>{zh
-                    ? '只呈现经过 Client 白名单验证的关系；节点声明能力不等于控制台可以调用。'
-                    : 'Only Client allowlisted relations are callable; advertised capability does not imply console access.'}</p>
+                    ? '点击可调用 work agent，自动带入任务类型、执行节点和推荐资源；网络依赖异常时禁止下发。'
+                    : 'Select a callable work agent to fill task type, executor, and recommended resources; unhealthy dependencies block dispatch.'}</p>
             </div>
             <div className='ComputeKnowledgeStats'>
                 <div><strong>{graph.summary.entities}</strong><span>{zh ? '实体' : 'entities'}</span></div>
                 <div><strong>{graph.summary.relations}</strong><span>{zh ? '关系' : 'relations'}</span></div>
                 <div><strong>{graph.summary.callable_work_agents}/{graph.summary.work_agents}</strong><span>{zh ? '可调用 agents' : 'callable agents'}</span></div>
+                <div><strong>{graph.summary.healthy_network_dependencies}/{graph.summary.network_dependencies}</strong><span>{zh ? '健康网络依赖' : 'healthy dependencies'}</span></div>
             </div>
         </div>
 
@@ -106,20 +120,43 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({g
             <div className='ComputeKnowledgeColumn resources'>
                 <span className='ComputeKnowledgeColumnLabel'>{zh ? '可用资源与 work agents' : 'Resources and work agents'}</span>
                 <div className='ComputeKnowledgeAgentGrid'>
-                    {agents.map(agent => <article key={agent.entity_id} className={`ComputeKnowledgeEntity agent ${agent.callable ? 'callable' : ''}`}>
-                        <span>{agent.callable ? (zh ? '可调用' : 'Callable') : (zh ? '暂不可调用' : 'Unavailable')}</span>
-                        <strong>{agentLabel(agent, zh)}</strong>
-                        <small>{agent.available_node_count || 0} {zh ? '个执行节点' : 'executor nodes'} · {agent.modes.map(mode => modeLabel(mode, zh)).join(' / ')}</small>
-                    </article>)}
+                    {agents.map(agent => {
+                        const candidateNodeIds = graph.relations
+                            .filter(relation => relation.kind === 'can_execute'
+                                && relation.target_id === agent.entity_id
+                                && relation.active)
+                            .map(relation => index.get(relation.source_id)?.node_id)
+                            .filter((nodeId): nodeId is string => Boolean(nodeId));
+                        const selected = selectedTaskType === agent.task_type;
+                        return <button
+                            type='button'
+                            key={agent.entity_id}
+                            className={`ComputeKnowledgeEntity agent ${agent.callable ? 'callable' : ''} ${selected ? 'selected' : ''}`}
+                            disabled={!agent.callable || candidateNodeIds.length === 0}
+                            onClick={() => onSelectWorkAgent(agent, candidateNodeIds)}
+                            aria-label={`${zh ? '选择' : 'Select'} ${agentLabel(agent, zh)}`}
+                        >
+                            <span>{agent.callable ? (zh ? '可调用' : 'Callable') : (zh ? '暂不可调用' : 'Unavailable')}</span>
+                            <strong>{agentLabel(agent, zh)}</strong>
+                            <small>{agent.available_node_count || 0} {zh ? '个执行节点' : 'executor nodes'} · {agent.modes.map(mode => modeLabel(mode, zh)).join(' / ')}</small>
+                            <em>{zh ? '点击带入调度表单' : 'Click to fill dispatch form'}</em>
+                        </button>;
+                    })}
                 </div>
                 {resources.map(resource => <article key={resource.entity_id} className={`ComputeKnowledgeEntity capacity ${resource.callable ? 'callable' : ''}`}>
                     <span>{resource.platform} · {resource.architecture}</span>
                     <strong>{resource.label}</strong>
                     <small>CPU {resource.cpu_logical || 0} · {zh ? '内存' : 'RAM'} {resource.memory_available_bytes == null ? '—' : `${(resource.memory_available_bytes / 1024 ** 3).toFixed(1)} GB`} · GPU {resource.gpu_count || 0}</small>
                 </article>)}
+                {dependencies.map(dependency => <article key={dependency.entity_id} className={`ComputeKnowledgeEntity dependency ${dependency.callable ? 'callable' : ''}`}>
+                    <span>{dependency.dependency_kind}</span>
+                    <strong>{dependency.label}</strong>
+                    <small>{dependency.callable ? (zh ? '健康' : 'Healthy') : (zh ? '不可用' : 'Unavailable')} · {(dependency.required_for || []).join(' / ') || (zh ? '基础链路' : 'base link')}</small>
+                </article>)}
                 {devices.map(device => <article key={device.entity_id} className={`ComputeKnowledgeEntity device ${device.callable ? 'callable' : ''}`}>
                     <span>{device.device_kind} · {device.provider}</span>
                     <strong>{device.label}</strong>
+                    <small>{device.device_model || (zh ? '型号未知' : 'Unknown model')} · {device.channels || 0} {zh ? '个通道' : 'channels'}</small>
                     <small>{device.callable ? (zh ? '可调用' : 'Callable') : (zh ? '已归属，未接入控制台调用' : 'Managed, not console-enabled')}</small>
                 </article>)}
             </div>

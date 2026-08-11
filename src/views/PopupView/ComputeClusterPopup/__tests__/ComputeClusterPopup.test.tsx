@@ -32,6 +32,16 @@ describe('ComputeClusterPopup', () => {
                 provider: 'tailscale', installed: true, online: true, ssh_available: true,
                 addresses: ['100.64.0.1'],
             },
+            network_dependencies: [{
+                dependency_id: 'tailscale', kind: 'overlay_network', state: 'healthy',
+                checked_at: 1, required_for: ['system.wait', 'information.web_fetch'],
+            }, {
+                dependency_id: 'control_ssh', kind: 'control_transport', state: 'healthy',
+                checked_at: 1, required_for: ['system.wait', 'information.web_fetch'],
+            }, {
+                dependency_id: 'public_http', kind: 'internet_egress', state: 'healthy',
+                checked_at: 1, required_for: ['information.web_fetch'],
+            }],
             resources: {
                 captured_at: 1, platform: 'linux', architecture: 'x86_64', cpu_logical: 16,
                 load_average_1m: 0.5, memory_total_bytes: 64 * 1024 ** 3,
@@ -60,10 +70,11 @@ describe('ComputeClusterPopup', () => {
             active_allocations: 0, allocations: [],
         });
         service.resourceGraph.mockResolvedValue({
-            schema_version: 'resource-knowledge-graph.v1', group_id: 'group-1', generated_at: 1,
+            schema_version: 'resource-knowledge-graph.v2', group_id: 'group-1', generated_at: 1,
             summary: {
-                entities: 5, relations: 4, online_nodes: 1, compute_resources: 1,
-                managed_devices: 0, work_agents: 2, callable_work_agents: 2,
+                entities: 9, relations: 8, online_nodes: 1, compute_resources: 1,
+                managed_devices: 1, network_dependencies: 3, healthy_network_dependencies: 3,
+                work_agents: 2, callable_work_agents: 2, interactive_work_agents: 2,
             },
             entities: [{
                 entity_id: 'group:group-1', kind: 'compute_group', label: 'cross-region-lab',
@@ -81,11 +92,44 @@ describe('ComputeClusterPopup', () => {
                 state: 'available', callable: true, task_type: 'system.wait',
                 capability: 'task.system.wait.v1', category: 'diagnostic',
                 modes: ['online', 'background'], available_node_count: 1,
+                required_network_dependencies: ['tailscale', 'control_ssh'],
+                recommended_resources: {
+                    cpu_cores: 0.1, memory_bytes: 64 * 1024 ** 2, disk_bytes: 0,
+                    gpu_count: 0, gpu_memory_mb: 0,
+                },
             }, {
                 entity_id: 'work-agent:information.web_fetch', kind: 'work_agent', label: 'information.web_fetch',
                 state: 'available', callable: true, task_type: 'information.web_fetch',
                 capability: 'task.information.web_fetch.v1', category: 'information',
                 modes: ['background'], available_node_count: 1,
+                required_network_dependencies: ['tailscale', 'control_ssh', 'public_http'],
+                recommended_resources: {
+                    cpu_cores: 0.5, memory_bytes: 256 * 1024 ** 2, disk_bytes: 64 * 1024 ** 2,
+                    gpu_count: 0, gpu_memory_mb: 0,
+                },
+            }, ...(['tailscale', 'control_ssh', 'public_http'] as const).map(dependencyId => ({
+                entity_id: `network-dependency:node-12345678:${dependencyId}`,
+                kind: 'network_dependency' as const,
+                label: dependencyId,
+                state: 'available' as const,
+                callable: true,
+                node_id: 'node-12345678',
+                modes: [],
+                dependency_id: dependencyId,
+                dependency_kind: dependencyId === 'tailscale'
+                    ? 'overlay_network'
+                    : dependencyId === 'control_ssh' ? 'control_transport' : 'internet_egress',
+                checked_at: 1,
+                required_for: dependencyId === 'public_http'
+                    ? ['information.web_fetch' as const]
+                    : ['system.wait' as const, 'information.web_fetch' as const],
+            })), {
+                entity_id: 'managed-device:node-12345678:camera-1', kind: 'managed_device',
+                label: 'IP CAMERA', state: 'available', callable: false,
+                node_id: 'node-12345678', modes: [], provider: 'camera-connect',
+                device_kind: 'camera', device_status: 'registered', channels: 2,
+                device_model: 'DS-2CD2686FWDA2-IZS',
+                device_capabilities: ['camera.registry.v1', 'camera.stream.v1'],
             }],
             relations: [{
                 relation_id: 'contains:1', kind: 'contains', source_id: 'group:group-1',
@@ -99,11 +143,23 @@ describe('ComputeClusterPopup', () => {
             }, {
                 relation_id: 'can-execute:2', kind: 'can_execute', source_id: 'node:node-12345678',
                 target_id: 'work-agent:information.web_fetch', active: true, reason: 'available',
+            }, ...(['tailscale', 'control_ssh', 'public_http'] as const).map(dependencyId => ({
+                relation_id: `depends-on:${dependencyId}`,
+                kind: 'depends_on' as const,
+                source_id: 'node:node-12345678',
+                target_id: `network-dependency:node-12345678:${dependencyId}`,
+                active: true,
+                reason: 'available' as const,
+            })), {
+                relation_id: 'manages:camera-1', kind: 'manages',
+                source_id: 'node:node-12345678',
+                target_id: 'managed-device:node-12345678:camera-1',
+                active: false, reason: 'not_console_allowlisted',
             }],
         });
     });
 
-    it('shows node, aggregate resources, and the phase-five boundary', async () => {
+    it('shows node, aggregate resources, and the phase-six boundary', async () => {
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByText('edge-01')).toBeInTheDocument();
@@ -113,7 +169,7 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('2 个通道')).toBeInTheDocument();
         expect(screen.getByText('已归属')).toBeInTheDocument();
         expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
-        expect(screen.getByText('第五阶段：把跨地域节点、算力、设备与可调用 work agents 组织为资源知识图谱。')).toBeInTheDocument();
+        expect(screen.getByText('第六阶段：点击图谱中的 work agent，按实时网络依赖与节点资源完成安全调度。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
         expect(screen.getAllByText('在线')).toHaveLength(2);
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
@@ -129,7 +185,10 @@ describe('ComputeClusterPopup', () => {
                 resource_orchestration: true,
                 work_agent_execution: true,
                 resource_knowledge_graph: true,
-                graph_schema: 'resource-knowledge-graph.v1',
+                graph_schema: 'resource-knowledge-graph.v2',
+                graph_interaction: true,
+                network_dependency_health: true,
+                managed_device_inventory: true,
                 placement_modes: ['automatic', 'manual'],
             },
             nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
@@ -137,14 +196,64 @@ describe('ComputeClusterPopup', () => {
 
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
-        expect(await screen.findByText('可调用资源图谱')).toBeInTheDocument();
-        expect(screen.getByText('阶段 5 · 资源知识图谱')).toBeInTheDocument();
+        expect(await screen.findByText('可交互资源图谱')).toBeInTheDocument();
+        expect(screen.getByText('阶段 6 · 交互式资源编排')).toBeInTheDocument();
         expect(screen.getByText('cross-region-lab')).toBeInTheDocument();
-        expect(screen.getByText('resource-knowledge-graph.v1')).toBeInTheDocument();
+        expect(screen.getByText('resource-knowledge-graph.v2')).toBeInTheDocument();
         expect(screen.getAllByText('公开信息采集 agent').length).toBeGreaterThanOrEqual(1);
         expect(screen.getAllByText('等待诊断 agent').length).toBeGreaterThanOrEqual(1);
         expect(screen.getByText('2/2')).toBeInTheDocument();
         await waitFor(() => expect(service.resourceGraph).toHaveBeenCalledTimes(1));
+    });
+
+    it('uses a graph work-agent button to fill a directed task and recommended resources', async () => {
+        const user = userEvent.setup();
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.2.0', protocol_version: 1,
+            admin_configured: true,
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['system.wait', 'information.web_fetch'],
+                resource_orchestration: true,
+                work_agent_execution: true,
+                resource_knowledge_graph: true,
+                graph_schema: 'resource-knowledge-graph.v2',
+                graph_interaction: true,
+                network_dependency_health: true,
+                managed_device_inventory: true,
+                placement_modes: ['automatic', 'manual'],
+            },
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+        service.submitTask.mockResolvedValue({} as never);
+
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        const agentButton = await screen.findByRole('button', {name: '选择 公开信息采集 agent'});
+        expect(agentButton).toBeEnabled();
+        await user.click(agentButton);
+
+        expect(screen.getByText('已从图谱带入')).toBeInTheDocument();
+        expect(screen.getByRole('combobox', {name: '工作类型'})).toHaveValue('information.web_fetch');
+        expect(screen.getByRole('combobox', {name: '节点选择'})).toHaveValue('node-12345678');
+        expect(screen.getByRole('spinbutton', {name: 'CPU 核心'})).toHaveValue(0.5);
+        expect(screen.getByRole('spinbutton', {name: '内存（GB）'})).toHaveValue(0.25);
+        expect(screen.getByRole('spinbutton', {name: '磁盘（GB）'})).toHaveValue(0.0625);
+
+        await user.click(screen.getByRole('button', {name: '定向下发'}));
+        await waitFor(() => expect(service.submitTask).toHaveBeenCalledWith(
+            expect.objectContaining({
+                node_id: 'node-12345678',
+                task_type: 'information.web_fetch',
+                resources: {
+                    cpu_cores: 0.5,
+                    memory_bytes: 256 * 1024 ** 2,
+                    disk_bytes: 64 * 1024 ** 2,
+                    gpu_count: 0,
+                    gpu_memory_mb: 0,
+                },
+            }),
+        ));
     });
 
     it('shows task dispatch, durable progress, and controls when enabled', async () => {

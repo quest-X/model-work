@@ -7,6 +7,7 @@ import {
     ComputeClusterService,
     ComputeClusterStatus,
     ComputeResourceGraph,
+    ComputeResourceGraphEntity,
     ComputeSchedulerResponse,
     ComputeTask,
     ComputeTaskMode,
@@ -120,8 +121,10 @@ const TaskCard: React.FC<TaskCardProps> = ({task, zh, busy, onControl}) => {
                     ? (zh ? '公开信息抓取' : 'Public information fetch')
                     : (zh ? '等待测试' : 'Wait test')} · {task.node_name}</strong>
                 <small>{task.mode === 'online' ? (zh ? '在线任务' : 'Online') : (zh ? '后台任务' : 'Background')} · {task.task_id.slice(0, 8)}</small>
-                {task.placement?.mode === 'automatic' && <small className='ComputeTaskPlacement'>
-                    {zh ? '自动调度' : 'Auto placed'} · CPU {task.resources?.cpu_cores ?? 0} · {bytes(task.resources?.memory_bytes ?? 0, zh)}
+                {task.placement && <small className='ComputeTaskPlacement'>
+                    {task.placement.mode === 'automatic'
+                        ? (zh ? '自动调度' : 'Auto placed')
+                        : (zh ? '图谱定向调度' : 'Graph-directed')} · CPU {task.resources?.cpu_cores ?? 0} · {bytes(task.resources?.memory_bytes ?? 0, zh)}
                     {task.placement.reserved ? (zh ? ' · 已预留' : ' · reserved') : ''}
                 </small>}
             </div>
@@ -252,11 +255,16 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     const [taskDiskGb, setTaskDiskGb] = useState(0);
     const [taskGpu, setTaskGpu] = useState(0);
     const [taskGpuMemoryMb, setTaskGpuMemoryMb] = useState(0);
+    const [graphSelection, setGraphSelection] = useState<{
+        taskType: ComputeTaskType;
+        nodeId: string;
+    } | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [controllingTask, setControllingTask] = useState('');
     const mounted = useRef(true);
     const refreshingRef = useRef(false);
     const heartbeats = useRef<Record<string, number>>({});
+    const taskFormRef = useRef<HTMLDivElement | null>(null);
 
     // The refresh is one atomic snapshot transaction: directory, tasks, and online leases.
     // eslint-disable-next-line complexity
@@ -365,13 +373,13 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                 seconds: informationTask ? undefined : taskSeconds,
                 url: informationTask ? taskUrl : undefined,
                 lease_seconds: 60,
-                resources: automatic ? {
+                resources: {
                     cpu_cores: taskCpu,
                     memory_bytes: Math.round(taskMemoryGb * 1024 ** 3),
                     disk_bytes: Math.round(taskDiskGb * 1024 ** 3),
                     gpu_count: taskGpu,
                     gpu_memory_mb: taskGpuMemoryMb,
-                } : undefined,
+                },
             });
             setTaskError('');
             await refresh();
@@ -394,6 +402,30 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         taskType,
         taskUrl,
     ]);
+
+    const selectWorkAgent = useCallback((
+        agent: ComputeResourceGraphEntity,
+        candidateNodeIds: string[],
+    ) => {
+        if (!agent.callable || !agent.task_type || candidateNodeIds.length === 0) return;
+        const taskType = agent.task_type;
+        const resources = agent.recommended_resources;
+        setTaskType(taskType);
+        setTaskMode(taskType === 'information.web_fetch' ? 'background' : (agent.modes[0] || 'online'));
+        setSelectedNode(candidateNodeIds[0]);
+        if (resources) {
+            setTaskCpu(resources.cpu_cores);
+            setTaskMemoryGb(Number((resources.memory_bytes / 1024 ** 3).toFixed(4)));
+            setTaskDiskGb(Number((resources.disk_bytes / 1024 ** 3).toFixed(4)));
+            setTaskGpu(resources.gpu_count);
+            setTaskGpuMemoryMb(resources.gpu_memory_mb);
+        }
+        setGraphSelection({taskType, nodeId: candidateNodeIds[0]});
+        setTaskError('');
+        window.requestAnimationFrame(() => {
+            taskFormRef.current?.scrollIntoView?.({behavior: 'smooth', block: 'center'});
+        });
+    }, []);
 
     const controlTask = useCallback(async (
         task: ComputeTask,
@@ -450,8 +482,8 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     <span className='ComputeClusterEyebrow'>OpenSight · model-work-node</span>
                     <h2>{zh ? '计算群' : 'Compute Cluster'}</h2>
                     <p>{zh
-                        ? '第五阶段：把跨地域节点、算力、设备与可调用 work agents 组织为资源知识图谱。'
-                        : 'Phase 5: organize cross-region nodes, compute, devices, and callable work agents as a resource knowledge graph.'}</p>
+                        ? '第六阶段：点击图谱中的 work agent，按实时网络依赖与节点资源完成安全调度。'
+                        : 'Phase 6: select work agents in the graph and dispatch safely using live network and node resources.'}</p>
                 </div>
                 <div className='ComputeClusterHeaderActions'>
                     <span className={`ComputeClusterServiceState ${error ? 'error' : 'ready'}`}>
@@ -486,7 +518,12 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         : 'Mint a one-time enrollment token, then run model-work-node cluster join on the target machine.'}</p>
                     <code>model-work-node cluster join --control-url &lt;OpenSight URL&gt; --enrollment-token-file &lt;secret file&gt;</code>
                 </div>}
-                {!loading && resourceGraph && <ResourceKnowledgeGraph graph={resourceGraph} zh={zh}/>}
+                {!loading && resourceGraph && <ResourceKnowledgeGraph
+                    graph={resourceGraph}
+                    zh={zh}
+                    selectedTaskType={graphSelection?.taskType}
+                    onSelectWorkAgent={selectWorkAgent}
+                />}
                 {!loading && orchestrationEnabled && scheduler && <section className='ComputeSchedulerPanel'>
                     <div className='ComputeSchedulerHeading'>
                         <div>
@@ -509,7 +546,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         <div><span>{zh ? '活动预留' : 'Allocations'}</span><strong>{scheduler.active_allocations}</strong><small>{zh ? '随任务终态释放' : 'released at terminal state'}</small></div>
                     </div>
                 </section>}
-                {!loading && taskControlEnabled && <section className='ComputeTaskControl'>
+                {!loading && taskControlEnabled && <section className='ComputeTaskControl' ref={taskFormRef}>
                     <div className='ComputeTaskControlHeading'>
                         <div>
                             <span>{zh ? '阶段 4 · work agent' : 'Phase 4 · Work agent'}</span>
@@ -525,6 +562,14 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                                 : (zh ? '群主离线后节点仍继续执行' : 'Keeps running when the owner is offline')}</span>
                         </div>
                     </div>
+                    {graphSelection && <div className='ComputeGraphSelection' role='status'>
+                        <strong>{zh ? '已从图谱带入' : 'Filled from graph'}</strong>
+                        <span>{graphSelection.taskType === 'information.web_fetch'
+                            ? (zh ? '公开信息采集 agent' : 'Public information agent')
+                            : (zh ? '等待诊断 agent' : 'Wait diagnostic agent')}</span>
+                        <span>{nodes.find(node => node.node_id === graphSelection.nodeId)?.name || graphSelection.nodeId}</span>
+                        <span>CPU {taskCpu} · {taskMemoryGb} GB RAM · {taskDiskGb} GB Disk · GPU {taskGpu}</span>
+                    </div>}
                     <div className='ComputeTaskForm'>
                         <label>
                             <span>{zh ? '工作类型' : 'Work type'}</span>
@@ -532,6 +577,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                                 const next = event.target.value as ComputeTaskType;
                                 setTaskType(next);
                                 setTaskMode(next === 'information.web_fetch' ? 'background' : 'online');
+                                setGraphSelection(null);
                             }}>
                                 <option value='information.web_fetch' disabled={!informationWorkAgentEnabled}>{zh ? '公开信息抓取' : 'Public information fetch'}</option>
                                 <option value='system.wait'>{zh ? '等待测试' : 'Wait test'}</option>
@@ -539,7 +585,10 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         </label>
                         <label>
                             <span>{zh ? '节点选择' : 'Node placement'}</span>
-                            <select value={selectedNode} onChange={event => setSelectedNode(event.target.value)}>
+                            <select value={selectedNode} onChange={event => {
+                                setSelectedNode(event.target.value);
+                                setGraphSelection(null);
+                            }}>
                                 {orchestrationEnabled && <option value={AUTO_PLACEMENT}>{zh ? '计算群自动调度（推荐）' : 'Automatic group placement (recommended)'}</option>}
                                 {nodes.map(node => <option value={node.node_id} key={node.node_id} disabled={!node.online}>
                                     {node.name}{node.online ? '' : (zh ? '（离线）' : ' (offline)')}
@@ -566,10 +615,10 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         >{submitting ? (zh ? '调度中…' : 'Scheduling…') : (automaticPlacement ? (zh ? '自动调度' : 'Auto place') : (zh ? '定向下发' : 'Dispatch'))}</button>
                     </div>
 
-                    {automaticPlacement && orchestrationEnabled && <div className='ComputeResourceRequestForm'>
-                        <label><span>CPU {zh ? '核心' : 'cores'}</span><input type='number' min={0} step={0.5} value={taskCpu} onChange={event => setTaskCpu(Number(event.target.value))}/></label>
+                    {orchestrationEnabled && <div className='ComputeResourceRequestForm'>
+                        <label><span>CPU {zh ? '核心' : 'cores'}</span><input type='number' min={0} step={0.1} value={taskCpu} onChange={event => setTaskCpu(Number(event.target.value))}/></label>
                         <label><span>{zh ? '内存（GB）' : 'Memory (GB)'}</span><input type='number' min={0} step={0.25} value={taskMemoryGb} onChange={event => setTaskMemoryGb(Number(event.target.value))}/></label>
-                        <label><span>{zh ? '磁盘（GB）' : 'Disk (GB)'}</span><input type='number' min={0} step={1} value={taskDiskGb} onChange={event => setTaskDiskGb(Number(event.target.value))}/></label>
+                        <label><span>{zh ? '磁盘（GB）' : 'Disk (GB)'}</span><input type='number' min={0} step={0.0625} value={taskDiskGb} onChange={event => setTaskDiskGb(Number(event.target.value))}/></label>
                         <label><span>GPU {zh ? '数量' : 'count'}</span><input type='number' min={0} step={1} value={taskGpu} onChange={event => setTaskGpu(Number(event.target.value))}/></label>
                         <label><span>{zh ? '显存（MB）' : 'VRAM (MB)'}</span><input type='number' min={0} step={256} value={taskGpuMemoryMb} onChange={event => setTaskGpuMemoryMb(Number(event.target.value))}/></label>
                         <p>{informationTask

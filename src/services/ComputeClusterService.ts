@@ -39,6 +39,14 @@ export type ComputeDeviceInventory = {
     error?: string | null;
 };
 
+export type ComputeNetworkDependency = {
+    dependency_id: 'tailscale' | 'control_ssh' | 'public_http';
+    kind: 'overlay_network' | 'control_transport' | 'internet_egress';
+    state: 'healthy' | 'degraded' | 'unavailable' | 'unknown';
+    checked_at: number;
+    required_for: ComputeTaskType[];
+};
+
 export type ComputeClusterNode = {
     node_id: string;
     installation_id: string;
@@ -56,6 +64,7 @@ export type ComputeClusterNode = {
         tailnet?: string | null;
         error?: string | null;
     };
+    network_dependencies: ComputeNetworkDependency[];
     resources: ComputeNodeResources;
     device_inventory: ComputeDeviceInventory;
     enrolled_at: number;
@@ -77,7 +86,10 @@ export type ComputeClusterStatus = {
         resource_orchestration?: boolean;
         work_agent_execution?: boolean;
         resource_knowledge_graph?: boolean;
-        graph_schema?: 'resource-knowledge-graph.v1';
+        graph_schema?: 'resource-knowledge-graph.v2';
+        graph_interaction?: boolean;
+        network_dependency_health?: boolean;
+        managed_device_inventory?: boolean;
         evidence_projection?: 'metadata-only-v1';
         placement_modes?: ('automatic' | 'manual')[];
     };
@@ -113,6 +125,7 @@ export type ComputeResourceRequest = {
     gpu_count: number;
     gpu_memory_mb: number;
     required_capabilities?: string[];
+    required_network_dependencies?: string[];
     required_labels?: Record<string, string>;
 };
 
@@ -171,12 +184,13 @@ export type ComputeSchedulerResponse = {
         node_online: boolean;
         request: ComputeResourceRequest;
         created_at: number;
+        mode: 'automatic' | 'manual';
     }[];
 };
 
 export type ComputeResourceGraphEntity = {
     entity_id: string;
-    kind: 'compute_group' | 'compute_node' | 'compute_resource' | 'work_agent' | 'managed_device';
+    kind: 'compute_group' | 'compute_node' | 'compute_resource' | 'work_agent' | 'managed_device' | 'network_dependency';
     label: string;
     state: 'available' | 'degraded' | 'unavailable';
     callable: boolean;
@@ -196,19 +210,27 @@ export type ComputeResourceGraphEntity = {
     device_kind?: string | null;
     device_status?: string | null;
     channels?: number | null;
+    device_model?: string | null;
+    device_capabilities?: string[];
+    dependency_id?: string | null;
+    dependency_kind?: string | null;
+    checked_at?: number | null;
+    required_for?: ComputeTaskType[];
+    required_network_dependencies?: string[];
+    recommended_resources?: ComputeResourceRequest | null;
 };
 
 export type ComputeResourceGraphRelation = {
     relation_id: string;
-    kind: 'contains' | 'provides' | 'can_execute' | 'manages';
+    kind: 'contains' | 'provides' | 'can_execute' | 'manages' | 'depends_on';
     source_id: string;
     target_id: string;
     active: boolean;
-    reason: 'available' | 'node_offline' | 'capability_missing' | 'not_console_allowlisted';
+    reason: 'available' | 'node_offline' | 'capability_missing' | 'dependency_unavailable' | 'not_console_allowlisted';
 };
 
 export type ComputeResourceGraph = {
-    schema_version: 'resource-knowledge-graph.v1';
+    schema_version: 'resource-knowledge-graph.v2';
     group_id: string;
     generated_at: number;
     summary: {
@@ -217,8 +239,11 @@ export type ComputeResourceGraph = {
         online_nodes: number;
         compute_resources: number;
         managed_devices: number;
+        network_dependencies: number;
+        healthy_network_dependencies: number;
         work_agents: number;
         callable_work_agents: number;
+        interactive_work_agents: number;
     };
     entities: ComputeResourceGraphEntity[];
     relations: ComputeResourceGraphRelation[];

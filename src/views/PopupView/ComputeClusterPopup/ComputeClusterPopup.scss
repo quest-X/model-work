@@ -125,6 +125,130 @@
   > span { width: 17px; height: 17px; border: 2px solid rgba(255, 255, 255, 0.12); border-top-color: $primaryColor; border-radius: 50%; animation: compute-spin .8s linear infinite; }
 }
 
+.ComputeKnowledgePanel {
+  overflow: hidden;
+  margin-bottom: 14px;
+  border: 1px solid rgba(177, 126, 255, 0.28);
+  border-radius: 7px;
+  background: linear-gradient(145deg, rgba(69, 43, 98, 0.38), rgba(28, 30, 34, 0.96));
+}
+
+.ComputeKnowledgeHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 14px 16px 12px;
+  > div:first-child > span { color: #c39afc; font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  h3 { margin: 4px 0 3px; font-size: 14px; }
+  p { margin: 0; color: rgba(255, 255, 255, 0.46); font-size: 9px; }
+}
+
+.ComputeKnowledgeStats {
+  display: flex;
+  gap: 18px;
+  > div { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  strong { color: #d6b8ff; font-size: 14px; }
+  span { color: rgba(255, 255, 255, 0.36); font-size: 8px; white-space: nowrap; }
+}
+
+.ComputeKnowledgeLegend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 8px 16px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 8px;
+  span { display: inline-flex; align-items: center; gap: 5px; }
+  i { width: 6px; height: 6px; border-radius: 50%; background: #77727e; }
+  i.callable { background: #68d68d; box-shadow: 0 0 6px rgba(104, 214, 141, 0.45); }
+  code { margin-left: auto; color: rgba(197, 161, 247, 0.66); font-size: 8px; }
+}
+
+.ComputeKnowledgeGraph {
+  display: grid;
+  grid-template-columns: minmax(150px, .7fr) 58px minmax(190px, .9fr) 82px minmax(320px, 1.5fr);
+  align-items: stretch;
+  gap: 0;
+  min-height: 220px;
+  padding: 14px 16px 16px;
+}
+
+.ComputeKnowledgeColumn {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 7px;
+  &.resources { justify-content: flex-start; }
+}
+
+.ComputeKnowledgeColumnLabel {
+  margin-bottom: 1px;
+  color: rgba(255, 255, 255, 0.34);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.ComputeKnowledgeEntity {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-left: 3px solid #6f6976;
+  border-radius: 5px;
+  background: rgba(16, 17, 20, 0.72);
+  padding: 10px;
+  &.callable { border-left-color: #5aca80; }
+  &.group { min-height: 78px; justify-content: center; border-color: rgba(193, 148, 255, 0.28); border-left-color: #b982f4; background: rgba(93, 57, 126, 0.24); }
+  &.agent { border-color: rgba(101, 191, 246, 0.17); }
+  &.capacity { padding: 8px 10px; }
+  > span { color: rgba(255, 255, 255, 0.38); font-size: 8px; }
+  > strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+  > small { color: rgba(255, 255, 255, 0.4); font-size: 8px; line-height: 1.4; }
+}
+
+.ComputeKnowledgeAgentGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.ComputeKnowledgeEdges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+  small {
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 3px 6px;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 7px;
+  }
+  small.active { background: rgba(83, 199, 122, 0.11); color: #79d99a; }
+}
+
+.ComputeKnowledgeConnector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  span { color: rgba(196, 158, 246, 0.58); font-size: 7px; text-align: center; }
+  i {
+    position: relative;
+    width: calc(100% - 14px);
+    height: 1px;
+    background: linear-gradient(90deg, rgba(184, 128, 244, 0.18), rgba(184, 128, 244, 0.74));
+    &::after { position: absolute; top: -3px; right: -1px; width: 6px; height: 6px; border-top: 1px solid #b982f4; border-right: 1px solid #b982f4; content: ''; transform: rotate(45deg); }
+  }
+}
+
 .ComputeSchedulerPanel {
   overflow: hidden;
   margin-bottom: 14px;
@@ -546,7 +670,13 @@
   .ComputeNodeResourceGrid,
   .ComputeSchedulerCapacity { grid-template-columns: 1fr 1fr; }
   .ComputeTaskControlHeading,
-  .ComputeSchedulerHeading { flex-direction: column; }
+  .ComputeSchedulerHeading,
+  .ComputeKnowledgeHeading { flex-direction: column; }
+  .ComputeKnowledgeStats { width: 100%; justify-content: flex-start; }
+  .ComputeKnowledgeStats > div { align-items: flex-start; }
+  .ComputeKnowledgeGraph { grid-template-columns: 1fr; gap: 9px; }
+  .ComputeKnowledgeConnector { min-height: 24px; transform: rotate(90deg); }
+  .ComputeKnowledgeAgentGrid { grid-template-columns: 1fr; }
   .ComputeSchedulerPolicy { align-items: flex-start; }
   .ComputeTaskModeHelp { align-items: flex-start; }
   .ComputeTaskModeHelp span { text-align: left; }

@@ -1,5 +1,5 @@
 import React from 'react';
-import {fireEvent, render, screen} from '@testing-library/react';
+import {fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {Language} from '../../../../data/LanguageConfig';
 import {ProjectType} from '../../../../data/enums/ProjectType';
 import {
@@ -9,6 +9,7 @@ import {
     QueueItemType,
 } from '../../../../store/queue/types';
 import {TopNavigationBar} from '../TopNavigationBar';
+import {PopupWindowType} from '../../../../data/enums/PopupWindowType';
 
 jest.mock('../../StateBar/StateBar', () => ({
     __esModule: true,
@@ -78,5 +79,41 @@ describe('TopNavigationBar core-engine change badge', () => {
         renderNavigation([queueItem('dirty', QueueDataSyncStatus.DIRTY)], Language.ENGLISH);
 
         expect(screen.getByRole('status', {name: '1 local change pending'})).toHaveTextContent('1');
+    });
+});
+
+describe('TopNavigationBar compute-cluster entry', () => {
+    it('opens the compute cluster only when its extension is ready', async () => {
+        const updatePopup = jest.fn();
+        const previousFetch = global.fetch;
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                plugins: {
+                    camera_connect: {enabled: true, state: 'ready'},
+                    compute_cluster: {enabled: true, state: 'ready'},
+                },
+            }),
+        } as Response);
+        global.fetch = fetchMock;
+        render(<TopNavigationBar
+            updateActivePopupTypeAction={updatePopup}
+            updateProjectDataAction={jest.fn()}
+            updateLanguageAction={jest.fn()}
+            updateQueueItemAction={jest.fn()}
+            projectData={{type: ProjectType.OBJECT_DETECTION, name: 'cluster-test'}}
+            queueItems={[]}
+            activeQueueItemId={null}
+            language={Language.CHINESE}
+            hasCoreEngine
+            hasExtensionEngine
+        />);
+
+        fireEvent.click(screen.getByText('拓展引擎'));
+        await waitFor(() => expect(screen.getByText('计算群')).toBeInTheDocument());
+        fireEvent.click(screen.getByText('计算群'));
+
+        expect(updatePopup).toHaveBeenCalledWith(PopupWindowType.COMPUTE_CLUSTER);
+        global.fetch = previousFetch;
     });
 });

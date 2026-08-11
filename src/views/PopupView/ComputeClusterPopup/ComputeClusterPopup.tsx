@@ -6,6 +6,7 @@ import {
     ComputeClusterNode,
     ComputeClusterService,
     ComputeClusterStatus,
+    ComputeSchedulerResponse,
     ComputeTask,
     ComputeTaskMode,
 } from '../../../services/ComputeClusterService';
@@ -15,6 +16,8 @@ import './ComputeClusterPopup.scss';
 interface IProps {
     language: Language;
 }
+
+const AUTO_PLACEMENT = '__automatic__';
 
 const bytes = (value: number | null, zh: boolean): string => {
     if (value === null || !Number.isFinite(value)) return zh ? '未知' : 'Unknown';
@@ -63,6 +66,15 @@ const taskProgress = (task: ComputeTask): number => {
     return total > 0 && Number.isFinite(elapsed) ? Math.max(0, Math.min(100, elapsed / total * 100)) : 0;
 };
 
+const resourceRequestValid = (
+    cpu: number,
+    memoryGb: number,
+    diskGb: number,
+    gpu: number,
+    gpuMemoryMb: number,
+): boolean => [cpu, memoryGb, diskGb, gpu, gpuMemoryMb].every(value => value >= 0)
+    && (gpuMemoryMb === 0 || gpu >= 1);
+
 interface TaskCardProps {
     task: ComputeTask;
     zh: boolean;
@@ -82,6 +94,10 @@ const TaskCard: React.FC<TaskCardProps> = ({task, zh, busy, onControl}) => {
             <div>
                 <strong>{zh ? '等待测试' : 'Wait test'} · {task.node_name}</strong>
                 <small>{task.mode === 'online' ? (zh ? '在线任务' : 'Online') : (zh ? '后台任务' : 'Background')} · {task.task_id.slice(0, 8)}</small>
+                {task.placement?.mode === 'automatic' && <small className='ComputeTaskPlacement'>
+                    {zh ? '自动调度' : 'Auto placed'} · CPU {task.resources?.cpu_cores ?? 0} · {bytes(task.resources?.memory_bytes ?? 0, zh)}
+                    {task.placement.reserved ? (zh ? ' · 已预留' : ' · reserved') : ''}
+                </small>}
             </div>
         </div>
         <div className='ComputeTaskProgress'>
@@ -178,13 +194,19 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     const [nodes, setNodes] = useState<ComputeClusterNode[]>([]);
     const [status, setStatus] = useState<ComputeClusterStatus | null>(null);
     const [tasks, setTasks] = useState<ComputeTask[]>([]);
+    const [scheduler, setScheduler] = useState<ComputeSchedulerResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState('');
     const [taskError, setTaskError] = useState('');
-    const [selectedNode, setSelectedNode] = useState('');
+    const [selectedNode, setSelectedNode] = useState(AUTO_PLACEMENT);
     const [taskMode, setTaskMode] = useState<ComputeTaskMode>('online');
     const [taskSeconds, setTaskSeconds] = useState(20);
+    const [taskCpu, setTaskCpu] = useState(1);
+    const [taskMemoryGb, setTaskMemoryGb] = useState(1);
+    const [taskDiskGb, setTaskDiskGb] = useState(0);
+    const [taskGpu, setTaskGpu] = useState(0);
+    const [taskGpuMemoryMb, setTaskGpuMemoryMb] = useState(0);
     const [submitting, setSubmitting] = useState(false);
     const [controllingTask, setControllingTask] = useState('');
     const mounted = useRef(true);
@@ -205,14 +227,26 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             if (mounted.current) {
                 setStatus(nextStatus);
                 setNodes(nextNodes);
-                setSelectedNode(current => current || nextNodes.find(node => node.online)?.node_id || nextNodes[0]?.node_id || '');
+                setSelectedNode(current => {
+                    if (nextStatus.task_control?.resource_orchestration) {
+                        return current || AUTO_PLACEMENT;
+                    }
+                    if (current && current !== AUTO_PLACEMENT) return current;
+                    return nextNodes.find(node => node.online)?.node_id || nextNodes[0]?.node_id || '';
+                });
                 setError('');
             }
             if (nextStatus.task_control?.enabled) {
                 try {
-                    const response = await ComputeClusterService.tasks(signal);
+                    const [response, schedulerResponse] = await Promise.all([
+                        ComputeClusterService.tasks(signal),
+                        nextStatus.task_control.resource_orchestration
+                            ? ComputeClusterService.scheduler(signal)
+                            : Promise.resolve(null),
+                    ]);
                     if (mounted.current) {
                         setTasks(response.tasks);
+                        setScheduler(schedulerResponse);
                         setTaskError('');
                     }
                     const now = Date.now();
@@ -232,6 +266,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                 }
             } else if (mounted.current) {
                 setTasks([]);
+                setScheduler(null);
             }
         } catch (reason) {
             if ((reason as {name?: string})?.name !== 'AbortError') {
@@ -259,14 +294,28 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     }, [refresh]);
 
     const submitTask = useCallback(async () => {
-        if (!selectedNode || submitting || taskSeconds < 0 || taskSeconds > 3600) return;
+        const automatic = selectedNode === AUTO_PLACEMENT;
+        if (
+            !selectedNode
+            || submitting
+            || taskSeconds < 0
+            || taskSeconds > 3600
+            || !resourceRequestValid(taskCpu, taskMemoryGb, taskDiskGb, taskGpu, taskGpuMemoryMb)
+        ) return;
         setSubmitting(true);
         try {
             await ComputeClusterService.submitTask({
-                node_id: selectedNode,
+                node_id: automatic ? undefined : selectedNode,
                 mode: taskMode,
                 seconds: taskSeconds,
                 lease_seconds: 60,
+                resources: automatic ? {
+                    cpu_cores: taskCpu,
+                    memory_bytes: Math.round(taskMemoryGb * 1024 ** 3),
+                    disk_bytes: Math.round(taskDiskGb * 1024 ** 3),
+                    gpu_count: taskGpu,
+                    gpu_memory_mb: taskGpuMemoryMb,
+                } : undefined,
             });
             setTaskError('');
             await refresh();
@@ -275,7 +324,18 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         } finally {
             if (mounted.current) setSubmitting(false);
         }
-    }, [refresh, selectedNode, submitting, taskMode, taskSeconds]);
+    }, [
+        refresh,
+        selectedNode,
+        submitting,
+        taskCpu,
+        taskDiskGb,
+        taskGpu,
+        taskGpuMemoryMb,
+        taskMemoryGb,
+        taskMode,
+        taskSeconds,
+    ]);
 
     const controlTask = useCallback(async (
         task: ComputeTask,
@@ -304,6 +364,19 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     }), [nodes, status, tasks]);
 
     const taskControlEnabled = status?.task_control?.enabled === true;
+    const orchestrationEnabled = taskControlEnabled
+        && status?.task_control?.resource_orchestration === true;
+    const automaticPlacement = selectedNode === AUTO_PLACEMENT;
+    const selectedNodeOnline = automaticPlacement
+        ? nodes.some(node => node.online)
+        : nodes.some(node => node.node_id === selectedNode && node.online);
+    const resourcesValid = resourceRequestValid(
+        taskCpu,
+        taskMemoryGb,
+        taskDiskGb,
+        taskGpu,
+        taskGpuMemoryMb,
+    );
 
     return <div className='ComputeClusterBackdrop'>
         <section className='ComputeClusterPopup' aria-label={zh ? '计算群' : 'Compute Cluster'}>
@@ -312,8 +385,8 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     <span className='ComputeClusterEyebrow'>OpenSight · model-work-node</span>
                     <h2>{zh ? '计算群' : 'Compute Cluster'}</h2>
                     <p>{zh
-                        ? '第二阶段：通过签名白名单任务安全下发、查看进度，并支持暂停、恢复和取消。'
-                        : 'Phase 2: dispatch signed allowlisted tasks, monitor progress, pause, resume, and cancel.'}</p>
+                        ? '第三阶段：汇总跨地域资源，按任务需求自动选择节点、预留容量并在终态释放。'
+                        : 'Phase 3: aggregate cross-region capacity, auto-place tasks, reserve resources, and release at terminal state.'}</p>
                 </div>
                 <div className='ComputeClusterHeaderActions'>
                     <span className={`ComputeClusterServiceState ${error ? 'error' : 'ready'}`}>
@@ -348,14 +421,36 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         : 'Mint a one-time enrollment token, then run model-work-node cluster join on the target machine.'}</p>
                     <code>model-work-node cluster join --control-url &lt;OpenSight URL&gt; --enrollment-token-file &lt;secret file&gt;</code>
                 </div>}
+                {!loading && orchestrationEnabled && scheduler && <section className='ComputeSchedulerPanel'>
+                    <div className='ComputeSchedulerHeading'>
+                        <div>
+                            <span>{zh ? '阶段 3 · 资源编排' : 'Phase 3 · Resource orchestration'}</span>
+                            <h3>{zh ? '计算群调度池' : 'Compute-group scheduler'}</h3>
+                            <p>{zh
+                                ? '按任务预留各节点容量；统一调配不等于把多台机器的物理内存合并。'
+                                : 'Capacity is reserved per task; unified placement does not merge physical memory across machines.'}</p>
+                        </div>
+                        <div className='ComputeSchedulerPolicy'>
+                            <strong>{zh ? '优先选择余量充足节点' : 'Most available node'}</strong>
+                            <span>{scheduler.policy} · {scheduler.online_nodes} {zh ? '个在线成员' : 'online members'}</span>
+                        </div>
+                    </div>
+                    <div className='ComputeSchedulerCapacity'>
+                        <div><span>CPU</span><strong>{scheduler.available.cpu_cores} / {scheduler.totals.cpu_cores}</strong><small>{zh ? '核可用' : 'cores available'}</small></div>
+                        <div><span>{zh ? '内存' : 'Memory'}</span><strong>{bytes(scheduler.available.memory_bytes, zh)}</strong><small>/ {bytes(scheduler.totals.memory_bytes, zh)}</small></div>
+                        <div><span>{zh ? '磁盘' : 'Disk'}</span><strong>{bytes(scheduler.available.disk_bytes, zh)}</strong><small>/ {bytes(scheduler.totals.disk_bytes, zh)}</small></div>
+                        <div><span>GPU</span><strong>{scheduler.available.gpu_count} / {scheduler.totals.gpu_count}</strong><small>{bytes(scheduler.available.gpu_memory_mb * 1024 ** 2, zh)} {zh ? '显存' : 'VRAM'}</small></div>
+                        <div><span>{zh ? '活动预留' : 'Allocations'}</span><strong>{scheduler.active_allocations}</strong><small>{zh ? '随任务终态释放' : 'released at terminal state'}</small></div>
+                    </div>
+                </section>}
                 {!loading && taskControlEnabled && <section className='ComputeTaskControl'>
                     <div className='ComputeTaskControlHeading'>
                         <div>
-                            <span>{zh ? '阶段 2 · 任务分发' : 'Phase 2 · Task dispatch'}</span>
-                            <h3>{zh ? '创建安全测试任务' : 'Create a safe test task'}</h3>
+                            <span>{zh ? '资源任务' : 'Resource-aware task'}</span>
+                            <h3>{zh ? '提交任务需求' : 'Submit task requirements'}</h3>
                             <p>{zh
-                                ? '当前仅开放可暂停的等待任务，用来验收完整控制链路；不会执行 Shell。'
-                                : 'Only a pausable wait task is enabled to validate the control path. Shell is never executed.'}</p>
+                                ? '默认由计算群自动选点；当前仍只运行可暂停的白名单等待任务，不执行 Shell。'
+                                : 'The group selects a node by default; only the pausable allowlisted wait task is enabled, never Shell.'}</p>
                         </div>
                         <div className='ComputeTaskModeHelp'>
                             <strong>{taskMode === 'online' ? (zh ? '在线任务' : 'Online') : (zh ? '后台任务' : 'Background')}</strong>
@@ -366,8 +461,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     </div>
                     <div className='ComputeTaskForm'>
                         <label>
-                            <span>{zh ? '目标节点' : 'Target node'}</span>
+                            <span>{zh ? '节点选择' : 'Node placement'}</span>
                             <select value={selectedNode} onChange={event => setSelectedNode(event.target.value)}>
+                                {orchestrationEnabled && <option value={AUTO_PLACEMENT}>{zh ? '计算群自动调度（推荐）' : 'Automatic group placement (recommended)'}</option>}
                                 {nodes.map(node => <option value={node.node_id} key={node.node_id} disabled={!node.online}>
                                     {node.name}{node.online ? '' : (zh ? '（离线）' : ' (offline)')}
                                 </option>)}
@@ -392,17 +488,26 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         </label>
                         <button
                             type='button'
-                            disabled={submitting || !selectedNode || !nodes.some(node => node.node_id === selectedNode && node.online)}
+                            disabled={submitting || !selectedNode || !selectedNodeOnline || !resourcesValid}
                             onClick={() => void submitTask()}
-                        >{submitting ? (zh ? '下发中…' : 'Dispatching…') : (zh ? '下发任务' : 'Dispatch task')}</button>
+                        >{submitting ? (zh ? '调度中…' : 'Scheduling…') : (automaticPlacement ? (zh ? '自动调度' : 'Auto place') : (zh ? '定向下发' : 'Dispatch'))}</button>
                     </div>
+
+                    {automaticPlacement && orchestrationEnabled && <div className='ComputeResourceRequestForm'>
+                        <label><span>CPU {zh ? '核心' : 'cores'}</span><input type='number' min={0} step={0.5} value={taskCpu} onChange={event => setTaskCpu(Number(event.target.value))}/></label>
+                        <label><span>{zh ? '内存（GB）' : 'Memory (GB)'}</span><input type='number' min={0} step={0.25} value={taskMemoryGb} onChange={event => setTaskMemoryGb(Number(event.target.value))}/></label>
+                        <label><span>{zh ? '磁盘（GB）' : 'Disk (GB)'}</span><input type='number' min={0} step={1} value={taskDiskGb} onChange={event => setTaskDiskGb(Number(event.target.value))}/></label>
+                        <label><span>GPU {zh ? '数量' : 'count'}</span><input type='number' min={0} step={1} value={taskGpu} onChange={event => setTaskGpu(Number(event.target.value))}/></label>
+                        <label><span>{zh ? '显存（MB）' : 'VRAM (MB)'}</span><input type='number' min={0} step={256} value={taskGpuMemoryMb} onChange={event => setTaskGpuMemoryMb(Number(event.target.value))}/></label>
+                        <p>{zh ? '调度器会排除离线、过期、能力不匹配或资源不足的节点。' : 'Offline, stale, incompatible, or undersized nodes are excluded.'}</p>
+                    </div>}
 
                     <div className='ComputeTaskListHeading'>
                         <strong>{zh ? '最近任务' : 'Recent tasks'}</strong>
                         <span>{tasks.length}</span>
                     </div>
                     {tasks.length === 0 && <div className='ComputeTaskEmpty'>
-                        {zh ? '还没有任务。选择节点后下发一个 20 秒测试任务。' : 'No tasks yet. Dispatch a 20-second test task.'}
+                        {zh ? '还没有任务。保留默认资源需求，点击“自动调度”即可验收。' : 'No tasks yet. Keep the defaults and click Auto place to validate scheduling.'}
                     </div>}
                     {tasks.length > 0 && <div className='ComputeTaskList'>
                         {tasks.map(task => <TaskCard

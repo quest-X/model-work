@@ -1,5 +1,6 @@
 import React from 'react';
 import {render, screen, waitFor} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import {Language} from '../../../../data/LanguageConfig';
 import {ComputeClusterService} from '../../../../services/ComputeClusterService';
 import {ComputeClusterPopup} from '../ComputeClusterPopup';
@@ -9,7 +10,7 @@ jest.mock('../../../../logic/actions/PopupActions', () => ({
 }));
 jest.mock('../../../../services/ComputeClusterService', () => ({
     ComputeClusterService: {
-        status: jest.fn(), nodes: jest.fn(), tasks: jest.fn(),
+        status: jest.fn(), nodes: jest.fn(), tasks: jest.fn(), scheduler: jest.fn(),
         submitTask: jest.fn(), controlTask: jest.fn(),
     },
 }));
@@ -50,9 +51,16 @@ describe('ComputeClusterPopup', () => {
         service.tasks.mockResolvedValue({
             version: 1, group_id: 'group-1', total: 0, counts: {}, nodes: [], tasks: [],
         });
+        service.scheduler.mockResolvedValue({
+            version: 1, group_id: 'group-1', policy: 'most-available-v1', online_nodes: 1,
+            totals: {cpu_cores: 16, memory_bytes: 48 * 1024 ** 3, disk_bytes: 700 * 1024 ** 3, gpu_count: 1, gpu_memory_mb: 23540},
+            reserved: {cpu_cores: 0, memory_bytes: 0, disk_bytes: 0, gpu_count: 0, gpu_memory_mb: 0},
+            available: {cpu_cores: 16, memory_bytes: 48 * 1024 ** 3, disk_bytes: 700 * 1024 ** 3, gpu_count: 1, gpu_memory_mb: 23540},
+            active_allocations: 0, allocations: [],
+        });
     });
 
-    it('shows node, aggregate resources, and the phase-two boundary', async () => {
+    it('shows node, aggregate resources, and the phase-three boundary', async () => {
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByText('edge-01')).toBeInTheDocument();
@@ -62,17 +70,23 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('2 个通道')).toBeInTheDocument();
         expect(screen.getByText('已归属')).toBeInTheDocument();
         expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
-        expect(screen.getByText('第二阶段：通过签名白名单任务安全下发、查看进度，并支持暂停、恢复和取消。')).toBeInTheDocument();
+        expect(screen.getByText('第三阶段：汇总跨地域资源，按任务需求自动选择节点、预留容量并在终态释放。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
         expect(screen.getAllByText('在线')).toHaveLength(2);
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
     });
 
     it('shows task dispatch, durable progress, and controls when enabled', async () => {
+        const user = userEvent.setup();
         service.status.mockResolvedValue({
             state: 'ready', version: '0.1.0', protocol_version: 1,
             admin_configured: true,
-            task_control: {enabled: true, allowed_task_types: ['system.wait']},
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['system.wait'],
+                resource_orchestration: true,
+                placement_modes: ['automatic', 'manual'],
+            },
             nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
         });
         service.tasks.mockResolvedValue({
@@ -84,17 +98,30 @@ describe('ComputeClusterPopup', () => {
                 control_request: null, checkpoint: null,
                 progress: {completed: 5, total: 20, unit: 'seconds', percent: 25},
                 result: null, error: null, attempt: 1, parameters: {seconds: 20},
+                resources: {cpu_cores: 1, memory_bytes: 1024 ** 3, disk_bytes: 0, gpu_count: 0, gpu_memory_mb: 0},
+                placement: {mode: 'automatic', policy: 'most-available-v1', reserved: true, created_at: 1},
             }],
         });
+        service.submitTask.mockResolvedValue({} as never);
 
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
-        expect(await screen.findByText('创建安全测试任务')).toBeInTheDocument();
+        expect(await screen.findByText('计算群调度池')).toBeInTheDocument();
+        expect(screen.getByText('提交任务需求')).toBeInTheDocument();
         expect(screen.getByText('等待测试 · edge-01')).toBeInTheDocument();
+        expect(screen.getByText(/自动调度 · CPU 1 · 1.0 GB/)).toBeInTheDocument();
         expect(screen.getAllByText('25%').length).toBeGreaterThanOrEqual(1);
         expect(screen.getByRole('button', {name: '暂停'})).toBeInTheDocument();
         expect(screen.getByRole('button', {name: '取消'})).toBeInTheDocument();
         expect(screen.getByText('关闭页面并超过租约后自动取消')).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', {name: '自动调度'}));
+        await waitFor(() => expect(service.submitTask).toHaveBeenCalledWith(
+            expect.objectContaining({
+                node_id: undefined,
+                resources: expect.objectContaining({cpu_cores: 1, memory_bytes: 1024 ** 3}),
+            }),
+        ));
     });
 
     it('shows enrollment guidance when the cluster is empty', async () => {

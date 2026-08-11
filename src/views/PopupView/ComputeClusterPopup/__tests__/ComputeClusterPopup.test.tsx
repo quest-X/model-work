@@ -8,7 +8,10 @@ jest.mock('../../../../logic/actions/PopupActions', () => ({
     PopupActions: {close: jest.fn()},
 }));
 jest.mock('../../../../services/ComputeClusterService', () => ({
-    ComputeClusterService: {status: jest.fn(), nodes: jest.fn()},
+    ComputeClusterService: {
+        status: jest.fn(), nodes: jest.fn(), tasks: jest.fn(),
+        submitTask: jest.fn(), controlTask: jest.fn(),
+    },
 }));
 
 const service = ComputeClusterService as jest.Mocked<typeof ComputeClusterService>;
@@ -44,9 +47,12 @@ describe('ComputeClusterPopup', () => {
             },
             enrolled_at: 1, last_seen_at: 1, enabled: true, online: true, heartbeat_age_seconds: 2,
         }]);
+        service.tasks.mockResolvedValue({
+            version: 1, group_id: 'group-1', total: 0, counts: {}, nodes: [], tasks: [],
+        });
     });
 
-    it('shows node, aggregate resources, and monitoring-only boundary', async () => {
+    it('shows node, aggregate resources, and the phase-two boundary', async () => {
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByText('edge-01')).toBeInTheDocument();
@@ -56,10 +62,39 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('2 个通道')).toBeInTheDocument();
         expect(screen.getByText('已归属')).toBeInTheDocument();
         expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
-        expect(screen.getByText('汇总灵析节点的计算资源与心跳状态；0.1 阶段仅监控，不开放远程命令。')).toBeInTheDocument();
+        expect(screen.getByText('第二阶段：通过签名白名单任务安全下发、查看进度，并支持暂停、恢复和取消。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
         expect(screen.getAllByText('在线')).toHaveLength(2);
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
+    });
+
+    it('shows task dispatch, durable progress, and controls when enabled', async () => {
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.1.0', protocol_version: 1,
+            admin_configured: true,
+            task_control: {enabled: true, allowed_task_types: ['system.wait']},
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+        service.tasks.mockResolvedValue({
+            version: 1, group_id: 'group-1', total: 1, counts: {running: 1}, nodes: [],
+            tasks: [{
+                task_id: 'task-12345678', node_id: 'node-12345678', node_name: 'edge-01',
+                task_type: 'system.wait', mode: 'background', state: 'running',
+                created_at: 1, updated_at: 2, lease_seconds: 60, lease_expires_at: null,
+                control_request: null, checkpoint: null,
+                progress: {completed: 5, total: 20, unit: 'seconds', percent: 25},
+                result: null, error: null, attempt: 1, parameters: {seconds: 20},
+            }],
+        });
+
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        expect(await screen.findByText('创建安全测试任务')).toBeInTheDocument();
+        expect(screen.getByText('等待测试 · edge-01')).toBeInTheDocument();
+        expect(screen.getAllByText('25%').length).toBeGreaterThanOrEqual(1);
+        expect(screen.getByRole('button', {name: '暂停'})).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '取消'})).toBeInTheDocument();
+        expect(screen.getByText('关闭页面并超过租约后自动取消')).toBeInTheDocument();
     });
 
     it('shows enrollment guidance when the cluster is empty', async () => {

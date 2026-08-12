@@ -1,7 +1,8 @@
-import React, {useMemo} from 'react';
+import React, {useMemo, useState} from 'react';
 import {
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
+    ComputeResourceGraphRelation,
     ComputeTaskType,
 } from '../../../services/ComputeClusterService';
 
@@ -13,6 +14,11 @@ interface ResourceKnowledgeGraphProps {
         agent: ComputeResourceGraphEntity,
         candidateNodeIds: string[],
     ) => void;
+}
+
+interface GraphPoint {
+    x: number;
+    y: number;
 }
 
 const agentLabel = (
@@ -47,7 +53,139 @@ const reasonLabel = (reason: string, zh: boolean): string => {
     return (labels[reason] || [reason, reason])[zh ? 0 : 1];
 };
 
-// Graph entity variants share one visual boundary so relation state stays consistent.
+const relationLabel = (relation: ComputeResourceGraphRelation, zh: boolean): string => {
+    const labels: Record<ComputeResourceGraphRelation['kind'], [string, string]> = {
+        contains: ['包含', 'contains'],
+        provides: ['提供', 'provides'],
+        can_execute: ['可执行', 'can execute'],
+        manages: ['管理', 'manages'],
+        depends_on: ['依赖', 'depends on'],
+    };
+    return labels[relation.kind][zh ? 0 : 1];
+};
+
+const entityKindLabel = (entity: ComputeResourceGraphEntity, zh: boolean): string => {
+    const labels: Record<ComputeResourceGraphEntity['kind'], [string, string]> = {
+        compute_group: ['计算群', 'Compute group'],
+        compute_node: ['计算节点', 'Compute node'],
+        compute_resource: ['计算资源', 'Compute resource'],
+        work_agent: ['WORK AGENT', 'WORK AGENT'],
+        managed_device: ['托管设备', 'Managed device'],
+        network_dependency: ['网络依赖', 'Network dependency'],
+    };
+    return labels[entity.kind][zh ? 0 : 1];
+};
+
+const dependencyLabel = (entity: ComputeResourceGraphEntity, zh: boolean): string => {
+    const labels: Record<string, [string, string]> = {
+        tailscale: ['Tailscale 组网', 'Tailscale network'],
+        control_ssh: ['SSH 控制链路', 'SSH control'],
+        public_http: ['公网出口', 'Public egress'],
+    };
+    const key = entity.dependency_id || entity.label;
+    return (labels[key] || [entity.label, entity.label])[zh ? 0 : 1];
+};
+
+const spread = (count: number, minimum: number, maximum: number): number[] => {
+    if (count <= 0) return [];
+    if (count === 1) return [(minimum + maximum) / 2];
+    return Array.from({length: count}, (_, index) => minimum + (maximum - minimum) * index / (count - 1));
+};
+
+const graphLayout = (entities: ComputeResourceGraphEntity[]): Map<string, GraphPoint> => {
+    const points = new Map<string, GraphPoint>();
+    const group = entities.find(entity => entity.kind === 'compute_group');
+    const nodes = entities.filter(entity => entity.kind === 'compute_node');
+    const resources = entities.filter(entity => entity.kind === 'compute_resource');
+    const agents = entities.filter(entity => entity.kind === 'work_agent');
+    const devices = entities.filter(entity => entity.kind === 'managed_device');
+    const dependencies = entities.filter(entity => entity.kind === 'network_dependency');
+
+    if (group) points.set(group.entity_id, {x: 50, y: 45});
+    const nodeXs = spread(nodes.length, nodes.length === 1 ? 50 : 20, nodes.length === 1 ? 50 : 80);
+    nodes.forEach((node, index) => points.set(node.entity_id, {x: nodeXs[index], y: 25}));
+
+    const pointForNodeId = (nodeId?: string | null): GraphPoint | undefined => {
+        const owner = nodes.find(node => node.node_id === nodeId);
+        return owner ? points.get(owner.entity_id) : undefined;
+    };
+
+    resources.forEach((resource, index) => {
+        const parent = pointForNodeId(resource.node_id);
+        points.set(resource.entity_id, {x: parent?.x ?? spread(resources.length, 16, 84)[index], y: 8});
+    });
+
+    nodes.forEach(node => {
+        const parent = points.get(node.entity_id);
+        const owned = dependencies.filter(dependency => dependency.node_id === node.node_id);
+        const offsets = spread(owned.length, -13, 13);
+        owned.forEach((dependency, index) => points.set(dependency.entity_id, {
+            x: Math.max(7, Math.min(93, (parent?.x ?? 50) + offsets[index])),
+            y: 60,
+        }));
+    });
+
+    agents.forEach((agent, index) => points.set(agent.entity_id, {
+        x: spread(agents.length, agents.length === 1 ? 50 : 24, agents.length === 1 ? 50 : 76)[index],
+        y: 79,
+    }));
+
+    devices.forEach((device, index) => {
+        const parent = pointForNodeId(device.node_id);
+        const siblingIndex = devices.filter(item => item.node_id === device.node_id).indexOf(device);
+        points.set(device.entity_id, {
+            x: Math.max(10, Math.min(90, (parent?.x ?? spread(devices.length, 18, 82)[index]) + siblingIndex * 12)),
+            y: 93,
+        });
+    });
+
+    entities.filter(entity => !points.has(entity.entity_id)).forEach((entity, index, unknown) => {
+        points.set(entity.entity_id, {x: spread(unknown.length, 12, 88)[index], y: 92});
+    });
+    return points;
+};
+
+const entityLabel = (entity: ComputeResourceGraphEntity, zh: boolean): string => {
+    if (entity.kind === 'work_agent') return agentLabel(entity, zh);
+    if (entity.kind === 'network_dependency') return dependencyLabel(entity, zh);
+    return entity.label;
+};
+
+// Every graph entity keeps its compact visual summary in one place.
+// eslint-disable-next-line complexity
+const entitySummary = (entity: ComputeResourceGraphEntity, zh: boolean): string => {
+    if (entity.kind === 'compute_group') return zh ? '群主控制域' : 'Owner control domain';
+    if (entity.kind === 'compute_node') {
+        return entity.state === 'available' ? (zh ? '在线节点' : 'Online node') : (zh ? '离线节点' : 'Offline node');
+    }
+    if (entity.kind === 'compute_resource') {
+        const ram = entity.memory_available_bytes == null
+            ? '—'
+            : `${(entity.memory_available_bytes / 1024 ** 3).toFixed(1)}G`;
+        return `CPU ${entity.cpu_logical || 0} · RAM ${ram} · GPU ${entity.gpu_count || 0}`;
+    }
+    if (entity.kind === 'work_agent') {
+        return `${entity.available_node_count || 0} ${zh ? '个执行节点' : 'executors'} · ${entity.modes.map(mode => modeLabel(mode, zh)).join(' / ')}`;
+    }
+    if (entity.kind === 'managed_device') {
+        return `${entity.device_model || (zh ? '型号未知' : 'Unknown model')} · ${entity.channels || 0} ${zh ? '通道' : 'channels'}`;
+    }
+    return entity.callable ? (zh ? '链路健康' : 'Healthy') : (zh ? '链路不可用' : 'Unavailable');
+};
+
+const graphNodeCode = (entity: ComputeResourceGraphEntity): string => {
+    const codes: Record<ComputeResourceGraphEntity['kind'], string> = {
+        compute_group: 'OS',
+        compute_node: 'N',
+        compute_resource: 'R',
+        work_agent: 'A',
+        managed_device: 'D',
+        network_dependency: 'NET',
+    };
+    return codes[entity.kind];
+};
+
+// Graph entity variants share one interactive canvas so relation state stays consistent.
 // eslint-disable-next-line complexity
 export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     graph,
@@ -55,25 +193,26 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     selectedTaskType,
     onSelectWorkAgent,
 }) => {
+    const [focusedEntityId, setFocusedEntityId] = useState<string | null>(null);
     const index = useMemo(
         () => new Map(graph.entities.map(entity => [entity.entity_id, entity])),
         [graph.entities],
     );
-    const group = graph.entities.find(entity => entity.kind === 'compute_group');
+    const points = useMemo(() => graphLayout(graph.entities), [graph.entities]);
     const nodes = graph.entities.filter(entity => entity.kind === 'compute_node');
-    const resources = graph.entities.filter(entity => entity.kind === 'compute_resource');
-    const agents = graph.entities.filter(entity => entity.kind === 'work_agent');
-    const devices = graph.entities.filter(entity => entity.kind === 'managed_device');
-    const dependencies = graph.entities.filter(entity => entity.kind === 'network_dependency');
+    const focusedEntity = focusedEntityId ? index.get(focusedEntityId) : undefined;
+    const focusedRelations = focusedEntityId
+        ? graph.relations.filter(relation => relation.source_id === focusedEntityId || relation.target_id === focusedEntityId)
+        : [];
 
     return <section className='ComputeKnowledgePanel' aria-label={zh ? '资源知识图谱' : 'Resource knowledge graph'}>
         <div className='ComputeKnowledgeHeading'>
             <div>
                 <span>{zh ? '阶段 6 · 交互式资源编排' : 'Phase 6 · Interactive resource orchestration'}</span>
-                <h3>{zh ? '可交互资源图谱' : 'Interactive resource graph'}</h3>
+                <h3>{zh ? '计算群资源 Graph' : 'Compute cluster resource graph'}</h3>
                 <p>{zh
-                    ? '点击可调用 work agent，自动带入任务类型、执行节点和推荐资源；网络依赖异常时禁止下发。'
-                    : 'Select a callable work agent to fill task type, executor, and recommended resources; unhealthy dependencies block dispatch.'}</p>
+                    ? '节点和连线表达真实资源关系；点击实体可追踪上下游，点击可调用 work agent 可带入调度表单。'
+                    : 'Nodes and edges show authoritative resource relations. Inspect any entity or select a callable work agent to fill the dispatch form.'}</p>
             </div>
             <div className='ComputeKnowledgeStats'>
                 <div><strong>{graph.summary.entities}</strong><span>{zh ? '实体' : 'entities'}</span></div>
@@ -84,86 +223,97 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
         </div>
 
         <div className='ComputeKnowledgeLegend'>
+            <span><i className='relation contains'/>{zh ? '群组包含节点' : 'Group contains node'}</span>
+            <span><i className='relation capability'/>{zh ? '提供 / 执行' : 'Provides / executes'}</span>
+            <span><i className='relation dependency'/>{zh ? '依赖 / 管理' : 'Depends / manages'}</span>
             <span><i className='callable'/>{zh ? '当前可调用' : 'Callable now'}</span>
-            <span><i/>{zh ? '已登记但暂不可调用' : 'Registered, not callable'}</span>
+            <button type='button' onClick={() => setFocusedEntityId(null)} disabled={!focusedEntityId}>
+                {zh ? '复位图谱' : 'Reset graph'}
+            </button>
             <code>{graph.schema_version}</code>
         </div>
 
-        <div className='ComputeKnowledgeGraph' role='figure' aria-label={zh ? '计算群到节点再到资源与 agents 的关系' : 'Group-to-node-to-resource and agent relations'}>
-            <div className='ComputeKnowledgeColumn group'>
-                <span className='ComputeKnowledgeColumnLabel'>{zh ? '计算群' : 'Compute group'}</span>
-                {group && <article className={`ComputeKnowledgeEntity group ${group.callable ? 'callable' : ''}`}>
-                    <span>{zh ? '群主视图' : 'Owner view'}</span>
-                    <strong>{group.label}</strong>
-                    <small>{graph.summary.online_nodes}/{nodes.length} {zh ? '个节点在线' : 'nodes online'}</small>
-                </article>}
-            </div>
+        <div className='ComputeGraphViewport'>
+            <div
+                className={`ComputeGraphScene ${focusedEntityId ? 'has-focus' : ''}`}
+                role='figure'
+                aria-label={zh ? '计算群资源节点关系图' : 'Compute cluster resource node-link graph'}
+            >
+                <svg className='ComputeGraphEdges' viewBox='0 0 1000 520' preserveAspectRatio='none' data-testid='resource-node-link-graph' aria-hidden='true'>
+                    {graph.relations.map(relation => {
+                        const source = points.get(relation.source_id);
+                        const target = points.get(relation.target_id);
+                        if (!source || !target) return null;
+                        const connected = focusedEntityId === relation.source_id || focusedEntityId === relation.target_id;
+                        const muted = Boolean(focusedEntityId) && !connected;
+                        return <line
+                            key={relation.relation_id}
+                            x1={source.x * 10}
+                            y1={source.y * 5.2}
+                            x2={target.x * 10}
+                            y2={target.y * 5.2}
+                            className={`ComputeGraphEdge ${relation.kind} ${relation.active ? 'active' : 'inactive'} ${connected ? 'focused' : ''} ${muted ? 'muted' : ''}`}
+                            data-testid='resource-graph-edge'
+                            data-relation-kind={relation.kind}
+                        />;
+                    })}
+                </svg>
 
-            <div className='ComputeKnowledgeConnector'><span>{zh ? '包含' : 'contains'}</span><i/></div>
-
-            <div className='ComputeKnowledgeColumn nodes'>
-                <span className='ComputeKnowledgeColumnLabel'>{zh ? '计算节点' : 'Compute nodes'}</span>
-                {nodes.map(node => {
-                    const executionEdges = graph.relations.filter(relation =>
-                        relation.source_id === node.entity_id && relation.kind === 'can_execute'
-                    );
-                    return <article key={node.entity_id} className={`ComputeKnowledgeEntity node ${node.callable ? 'callable' : ''}`}>
-                        <span>{node.state === 'available' ? (zh ? '在线' : 'Online') : (zh ? '离线' : 'Offline')}</span>
-                        <strong>{node.label}</strong>
-                        <div className='ComputeKnowledgeEdges'>
-                            {executionEdges.map(edge => <small className={edge.active ? 'active' : ''} key={edge.relation_id}>
-                                {agentLabel(index.get(edge.target_id) || {label: edge.target_id}, zh)} · {reasonLabel(edge.reason, zh)}
-                            </small>)}
-                        </div>
-                    </article>;
-                })}
-            </div>
-
-            <div className='ComputeKnowledgeConnector'><span>{zh ? '提供 / 执行' : 'provides / executes'}</span><i/></div>
-
-            <div className='ComputeKnowledgeColumn resources'>
-                <span className='ComputeKnowledgeColumnLabel'>{zh ? '可用资源与 work agents' : 'Resources and work agents'}</span>
-                <div className='ComputeKnowledgeAgentGrid'>
-                    {agents.map(agent => {
-                        const candidateNodeIds = graph.relations
+                {graph.entities.map(entity => {
+                    const point = points.get(entity.entity_id);
+                    if (!point) return null;
+                    const candidateNodeIds = entity.kind === 'work_agent'
+                        ? graph.relations
                             .filter(relation => relation.kind === 'can_execute'
-                                && relation.target_id === agent.entity_id
+                                && relation.target_id === entity.entity_id
                                 && relation.active)
                             .map(relation => index.get(relation.source_id)?.node_id)
-                            .filter((nodeId): nodeId is string => Boolean(nodeId));
-                        const selected = selectedTaskType === agent.task_type;
-                        return <button
-                            type='button'
-                            key={agent.entity_id}
-                            className={`ComputeKnowledgeEntity agent ${agent.callable ? 'callable' : ''} ${selected ? 'selected' : ''}`}
-                            disabled={!agent.callable || candidateNodeIds.length === 0}
-                            onClick={() => onSelectWorkAgent(agent, candidateNodeIds)}
-                            aria-label={`${zh ? '选择' : 'Select'} ${agentLabel(agent, zh)}`}
-                        >
-                            <span>{agent.callable ? (zh ? '可调用' : 'Callable') : (zh ? '暂不可调用' : 'Unavailable')}</span>
-                            <strong>{agentLabel(agent, zh)}</strong>
-                            <small>{agent.available_node_count || 0} {zh ? '个执行节点' : 'executor nodes'} · {agent.modes.map(mode => modeLabel(mode, zh)).join(' / ')}</small>
-                            <em>{zh ? '点击带入调度表单' : 'Click to fill dispatch form'}</em>
-                        </button>;
-                    })}
-                </div>
-                {resources.map(resource => <article key={resource.entity_id} className={`ComputeKnowledgeEntity capacity ${resource.callable ? 'callable' : ''}`}>
-                    <span>{resource.platform} · {resource.architecture}</span>
-                    <strong>{resource.label}</strong>
-                    <small>CPU {resource.cpu_logical || 0} · {zh ? '内存' : 'RAM'} {resource.memory_available_bytes == null ? '—' : `${(resource.memory_available_bytes / 1024 ** 3).toFixed(1)} GB`} · GPU {resource.gpu_count || 0}</small>
-                </article>)}
-                {dependencies.map(dependency => <article key={dependency.entity_id} className={`ComputeKnowledgeEntity dependency ${dependency.callable ? 'callable' : ''}`}>
-                    <span>{dependency.dependency_kind}</span>
-                    <strong>{dependency.label}</strong>
-                    <small>{dependency.callable ? (zh ? '健康' : 'Healthy') : (zh ? '不可用' : 'Unavailable')} · {(dependency.required_for || []).join(' / ') || (zh ? '基础链路' : 'base link')}</small>
-                </article>)}
-                {devices.map(device => <article key={device.entity_id} className={`ComputeKnowledgeEntity device ${device.callable ? 'callable' : ''}`}>
-                    <span>{device.device_kind} · {device.provider}</span>
-                    <strong>{device.label}</strong>
-                    <small>{device.device_model || (zh ? '型号未知' : 'Unknown model')} · {device.channels || 0} {zh ? '个通道' : 'channels'}</small>
-                    <small>{device.callable ? (zh ? '可调用' : 'Callable') : (zh ? '已归属，未接入控制台调用' : 'Managed, not console-enabled')}</small>
-                </article>)}
+                            .filter((nodeId): nodeId is string => Boolean(nodeId))
+                        : [];
+                    const selected = entity.kind === 'work_agent' && selectedTaskType === entity.task_type;
+                    const focused = focusedEntityId === entity.entity_id;
+                    const action = entity.kind === 'work_agent' && entity.callable && candidateNodeIds.length
+                        ? (zh ? '选择' : 'Select')
+                        : (zh ? '查看' : 'Inspect');
+                    return <button
+                        type='button'
+                        key={entity.entity_id}
+                        className={`ComputeGraphNode ${entity.kind} ${entity.callable ? 'callable' : 'unavailable'} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}`}
+                        style={{left: `${point.x}%`, top: `${point.y}%`}}
+                        onClick={() => {
+                            setFocusedEntityId(entity.entity_id);
+                            if (entity.kind === 'work_agent' && entity.callable && candidateNodeIds.length) {
+                                onSelectWorkAgent(entity, candidateNodeIds);
+                            }
+                        }}
+                        aria-label={`${action} ${entityLabel(entity, zh)}`}
+                        aria-pressed={focused}
+                        data-testid='resource-graph-node'
+                    >
+                        <i>{graphNodeCode(entity)}</i>
+                        <span>{entityKindLabel(entity, zh)}</span>
+                        <strong>{entityLabel(entity, zh)}</strong>
+                        <small>{entity.kind === 'compute_group'
+                            ? `${graph.summary.online_nodes}/${nodes.length} ${zh ? '节点在线' : 'nodes online'}`
+                            : entitySummary(entity, zh)}</small>
+                    </button>;
+                })}
+
             </div>
+            <aside className={`ComputeGraphInspector ${focusedEntity ? 'visible' : ''}`} aria-live='polite'>
+                {focusedEntity ? <>
+                    <span>{entityKindLabel(focusedEntity, zh)} · {focusedEntity.callable ? (zh ? '可调用' : 'Callable') : (zh ? '只读' : 'Read only')}</span>
+                    <strong>{entityLabel(focusedEntity, zh)}</strong>
+                    <small>{entitySummary(focusedEntity, zh)}</small>
+                    <div>{focusedRelations.map(relation => <em key={relation.relation_id} className={relation.active ? 'active' : ''}>
+                        {relationLabel(relation, zh)} · {reasonLabel(relation.reason, zh)}
+                    </em>)}</div>
+                </> : <>
+                    <span>{zh ? '关系导航' : 'Relation navigation'}</span>
+                    <strong>{zh ? '点击任一节点' : 'Select any node'}</strong>
+                    <small>{zh ? '高亮它的上下游关系；Graph 数据来自受信任的计算群接口。' : 'Highlight its upstream and downstream relations. Graph data comes from the trusted cluster API.'}</small>
+                </>}
+            </aside>
         </div>
     </section>;
 };

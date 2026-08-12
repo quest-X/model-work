@@ -517,6 +517,7 @@ describe('ComputeClusterPopup', () => {
                 work_agent_execution: true,
                 lan_discovery: true,
                 lan_asset_inventory: true,
+                lan_discovery_schedules: true,
                 placement_modes: ['automatic', 'manual'],
             },
             nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
@@ -526,6 +527,9 @@ describe('ComputeClusterPopup', () => {
 
         await screen.findByRole('navigation', {name: '计算群工作区'});
         await user.click(await screen.findByRole('button', {name: '网络资产 1'}));
+        const schedules = screen.getByText('自动发现').closest('.ComputeLanSchedules');
+        const inventory = screen.getByText('资产台账').closest('.ComputeLanAssets');
+        expect(schedules?.nextElementSibling).toBe(inventory);
         expect(screen.getByText('资产台账')).toBeInTheDocument();
         expect(screen.getByText('camera.local')).toBeInTheDocument();
         expect(screen.getByText('rtsp:554')).toBeInTheDocument();

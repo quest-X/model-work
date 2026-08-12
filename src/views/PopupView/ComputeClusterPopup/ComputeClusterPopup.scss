@@ -313,6 +313,57 @@
   background: linear-gradient(145deg, rgba(35, 63, 80, 0.36), rgba(31, 32, 35, 0.92));
 }
 
+.ComputeLanAssets {
+  overflow: hidden;
+  margin-bottom: 18px;
+  border: 1px solid rgba(247, 186, 89, .26);
+  border-radius: 7px;
+  background: linear-gradient(145deg, rgba(83, 61, 27, .31), rgba(30, 31, 33, .94));
+}
+
+.ComputeLanAssetsHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, .07);
+  padding: 14px 16px 12px;
+  > div:first-child > span { color: #efbd6e; font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  h3 { margin: 4px 0 3px; font-size: 14px; }
+  p { margin: 0; color: rgba(255, 255, 255, .46); font-size: 9px; }
+}
+
+.ComputeLanAssetStats {
+  display: grid;
+  grid-template-columns: repeat(4, auto auto);
+  align-items: baseline;
+  gap: 3px 7px;
+  strong { color: #f3c679; font-size: 14px; }
+  span { color: rgba(255, 255, 255, .4); font-size: 8px; }
+}
+
+.ComputeLanAssetsEmpty { padding: 18px 16px; color: rgba(255, 255, 255, .4); font-size: 9px; }
+.ComputeLanAssetList { display: grid; gap: 1px; background: rgba(255, 255, 255, .05); }
+.ComputeLanAssetList article {
+  display: grid;
+  grid-template-columns: auto minmax(190px, 1fr) minmax(160px, .8fr) minmax(190px, 1fr);
+  align-items: center;
+  gap: 12px;
+  background: rgba(26, 27, 29, .96);
+  padding: 10px 15px;
+  > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  strong, small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  strong { font-size: 10px; }
+  small { color: rgba(255, 255, 255, .38); font-size: 8px; }
+  &.offline { opacity: .62; }
+}
+.ComputeLanAssetState { border-radius: 999px; padding: 4px 7px; background: rgba(85, 199, 123, .12); color: #82db9e; font-size: 8px; }
+.ComputeLanAssetState.new { background: rgba(51, 174, 247, .15); color: #7bd0ff; }
+.ComputeLanAssetState.changed { background: rgba(247, 186, 89, .15); color: #f3c679; }
+.ComputeLanAssetState.offline { background: rgba(214, 99, 99, .14); color: #e89893; }
+.ComputeLanAssetPorts { flex-direction: row !important; flex-wrap: wrap; }
+.ComputeLanAssetPorts code { border-radius: 3px; background: rgba(255, 255, 255, .06); padding: 3px 5px; color: rgba(255, 255, 255, .61); font-size: 8px; }
+
 .ComputeLanResult {
   display: grid;
   grid-template-columns: minmax(190px, .7fr) 1fr 1fr;
@@ -712,6 +763,7 @@
   .ComputeNodeResourceGrid,
   .ComputeSchedulerCapacity { grid-template-columns: 1fr 1fr; }
   .ComputeTaskControlHeading,
+  .ComputeLanAssetsHeading,
   .ComputeSchedulerHeading,
   .ComputeKnowledgeHeading { flex-direction: column; }
   .ComputeKnowledgeStats { width: 100%; justify-content: flex-start; }
@@ -725,6 +777,8 @@
   .ComputeTaskForm,
   .ComputeResourceRequestForm,
   .ComputeTaskCard { grid-template-columns: 1fr; }
+  .ComputeLanAssetStats { grid-template-columns: repeat(4, auto auto); }
+  .ComputeLanAssetList article { grid-template-columns: auto 1fr; }
   .ComputeTaskActions { justify-content: flex-start; }
   .ComputeNodeGpuList > div { grid-template-columns: 1fr; }
   .ComputeNodeDeviceList > div { grid-template-columns: auto 1fr; }

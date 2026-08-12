@@ -92,6 +92,7 @@ export type ComputeClusterStatus = {
         network_dependency_health?: boolean;
         managed_device_inventory?: boolean;
         lan_discovery?: boolean;
+        lan_asset_inventory?: boolean;
         evidence_projection?: 'metadata-only-v1';
         placement_modes?: ('automatic' | 'manual')[];
     };
@@ -130,6 +131,50 @@ export type ComputeLanScanTargetsResponse = {
     version: 1;
     group_id: string;
     nodes: {node_id: string; node_name: string; targets: ComputeLanScanTarget[]}[];
+};
+
+export type ComputeLanAsset = {
+    asset_id: string;
+    node_id: string;
+    node_name: string;
+    cidr: string;
+    address: string;
+    hostname: string;
+    mac: string;
+    ports: {port: number; service: string}[];
+    online: boolean;
+    first_seen_at: number;
+    last_seen_at: number;
+    last_changed_at: number;
+    change_type: 'new' | 'changed' | 'unchanged' | 'offline';
+};
+
+export type ComputeLanAssetsResponse = {
+    version: 1;
+    group_id: string;
+    summary: {
+        total: number;
+        online: number;
+        offline: number;
+        new: number;
+        changed: number;
+        networks: number;
+    };
+    latest_scans: {
+        scan_id: string;
+        task_id: string;
+        node_id: string;
+        node_name: string;
+        cidr: string;
+        interface: string;
+        started_at: number;
+        finished_at: number;
+        addresses_scanned: number;
+        host_count: number;
+        truncated: boolean;
+        changes: {new: number; changed: number; offline: number; unchanged: number};
+    }[];
+    assets: ComputeLanAsset[];
 };
 
 export type ComputeWebFetchResult = {
@@ -324,6 +369,10 @@ export class ComputeClusterService {
 
     public static lanScanTargets(signal?: AbortSignal): Promise<ComputeLanScanTargetsResponse> {
         return request('/lan-scan-targets', signal);
+    }
+
+    public static lanAssets(signal?: AbortSignal): Promise<ComputeLanAssetsResponse> {
+        return request('/lan-assets', signal);
     }
 
     public static submitTask(

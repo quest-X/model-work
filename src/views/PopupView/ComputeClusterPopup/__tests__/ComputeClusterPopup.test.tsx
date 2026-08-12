@@ -11,7 +11,7 @@ jest.mock('../../../../logic/actions/PopupActions', () => ({
 jest.mock('../../../../services/ComputeClusterService', () => ({
     ComputeClusterService: {
         status: jest.fn(), nodes: jest.fn(), tasks: jest.fn(), scheduler: jest.fn(),
-        resourceGraph: jest.fn(), lanScanTargets: jest.fn(),
+        resourceGraph: jest.fn(), lanScanTargets: jest.fn(), lanAssets: jest.fn(),
         submitTask: jest.fn(), controlTask: jest.fn(),
     },
 }));
@@ -170,6 +170,17 @@ describe('ComputeClusterPopup', () => {
                 }],
             }],
         });
+        service.lanAssets.mockResolvedValue({
+            version: 1, group_id: 'group-1',
+            summary: {total: 1, online: 1, offline: 0, new: 1, changed: 0, networks: 1},
+            latest_scans: [],
+            assets: [{
+                asset_id: 'lan-1', node_id: 'node-12345678', node_name: 'edge-01',
+                cidr: '192.168.50.0/24', address: '192.168.50.30', hostname: 'camera.local',
+                mac: '00:11:22:33:44:55', ports: [{port: 554, service: 'rtsp'}], online: true,
+                first_seen_at: 1, last_seen_at: 1, last_changed_at: 1, change_type: 'new',
+            }],
+        });
     });
 
     it('shows node, aggregate resources, and the phase-six boundary', async () => {
@@ -182,7 +193,7 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('2 个通道')).toBeInTheDocument();
         expect(screen.getByText('已归属')).toBeInTheDocument();
         expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
-        expect(screen.getByText('第七阶段 7.1：从 MacBook 指定节点，发现节点所在私有局域网的在线设备与常用服务。')).toBeInTheDocument();
+        expect(screen.getByText('第七阶段 7.2：持续记录各节点局域网资产，并识别新增、变化与离线设备。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
         expect(screen.getAllByText('在线')).toHaveLength(2);
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
@@ -414,6 +425,31 @@ describe('ComputeClusterPopup', () => {
                 cidr: '192.168.50.0/24',
             }),
         ));
+    });
+
+    it('renders the phase 7.2 persistent LAN asset inventory', async () => {
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.3.1', protocol_version: 1,
+            admin_configured: true,
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['system.wait', 'information.web_fetch', 'network.lan_discovery'],
+                resource_orchestration: true,
+                work_agent_execution: true,
+                lan_discovery: true,
+                lan_asset_inventory: true,
+                placement_modes: ['automatic', 'manual'],
+            },
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        expect(await screen.findByText('阶段 7.2 · 持久化资产台账')).toBeInTheDocument();
+        expect(screen.getByText('camera.local')).toBeInTheDocument();
+        expect(screen.getByText('rtsp:554')).toBeInTheDocument();
+        expect(screen.getByText('00:11:22:33:44:55')).toBeInTheDocument();
+        await waitFor(() => expect(service.lanAssets).toHaveBeenCalledTimes(1));
     });
 
     it('shows enrollment guidance when the cluster is empty', async () => {

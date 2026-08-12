@@ -12,6 +12,7 @@ jest.mock('../../../../services/ComputeClusterService', () => ({
     ComputeClusterService: {
         status: jest.fn(), nodes: jest.fn(), tasks: jest.fn(), scheduler: jest.fn(),
         resourceGraph: jest.fn(), lanScanTargets: jest.fn(), lanAssets: jest.fn(),
+        lanSchedules: jest.fn(), createLanSchedule: jest.fn(), controlLanSchedule: jest.fn(),
         submitTask: jest.fn(), controlTask: jest.fn(),
     },
 }));
@@ -179,6 +180,16 @@ describe('ComputeClusterPopup', () => {
                 cidr: '192.168.50.0/24', address: '192.168.50.30', hostname: 'camera.local',
                 mac: '00:11:22:33:44:55', ports: [{port: 554, service: 'rtsp'}], online: true,
                 first_seen_at: 1, last_seen_at: 1, last_changed_at: 1, change_type: 'new',
+            }],
+        });
+        service.lanSchedules.mockResolvedValue({
+            version: 1, group_id: 'group-1',
+            summary: {total: 1, enabled: 1, paused: 0, failed: 0},
+            schedules: [{
+                schedule_id: 'schedule-1', node_id: 'node-12345678', node_name: 'edge-01',
+                cidr: '192.168.50.0/24', interval_minutes: 60, enabled: true,
+                created_at: 1, updated_at: 1, next_run_at: 9999999999,
+                last_run_at: null, last_task_id: null, last_error: null, run_count: 2,
             }],
         });
     });
@@ -450,6 +461,36 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('rtsp:554')).toBeInTheDocument();
         expect(screen.getByText('00:11:22:33:44:55')).toBeInTheDocument();
         await waitFor(() => expect(service.lanAssets).toHaveBeenCalledTimes(1));
+    });
+
+    it('creates and controls phase 7.3 scheduled discovery', async () => {
+        const user = userEvent.setup();
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.3.2', protocol_version: 1,
+            admin_configured: true,
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['network.lan_discovery'],
+                resource_orchestration: true, lan_discovery: true,
+                lan_discovery_schedules: true,
+                placement_modes: ['automatic', 'manual'],
+            },
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+        service.createLanSchedule.mockResolvedValue({} as never);
+        service.controlLanSchedule.mockResolvedValue({} as never);
+
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        expect(await screen.findByText('阶段 7.3 · 定时发现')).toBeInTheDocument();
+        expect(screen.getByText('已执行 2 次')).toBeInTheDocument();
+        await user.selectOptions(screen.getByRole('combobox', {name: '计划节点'}), 'node-12345678');
+        await user.click(screen.getByRole('button', {name: '创建计划'}));
+        await waitFor(() => expect(service.createLanSchedule).toHaveBeenCalledWith({
+            node_id: 'node-12345678', cidr: '192.168.50.0/24', interval_minutes: 60,
+        }));
+        await user.click(screen.getByRole('button', {name: '立即执行'}));
+        await waitFor(() => expect(service.controlLanSchedule).toHaveBeenCalledWith('schedule-1', 'run-now'));
     });
 
     it('shows enrollment guidance when the cluster is empty', async () => {

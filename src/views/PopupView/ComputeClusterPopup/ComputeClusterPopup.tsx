@@ -8,6 +8,7 @@ import {
     ComputeClusterStatus,
     ComputeLanDiscoveryResult,
     ComputeLanAssetsResponse,
+    ComputeLanSchedule,
     ComputeLanScanTarget,
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
@@ -296,6 +297,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     const [controllingTask, setControllingTask] = useState('');
     const [lanTargets, setLanTargets] = useState<Record<string, ComputeLanScanTarget[]>>({});
     const [lanAssets, setLanAssets] = useState<ComputeLanAssetsResponse | null>(null);
+    const [lanSchedules, setLanSchedules] = useState<ComputeLanSchedule[]>([]);
+    const [scheduleInterval, setScheduleInterval] = useState(60);
+    const [scheduleBusy, setScheduleBusy] = useState('');
     const [scanCidr, setScanCidr] = useState('');
     const mounted = useRef(true);
     const refreshingRef = useRef(false);
@@ -331,7 +335,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             }
             if (nextStatus.task_control?.enabled) {
                 try {
-                    const [response, schedulerResponse, graphResponse, lanResponse, assetResponse] = await Promise.all([
+                    const [response, schedulerResponse, graphResponse, lanResponse, assetResponse, scheduleResponse] = await Promise.all([
                         ComputeClusterService.tasks(signal),
                         nextStatus.task_control.resource_orchestration
                             ? ComputeClusterService.scheduler(signal)
@@ -345,6 +349,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         nextStatus.task_control.lan_asset_inventory
                             ? ComputeClusterService.lanAssets(signal)
                             : Promise.resolve(null),
+                        nextStatus.task_control.lan_discovery_schedules
+                            ? ComputeClusterService.lanSchedules(signal)
+                            : Promise.resolve(null),
                     ]);
                     if (mounted.current) {
                         setTasks(response.tasks);
@@ -355,6 +362,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         );
                         setLanTargets(nextTargets);
                         setLanAssets(assetResponse);
+                        setLanSchedules(scheduleResponse?.schedules || []);
                         setScanCidr(current => current || Object.values(nextTargets)[0]?.[0]?.cidr || '');
                         setTaskError('');
                     }
@@ -378,6 +386,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                 setScheduler(null);
                 setResourceGraph(null);
                 setLanAssets(null);
+                setLanSchedules([]);
             }
         } catch (reason) {
             if ((reason as {name?: string})?.name !== 'AbortError') {
@@ -500,6 +509,38 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             setTaskError(reason instanceof Error ? reason.message : String(reason));
         } finally {
             if (mounted.current) setControllingTask('');
+        }
+    }, [refresh]);
+
+    const createSchedule = useCallback(async () => {
+        if (!selectedNode || selectedNode === AUTO_PLACEMENT || !scanCidr || scheduleBusy) return;
+        setScheduleBusy('create');
+        try {
+            await ComputeClusterService.createLanSchedule({
+                node_id: selectedNode, cidr: scanCidr, interval_minutes: scheduleInterval,
+            });
+            setTaskError('');
+            await refresh();
+        } catch (reason) {
+            setTaskError(reason instanceof Error ? reason.message : String(reason));
+        } finally {
+            if (mounted.current) setScheduleBusy('');
+        }
+    }, [refresh, scanCidr, scheduleBusy, scheduleInterval, selectedNode]);
+
+    const controlSchedule = useCallback(async (
+        schedule: ComputeLanSchedule,
+        action: 'run-now' | 'pause' | 'resume',
+    ) => {
+        setScheduleBusy(`${schedule.schedule_id}:${action}`);
+        try {
+            await ComputeClusterService.controlLanSchedule(schedule.schedule_id, action);
+            setTaskError('');
+            await refresh();
+        } catch (reason) {
+            setTaskError(reason instanceof Error ? reason.message : String(reason));
+        } finally {
+            if (mounted.current) setScheduleBusy('');
         }
     }, [refresh]);
 
@@ -764,6 +805,46 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                                 : <small>{zh ? '未发现常用服务' : 'No common service found'}</small>}</div>
                         </article>)}
                     </div>}
+                </section>}
+                {!loading && status?.task_control?.lan_discovery_schedules && <section className='ComputeLanSchedules'>
+                    <div className='ComputeLanAssetsHeading'>
+                        <div>
+                            <span>{zh ? '阶段 7.3 · 定时发现' : 'Phase 7.3 · Scheduled discovery'}</span>
+                            <h3>{zh ? '局域网扫描计划' : 'LAN discovery schedules'}</h3>
+                            <p>{zh ? '计划由 Mac Client 后台运行；关闭 OpenSight 后仍继续，最短间隔 15 分钟。' : 'Schedules run in the Mac Client background after OpenSight closes; minimum interval is 15 minutes.'}</p>
+                        </div>
+                        <div className='ComputeLanScheduleCreate'>
+                            <select aria-label={zh ? '计划节点' : 'Schedule node'} value={selectedNode === AUTO_PLACEMENT ? '' : selectedNode} onChange={event => {
+                                setSelectedNode(event.target.value);
+                                setScanCidr(lanTargets[event.target.value]?.[0]?.cidr || '');
+                            }}>
+                                <option value=''>{zh ? '选择节点' : 'Choose node'}</option>
+                                {nodes.filter(node => node.online && (lanTargets[node.node_id]?.length || 0) > 0).map(node => <option value={node.node_id} key={node.node_id}>{node.name}</option>)}
+                            </select>
+                            <select aria-label={zh ? '计划网段' : 'Schedule network'} value={scanCidr} onChange={event => setScanCidr(event.target.value)}>
+                                {(lanTargets[selectedNode] || []).map(target => <option value={target.cidr} key={target.cidr}>{target.cidr}</option>)}
+                            </select>
+                            <select aria-label={zh ? '扫描间隔' : 'Scan interval'} value={scheduleInterval} onChange={event => setScheduleInterval(Number(event.target.value))}>
+                                <option value={15}>{zh ? '每 15 分钟' : 'Every 15 minutes'}</option>
+                                <option value={60}>{zh ? '每小时' : 'Hourly'}</option>
+                                <option value={360}>{zh ? '每 6 小时' : 'Every 6 hours'}</option>
+                                <option value={1440}>{zh ? '每天' : 'Daily'}</option>
+                            </select>
+                            <button type='button' disabled={!selectedNode || selectedNode === AUTO_PLACEMENT || !scanCidr || Boolean(scheduleBusy)} onClick={() => void createSchedule()}>{zh ? '创建计划' : 'Create schedule'}</button>
+                        </div>
+                    </div>
+                    {lanSchedules.length === 0 && <div className='ComputeLanAssetsEmpty'>{zh ? '尚无定时计划。' : 'No schedules yet.'}</div>}
+                    {lanSchedules.length > 0 && <div className='ComputeLanScheduleList'>{lanSchedules.map(schedule => <article key={schedule.schedule_id}>
+                        <span className={`ComputeLanAssetState ${schedule.enabled ? '' : 'offline'}`}>{schedule.enabled ? (zh ? '运行中' : 'Enabled') : (zh ? '已暂停' : 'Paused')}</span>
+                        <div><strong>{schedule.node_name}</strong><small>{schedule.cidr}</small></div>
+                        <div><strong>{zh ? `每 ${schedule.interval_minutes} 分钟` : `Every ${schedule.interval_minutes} minutes`}</strong><small>{zh ? `已执行 ${schedule.run_count} 次` : `${schedule.run_count} run(s)`}</small></div>
+                        <div><strong>{zh ? '下次执行' : 'Next run'}</strong><small>{new Date(schedule.next_run_at * 1000).toLocaleString()}</small></div>
+                        {schedule.last_error && <small className='ComputeLanScheduleError'>{schedule.last_error}</small>}
+                        <div className='ComputeLanScheduleActions'>
+                            <button type='button' disabled={Boolean(scheduleBusy)} onClick={() => void controlSchedule(schedule, 'run-now')}>{zh ? '立即执行' : 'Run now'}</button>
+                            <button type='button' disabled={Boolean(scheduleBusy)} onClick={() => void controlSchedule(schedule, schedule.enabled ? 'pause' : 'resume')}>{schedule.enabled ? (zh ? '暂停' : 'Pause') : (zh ? '恢复' : 'Resume')}</button>
+                        </div>
+                    </article>)}</div>}
                 </section>}
                 {!loading && nodes.length > 0 && <div className='ComputeNodeSectionTitle'>
                     <strong>{zh ? '节点资源' : 'Node resources'}</strong>

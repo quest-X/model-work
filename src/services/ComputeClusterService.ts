@@ -93,6 +93,7 @@ export type ComputeClusterStatus = {
         managed_device_inventory?: boolean;
         lan_discovery?: boolean;
         lan_asset_inventory?: boolean;
+        lan_discovery_schedules?: boolean;
         evidence_projection?: 'metadata-only-v1';
         placement_modes?: ('automatic' | 'manual')[];
     };
@@ -175,6 +176,29 @@ export type ComputeLanAssetsResponse = {
         changes: {new: number; changed: number; offline: number; unchanged: number};
     }[];
     assets: ComputeLanAsset[];
+};
+
+export type ComputeLanSchedule = {
+    schedule_id: string;
+    node_id: string;
+    node_name: string;
+    cidr: string;
+    interval_minutes: number;
+    enabled: boolean;
+    created_at: number;
+    updated_at: number;
+    next_run_at: number;
+    last_run_at?: number | null;
+    last_task_id?: string | null;
+    last_error?: string | null;
+    run_count: number;
+};
+
+export type ComputeLanSchedulesResponse = {
+    version: 1;
+    group_id: string;
+    summary: {total: number; enabled: number; paused: number; failed: number};
+    schedules: ComputeLanSchedule[];
 };
 
 export type ComputeWebFetchResult = {
@@ -373,6 +397,29 @@ export class ComputeClusterService {
 
     public static lanAssets(signal?: AbortSignal): Promise<ComputeLanAssetsResponse> {
         return request('/lan-assets', signal);
+    }
+
+    public static lanSchedules(signal?: AbortSignal): Promise<ComputeLanSchedulesResponse> {
+        return request('/lan-schedules', signal);
+    }
+
+    public static createLanSchedule(
+        input: {node_id: string; cidr: string; interval_minutes: number},
+        signal?: AbortSignal,
+    ): Promise<ComputeLanSchedule> {
+        return request('/lan-schedules', signal, {
+            method: 'POST', body: JSON.stringify(input),
+        });
+    }
+
+    public static controlLanSchedule(
+        scheduleId: string,
+        action: 'run-now' | 'pause' | 'resume',
+        signal?: AbortSignal,
+    ): Promise<ComputeLanSchedule | {schedule_id: string; task_id?: string | null; accepted: boolean; error?: string | null}> {
+        return request(`/lan-schedules/${encodeURIComponent(scheduleId)}/${action}`, signal, {
+            method: 'POST', body: '{}',
+        });
     }
 
     public static submitTask(

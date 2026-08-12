@@ -195,16 +195,20 @@ describe('ComputeClusterPopup', () => {
     });
 
     it('shows node, aggregate resources, and the phase-six boundary', async () => {
+        const user = userEvent.setup();
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
-        expect(await screen.findByText('edge-01')).toBeInTheDocument();
+        expect(await screen.findByRole('navigation', {name: '计算群工作区'})).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '资源与关系 0'})).toHaveAttribute('aria-current', 'page');
+        await user.click(await screen.findByRole('button', {name: '节点详情 1'}));
+        expect(screen.getByText('edge-01')).toBeInTheDocument();
         expect(screen.getByText('NVIDIA RTX 4090')).toBeInTheDocument();
         expect(screen.getByText('IP CAMERA')).toBeInTheDocument();
         expect(screen.getByText('DS-2CD2686FWDA2-IZS')).toBeInTheDocument();
         expect(screen.getByText('2 个通道')).toBeInTheDocument();
         expect(screen.getByText('已归属')).toBeInTheDocument();
         expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
-        expect(screen.getByText('第七阶段：发现各节点局域网资产，并持续记录变化与定时计划。')).toBeInTheDocument();
+        expect(screen.getByText('统一查看资源关系、工作调度、网络资产与节点状态。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
         expect(screen.getAllByText('在线')).toHaveLength(2);
         expect(screen.queryByRole('button', {name: '刷新'})).not.toBeInTheDocument();
@@ -273,7 +277,7 @@ describe('ComputeClusterPopup', () => {
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByText('计算群资源 Graph')).toBeInTheDocument();
-        expect(screen.getByText('阶段 6 · 交互式资源编排')).toBeInTheDocument();
+        expect(screen.getByText('资源关系 · 可交互')).toBeInTheDocument();
         expect(screen.getByText('cross-region-lab')).toBeInTheDocument();
         expect(screen.getByText('resource-knowledge-graph.v2')).toBeInTheDocument();
         expect(screen.getByTestId('resource-node-link-graph')).toBeInTheDocument();
@@ -320,6 +324,7 @@ describe('ComputeClusterPopup', () => {
         expect(agentButton).toBeEnabled();
         await user.click(agentButton);
 
+        expect(screen.getByRole('button', {name: '工作调度 0'})).toHaveAttribute('aria-current', 'page');
         expect(screen.getByText('已从图谱带入')).toBeInTheDocument();
         expect(screen.getByRole('combobox', {name: '工作类型'})).toHaveValue('information.web_fetch');
         expect(screen.getByRole('combobox', {name: '节点选择'})).toHaveValue('node-12345678');
@@ -373,7 +378,9 @@ describe('ComputeClusterPopup', () => {
 
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
-        expect(await screen.findByText('计算群调度池')).toBeInTheDocument();
+        await screen.findByRole('navigation', {name: '计算群工作区'});
+        await user.click(await screen.findByRole('button', {name: '工作调度 1'}));
+        expect(screen.queryByText('计算群调度池')).not.toBeInTheDocument();
         expect(screen.getByText('分发节点工作')).toBeInTheDocument();
         expect(screen.getByText('等待测试 · edge-01')).toBeInTheDocument();
         expect(screen.getByText(/自动调度 · CPU 1 · 1.0 GB/)).toBeInTheDocument();
@@ -431,7 +438,9 @@ describe('ComputeClusterPopup', () => {
 
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
-        expect(await screen.findByText('公开信息抓取 · edge-01')).toBeInTheDocument();
+        await screen.findByRole('navigation', {name: '计算群工作区'});
+        await user.click(await screen.findByRole('button', {name: '工作调度 1'}));
+        expect(screen.getByText('公开信息抓取 · edge-01')).toBeInTheDocument();
         expect(screen.getByText('Public evidence')).toBeInTheDocument();
         expect(screen.getByText('direct · accepted · 1 次尝试')).toBeInTheDocument();
         expect(screen.getByText(/SHA-256 aaaaaaaaaaaa/)).toBeInTheDocument();
@@ -471,7 +480,9 @@ describe('ComputeClusterPopup', () => {
 
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
-        const workType = await screen.findByRole('combobox', {name: '工作类型'});
+        await screen.findByRole('navigation', {name: '计算群工作区'});
+        await user.click(screen.getByRole('button', {name: '工作调度 0'}));
+        const workType = screen.getByRole('combobox', {name: '工作类型'});
         await user.selectOptions(workType, 'network.lan_discovery');
         await user.selectOptions(screen.getByRole('combobox', {name: '节点选择'}), 'node-12345678');
 
@@ -490,7 +501,8 @@ describe('ComputeClusterPopup', () => {
         ));
     });
 
-    it('renders the phase 7.2 persistent LAN asset inventory', async () => {
+    it('renders the network asset inventory in its workspace', async () => {
+        const user = userEvent.setup();
         service.status.mockResolvedValue({
             state: 'ready', version: '0.3.1', protocol_version: 1,
             admin_configured: true,
@@ -508,14 +520,16 @@ describe('ComputeClusterPopup', () => {
 
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
-        expect(await screen.findByText('阶段 7.2 · 持久化资产台账')).toBeInTheDocument();
+        await screen.findByRole('navigation', {name: '计算群工作区'});
+        await user.click(await screen.findByRole('button', {name: '网络资产 1'}));
+        expect(screen.getByText('资产台账')).toBeInTheDocument();
         expect(screen.getByText('camera.local')).toBeInTheDocument();
         expect(screen.getByText('rtsp:554')).toBeInTheDocument();
         expect(screen.getByText('00:11:22:33:44:55')).toBeInTheDocument();
         await waitFor(() => expect(service.lanAssets).toHaveBeenCalledTimes(1));
     });
 
-    it('creates and controls phase 7.3 scheduled discovery', async () => {
+    it('creates and controls scheduled discovery in the network workspace', async () => {
         const user = userEvent.setup();
         service.status.mockResolvedValue({
             state: 'ready', version: '0.3.2', protocol_version: 1,
@@ -535,8 +549,9 @@ describe('ComputeClusterPopup', () => {
 
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
-        expect(await screen.findByText('阶段 7.3 · 定时发现')).toBeInTheDocument();
-        expect(screen.getByText('第七阶段已完成：跨地域节点发现、资产台账、定时计划与故障恢复均已验收。')).toBeInTheDocument();
+        await screen.findByRole('navigation', {name: '计算群工作区'});
+        await user.click(screen.getByRole('button', {name: '网络资产 0'}));
+        expect(screen.getByText('自动发现')).toBeInTheDocument();
         expect(screen.getByText('已执行 2 次')).toBeInTheDocument();
         await user.selectOptions(screen.getByRole('combobox', {name: '计划节点'}), 'node-12345678');
         await user.click(screen.getByRole('button', {name: '创建计划'}));

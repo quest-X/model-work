@@ -277,6 +277,10 @@ describe('ComputeClusterPopup', () => {
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByText('计算群资源 Graph')).toBeInTheDocument();
+        const resourceWorkspace = screen.getByRole('button', {name: '资源与关系 9'}).closest('.ComputeClusterPopup');
+        const schedulerPanel = resourceWorkspace?.querySelector('.ComputeSchedulerPanel');
+        const graphPanel = resourceWorkspace?.querySelector('.ComputeKnowledgePanel');
+        expect(schedulerPanel?.nextElementSibling).toBe(graphPanel);
         expect(screen.getByText('资源关系 · 可交互')).toBeInTheDocument();
         expect(screen.getByText('cross-region-lab')).toBeInTheDocument();
         expect(screen.getByText('resource-knowledge-graph.v2')).toBeInTheDocument();

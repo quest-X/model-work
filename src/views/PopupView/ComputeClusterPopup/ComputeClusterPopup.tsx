@@ -666,12 +666,6 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     <code>model-work-node cluster join --control-url &lt;OpenSight URL&gt; --enrollment-token-file &lt;secret file&gt;</code>
                 </div>}
                 {!loading && activeWorkspace === 'graph' && <>
-                    {resourceGraph && <ResourceKnowledgeGraph
-                        graph={resourceGraph}
-                        zh={zh}
-                        selectedTaskType={graphSelection?.taskType}
-                        onSelectWorkAgent={selectWorkAgent}
-                    />}
                     {orchestrationEnabled && scheduler && <section className='ComputeSchedulerPanel'>
                     <div className='ComputeSchedulerHeading'>
                         <div>
@@ -694,6 +688,12 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         <div><span>{zh ? '活动预留' : 'Allocations'}</span><strong>{scheduler.active_allocations}</strong><small>{zh ? '随任务终态释放' : 'released at terminal state'}</small></div>
                     </div>
                     </section>}
+                    {resourceGraph && <ResourceKnowledgeGraph
+                        graph={resourceGraph}
+                        zh={zh}
+                        selectedTaskType={graphSelection?.taskType}
+                        onSelectWorkAgent={selectWorkAgent}
+                    />}
                 </>}
                 {!loading && activeWorkspace === 'tasks' && taskControlEnabled && <section className='ComputeTaskControl' ref={taskFormRef}>
                     <div className='ComputeTaskControlHeading'>

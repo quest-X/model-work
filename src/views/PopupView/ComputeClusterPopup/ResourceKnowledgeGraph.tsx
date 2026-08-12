@@ -1,4 +1,4 @@
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
@@ -205,6 +205,15 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
         ? graph.relations.filter(relation => relation.source_id === focusedEntityId || relation.target_id === focusedEntityId)
         : [];
 
+    useEffect(() => {
+        if (!focusedEntityId) return undefined;
+        const resetOnEscape = (event: KeyboardEvent): void => {
+            if (event.key === 'Escape') setFocusedEntityId(null);
+        };
+        window.addEventListener('keydown', resetOnEscape);
+        return () => window.removeEventListener('keydown', resetOnEscape);
+    }, [focusedEntityId]);
+
     return <section className='ComputeKnowledgePanel' aria-label={zh ? '资源知识图谱' : 'Resource knowledge graph'}>
         <div className='ComputeKnowledgeHeading'>
             <div>
@@ -227,9 +236,6 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
             <span><i className='relation capability'/>{zh ? '提供 / 执行' : 'Provides / executes'}</span>
             <span><i className='relation dependency'/>{zh ? '依赖 / 管理' : 'Depends / manages'}</span>
             <span><i className='callable'/>{zh ? '当前可调用' : 'Callable now'}</span>
-            <button type='button' onClick={() => setFocusedEntityId(null)} disabled={!focusedEntityId}>
-                {zh ? '复位图谱' : 'Reset graph'}
-            </button>
             <code>{graph.schema_version}</code>
         </div>
 
@@ -238,6 +244,10 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                 className={`ComputeGraphScene ${focusedEntityId ? 'has-focus' : ''}`}
                 role='figure'
                 aria-label={zh ? '计算群资源节点关系图' : 'Compute cluster resource node-link graph'}
+                tabIndex={0}
+                onClick={event => {
+                    if (event.target === event.currentTarget) setFocusedEntityId(null);
+                }}
             >
                 <svg className='ComputeGraphEdges' viewBox='0 0 1000 520' preserveAspectRatio='none' data-testid='resource-node-link-graph' aria-hidden='true'>
                     {graph.relations.map(relation => {
@@ -311,7 +321,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                 </> : <>
                     <span>{zh ? '关系导航' : 'Relation navigation'}</span>
                     <strong>{zh ? '点击任一节点' : 'Select any node'}</strong>
-                    <small>{zh ? '高亮它的上下游关系；Graph 数据来自受信任的计算群接口。' : 'Highlight its upstream and downstream relations. Graph data comes from the trusted cluster API.'}</small>
+                    <small>{zh ? '高亮上下游关系；点击图谱空白处或按 Esc 取消聚焦。' : 'Highlight upstream and downstream relations; select empty canvas space or press Esc to clear focus.'}</small>
                 </>}
             </aside>
         </div>

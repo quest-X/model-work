@@ -210,7 +210,8 @@ describe('ComputeClusterPopup', () => {
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
     });
 
-    it('renders the authoritative callable-resource knowledge graph', async () => {
+    it('renders the authoritative graph and clears focus from the canvas background', async () => {
+        const user = userEvent.setup();
         service.status.mockResolvedValue({
             state: 'ready', version: '0.1.0', protocol_version: 1,
             admin_configured: true,
@@ -241,6 +242,18 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getAllByText('公开信息采集 agent').length).toBeGreaterThanOrEqual(1);
         expect(screen.getAllByText('等待诊断 agent').length).toBeGreaterThanOrEqual(1);
         expect(screen.getByText('2/2')).toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: '复位图谱'})).not.toBeInTheDocument();
+
+        const node = screen.getByRole('button', {name: '查看 edge-01'});
+        const canvas = screen.getByRole('figure', {name: '计算群资源节点关系图'});
+        await user.click(node);
+        expect(node).toHaveAttribute('aria-pressed', 'true');
+        await user.click(canvas);
+        expect(node).toHaveAttribute('aria-pressed', 'false');
+
+        await user.click(node);
+        await user.keyboard('{Escape}');
+        expect(node).toHaveAttribute('aria-pressed', 'false');
         await waitFor(() => expect(service.resourceGraph).toHaveBeenCalledTimes(1));
     });
 

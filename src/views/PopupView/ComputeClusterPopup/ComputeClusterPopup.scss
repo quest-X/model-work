@@ -168,18 +168,6 @@
   i.contains { background: #c493ff; }
   i.capability { background: #5bc3ff; }
   i.dependency { background: #d58aff; }
-  button {
-    appearance: none;
-    border: 1px solid rgba(197, 161, 247, 0.2);
-    border-radius: 4px;
-    background: rgba(140, 91, 190, 0.08);
-    padding: 4px 8px;
-    color: rgba(220, 196, 250, 0.72);
-    font: inherit;
-    cursor: pointer;
-    &:hover:not(:disabled) { border-color: rgba(197, 161, 247, 0.5); color: #ead8ff; }
-    &:disabled { cursor: default; opacity: .35; }
-  }
   code { margin-left: auto; color: rgba(197, 161, 247, 0.66); font-size: 8px; }
 }
 
@@ -202,6 +190,8 @@
     linear-gradient(90deg, rgba(191, 143, 249, 0.025) 1px, transparent 1px),
     radial-gradient(circle at 50% 46%, rgba(122, 71, 176, 0.2), transparent 37%);
   background-size: 24px 24px, 24px 24px, 100% 100%;
+  cursor: default;
+  &:focus-visible { outline: 1px solid rgba(197, 161, 247, 0.28); outline-offset: 2px; }
   &::before {
     position: absolute;
     inset: 0;

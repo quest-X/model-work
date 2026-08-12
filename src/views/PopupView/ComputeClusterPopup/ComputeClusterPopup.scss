@@ -164,105 +164,186 @@
   span { display: inline-flex; align-items: center; gap: 5px; }
   i { width: 6px; height: 6px; border-radius: 50%; background: #77727e; }
   i.callable { background: #68d68d; box-shadow: 0 0 6px rgba(104, 214, 141, 0.45); }
+  i.relation { width: 18px; height: 2px; border-radius: 999px; }
+  i.contains { background: #c493ff; }
+  i.capability { background: #5bc3ff; }
+  i.dependency { background: #d58aff; }
+  button {
+    appearance: none;
+    border: 1px solid rgba(197, 161, 247, 0.2);
+    border-radius: 4px;
+    background: rgba(140, 91, 190, 0.08);
+    padding: 4px 8px;
+    color: rgba(220, 196, 250, 0.72);
+    font: inherit;
+    cursor: pointer;
+    &:hover:not(:disabled) { border-color: rgba(197, 161, 247, 0.5); color: #ead8ff; }
+    &:disabled { cursor: default; opacity: .35; }
+  }
   code { margin-left: auto; color: rgba(197, 161, 247, 0.66); font-size: 8px; }
 }
 
-.ComputeKnowledgeGraph {
-  display: grid;
-  grid-template-columns: minmax(150px, .7fr) 58px minmax(190px, .9fr) 82px minmax(320px, 1.5fr);
-  align-items: stretch;
-  gap: 0;
-  min-height: 220px;
-  padding: 14px 16px 16px;
+.ComputeGraphViewport {
+  overflow: auto hidden;
+  padding: 0 12px 12px;
 }
 
-.ComputeKnowledgeColumn {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 7px;
-  &.resources { justify-content: flex-start; }
-}
-
-.ComputeKnowledgeColumnLabel {
-  margin-bottom: 1px;
-  color: rgba(255, 255, 255, 0.34);
-  font-size: 8px;
-  font-weight: 600;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-}
-
-.ComputeKnowledgeEntity {
+.ComputeGraphScene {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-left: 3px solid #6f6976;
-  border-radius: 5px;
-  background: rgba(16, 17, 20, 0.72);
-  padding: 10px;
-  &.callable { border-left-color: #5aca80; }
-  &.group { min-height: 78px; justify-content: center; border-color: rgba(193, 148, 255, 0.28); border-left-color: #b982f4; background: rgba(93, 57, 126, 0.24); }
-  &.agent {
-    width: 100%;
-    box-sizing: border-box;
-    appearance: none;
-    border-color: rgba(101, 191, 246, 0.17);
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-    transition: border-color .16s ease, background .16s ease, transform .16s ease;
-    &:hover:not(:disabled) { border-color: rgba(101, 191, 246, 0.62); background: rgba(33, 73, 97, 0.42); transform: translateY(-1px); }
-    &:focus-visible { outline: 2px solid rgba(101, 191, 246, 0.84); outline-offset: 2px; }
-    &:disabled { cursor: not-allowed; opacity: .58; }
-    &.selected { border-color: rgba(101, 191, 246, 0.86); background: rgba(33, 86, 116, 0.48); box-shadow: 0 0 0 1px rgba(101, 191, 246, 0.18); }
-    > em { color: rgba(121, 201, 248, 0.72); font-size: 7px; font-style: normal; }
+  overflow: hidden;
+  width: 100%;
+  min-width: 860px;
+  height: 520px;
+  border: 1px solid rgba(197, 161, 247, 0.12);
+  border-radius: 7px;
+  background-color: rgba(13, 14, 18, 0.72);
+  background-image:
+    linear-gradient(rgba(191, 143, 249, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(191, 143, 249, 0.025) 1px, transparent 1px),
+    radial-gradient(circle at 50% 46%, rgba(122, 71, 176, 0.2), transparent 37%);
+  background-size: 24px 24px, 24px 24px, 100% 100%;
+  &::before {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(180deg, rgba(218, 190, 255, 0.025), transparent 24%, rgba(0, 0, 0, 0.16));
+    content: '';
+    pointer-events: none;
   }
-  &.capacity { padding: 8px 10px; }
-  &.dependency { padding: 8px 10px; }
-  > span { color: rgba(255, 255, 255, 0.38); font-size: 8px; }
-  > strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-  > small { color: rgba(255, 255, 255, 0.4); font-size: 8px; line-height: 1.4; }
 }
 
-.ComputeKnowledgeAgentGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 7px;
+.ComputeGraphEdges {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
-.ComputeKnowledgeEdges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 2px;
-  small {
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.05);
-    padding: 3px 6px;
-    color: rgba(255, 255, 255, 0.35);
-    font-size: 7px;
-  }
-  small.active { background: rgba(83, 199, 122, 0.11); color: #79d99a; }
+.ComputeGraphEdge {
+  stroke: rgba(190, 151, 235, 0.46);
+  stroke-width: 1.15;
+  vector-effect: non-scaling-stroke;
+  transition: opacity .18s ease, stroke-width .18s ease;
+  &.contains { stroke: #b884f4; }
+  &.provides { stroke: #57b8f0; }
+  &.can_execute { stroke: #54cc87; }
+  &.depends_on { stroke: #cf82f2; }
+  &.manages { stroke: #f1bd67; }
+  &.inactive { opacity: .34; stroke-dasharray: 5 5; }
+  &.muted { opacity: .08; }
+  &.focused { opacity: 1; stroke-width: 2.2; filter: drop-shadow(0 0 3px currentColor); }
 }
 
-.ComputeKnowledgeConnector {
+.ComputeGraphNode {
+  position: absolute;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  span { color: rgba(196, 158, 246, 0.58); font-size: 7px; text-align: center; }
-  i {
-    position: relative;
-    width: calc(100% - 14px);
-    height: 1px;
-    background: linear-gradient(90deg, rgba(184, 128, 244, 0.18), rgba(184, 128, 244, 0.74));
-    &::after { position: absolute; top: -3px; right: -1px; width: 6px; height: 6px; border-top: 1px solid #b982f4; border-right: 1px solid #b982f4; content: ''; transform: rotate(45deg); }
+  gap: 4px;
+  box-sizing: border-box;
+  width: 126px;
+  min-height: 58px;
+  appearance: none;
+  border: 1px solid rgba(197, 161, 247, 0.28);
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgba(48, 36, 61, 0.96), rgba(20, 21, 26, 0.97));
+  padding: 8px 10px;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.24);
+  transform: translate(-50%, -50%);
+  transition: border-color .16s ease, box-shadow .16s ease, opacity .16s ease, transform .16s ease;
+  &:hover { z-index: 4; border-color: rgba(208, 171, 255, 0.72); box-shadow: 0 9px 25px rgba(0, 0, 0, 0.35), 0 0 15px rgba(174, 111, 245, 0.14); transform: translate(-50%, calc(-50% - 2px)); }
+  &:focus-visible { z-index: 5; outline: 2px solid rgba(101, 191, 246, 0.84); outline-offset: 3px; }
+  &.unavailable { border-color: rgba(255, 255, 255, 0.11); filter: saturate(.55); }
+  &.focused { z-index: 4; border-color: #d2a9ff; box-shadow: 0 0 0 2px rgba(193, 138, 255, 0.2), 0 0 24px rgba(173, 101, 248, 0.25); }
+  &.selected { border-color: #6acbff; box-shadow: 0 0 0 2px rgba(85, 185, 239, 0.2), 0 0 22px rgba(85, 185, 239, 0.22); }
+  > i {
+    position: absolute;
+    top: -10px;
+    left: 50%;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border: 1px solid rgba(209, 177, 249, 0.42);
+    border-radius: 50%;
+    background: #292331;
+    color: #d7b7ff;
+    font-size: 7px;
+    font-style: normal;
+    font-weight: 800;
+    letter-spacing: -.02em;
+    transform: translateX(-50%);
   }
+  > span { color: rgba(213, 183, 249, 0.64); font-size: 7px; letter-spacing: .06em; text-transform: uppercase; }
+  > strong { overflow: hidden; width: 100%; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  > small { overflow: hidden; width: 100%; color: rgba(255, 255, 255, 0.42); font-size: 7px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+
+  &.compute_group,
+  &.compute_node {
+    width: 92px;
+    height: 92px;
+    min-height: 0;
+    border-radius: 50%;
+    > i { top: 7px; border: 0; background: transparent; }
+    > span { margin-top: 12px; }
+  }
+  &.compute_group {
+    width: 108px;
+    height: 108px;
+    border-color: rgba(116, 224, 174, 0.62);
+    background: radial-gradient(circle at 38% 30%, rgba(33, 123, 86, 0.9), rgba(12, 54, 39, 0.98) 64%, rgba(8, 30, 23, 1));
+    box-shadow: 0 0 0 8px rgba(64, 206, 137, 0.04), 0 0 38px rgba(63, 211, 143, 0.14);
+    > i { color: #8ee4b3; }
+    > span { color: rgba(132, 231, 175, 0.7); }
+  }
+  &.compute_node {
+    border-color: rgba(170, 111, 241, 0.58);
+    background: radial-gradient(circle at 38% 30%, rgba(109, 68, 154, 0.96), rgba(49, 34, 68, 0.98) 68%);
+  }
+  &.compute_resource { width: 142px; border-color: rgba(83, 184, 240, 0.42); }
+  &.work_agent {
+    width: 154px;
+    border-color: rgba(84, 204, 135, 0.38);
+    background: linear-gradient(145deg, rgba(26, 74, 54, 0.9), rgba(18, 27, 25, 0.98));
+    > i { border-color: rgba(84, 204, 135, 0.52); background: #19382b; color: #7cdfa2; }
+    > span { color: rgba(117, 220, 158, 0.72); }
+  }
+  &.network_dependency { width: 112px; }
+  &.managed_device { width: 136px; border-color: rgba(241, 189, 103, 0.42); }
+}
+
+.ComputeGraphScene.has-focus .ComputeGraphNode:not(.focused) {
+  opacity: .63;
+  &:hover { opacity: 1; }
+}
+
+.ComputeGraphInspector {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  border: 1px solid rgba(197, 161, 247, 0.17);
+  border-radius: 6px;
+  background: rgba(13, 14, 18, 0.9);
+  padding: 9px 11px;
+  backdrop-filter: blur(8px);
+  > span { color: rgba(195, 154, 252, 0.68); font-size: 7px; letter-spacing: .05em; text-transform: uppercase; }
+  > strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  > small { color: rgba(255, 255, 255, 0.4); font-size: 7px; line-height: 1.4; }
+  > div { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+  em { border-radius: 999px; background: rgba(255, 255, 255, 0.05); padding: 3px 5px; color: rgba(255, 255, 255, 0.38); font-size: 6px; font-style: normal; }
+  em.active { background: rgba(84, 204, 135, 0.1); color: #73d799; }
+  &.visible { border-color: rgba(197, 161, 247, 0.34); }
 }
 
 .ComputeSchedulerPanel {
@@ -781,9 +862,9 @@
   .ComputeKnowledgeHeading { flex-direction: column; }
   .ComputeKnowledgeStats { width: 100%; justify-content: flex-start; }
   .ComputeKnowledgeStats > div { align-items: flex-start; }
-  .ComputeKnowledgeGraph { grid-template-columns: 1fr; gap: 9px; }
-  .ComputeKnowledgeConnector { min-height: 24px; transform: rotate(90deg); }
-  .ComputeKnowledgeAgentGrid { grid-template-columns: 1fr; }
+  .ComputeKnowledgeLegend { flex-wrap: wrap; }
+  .ComputeKnowledgeLegend code { width: 100%; margin-left: 0; }
+  .ComputeGraphViewport { padding-right: 0; padding-left: 0; }
   .ComputeSchedulerPolicy { align-items: flex-start; }
   .ComputeTaskModeHelp { align-items: flex-start; }
   .ComputeTaskModeHelp span { text-align: left; }

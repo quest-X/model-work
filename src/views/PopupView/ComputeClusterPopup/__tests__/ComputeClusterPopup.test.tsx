@@ -231,10 +231,13 @@ describe('ComputeClusterPopup', () => {
 
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
-        expect(await screen.findByText('可交互资源图谱')).toBeInTheDocument();
+        expect(await screen.findByText('计算群资源 Graph')).toBeInTheDocument();
         expect(screen.getByText('阶段 6 · 交互式资源编排')).toBeInTheDocument();
         expect(screen.getByText('cross-region-lab')).toBeInTheDocument();
         expect(screen.getByText('resource-knowledge-graph.v2')).toBeInTheDocument();
+        expect(screen.getByTestId('resource-node-link-graph')).toBeInTheDocument();
+        expect(screen.getAllByTestId('resource-graph-node')).toHaveLength(9);
+        expect(screen.getAllByTestId('resource-graph-edge')).toHaveLength(8);
         expect(screen.getAllByText('公开信息采集 agent').length).toBeGreaterThanOrEqual(1);
         expect(screen.getAllByText('等待诊断 agent').length).toBeGreaterThanOrEqual(1);
         expect(screen.getByText('2/2')).toBeInTheDocument();

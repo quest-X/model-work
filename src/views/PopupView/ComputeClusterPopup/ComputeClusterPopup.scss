@@ -9,6 +9,9 @@
   box-sizing: border-box;
   background: rgba(0, 0, 0, 0.7);
   padding: 24px;
+  transition: padding 180ms ease;
+
+  &.maximized { padding: 8px; }
 }
 
 .ComputeClusterPopup {
@@ -18,6 +21,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.14);
+  box-sizing: border-box;
   border-radius: 10px;
   background: #191a1c;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
@@ -878,11 +882,13 @@
 @keyframes compute-spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
+  .ComputeClusterBackdrop,
   .ComputeClusterPopup { transition: none; }
 }
 
 @media (max-width: 720px) {
-  .ComputeClusterBackdrop { padding: 0; }
+  .ComputeClusterBackdrop,
+  .ComputeClusterBackdrop.maximized { padding: 0; }
   .ComputeClusterPopup,
   .ComputeClusterPopup.maximized { width: 100%; height: 100%; border-radius: 0; }
   .ComputeClusterPopup > header { flex-direction: column; }

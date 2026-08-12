@@ -221,6 +221,7 @@ describe('ComputeClusterPopup', () => {
 
         await user.click(maximize);
         expect(popup).toHaveClass('maximized');
+        expect(popup.parentElement).toHaveClass('maximized');
         const restore = screen.getByRole('button', {name: '还原计算群窗口'});
         expect(restore).toHaveAttribute('aria-pressed', 'true');
 

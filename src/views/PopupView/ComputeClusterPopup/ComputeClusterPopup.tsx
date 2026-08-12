@@ -586,7 +586,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         ? (zh ? '还原计算群窗口' : 'Restore compute cluster window')
         : (zh ? '放大计算群窗口' : 'Maximize compute cluster window');
 
-    return <div className='ComputeClusterBackdrop'>
+    return <div className={`ComputeClusterBackdrop${maximized ? ' maximized' : ''}`}>
         <section className={`ComputeClusterPopup${maximized ? ' maximized' : ''}`} aria-label={zh ? '计算群' : 'Compute Cluster'}>
             <header>
                 <div>

@@ -27,6 +27,7 @@ interface IProps {
 }
 
 const AUTO_PLACEMENT = '__automatic__';
+type ComputeWorkspace = 'graph' | 'tasks' | 'network' | 'nodes';
 
 const bytes = (value: number | null, zh: boolean): string => {
     if (value === null || !Number.isFinite(value)) return zh ? '未知' : 'Unknown';
@@ -277,6 +278,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     const [resourceGraph, setResourceGraph] = useState<ComputeResourceGraph | null>(null);
     const [loading, setLoading] = useState(true);
     const [maximized, setMaximized] = useState(false);
+    const [activeWorkspace, setActiveWorkspace] = useState<ComputeWorkspace>('graph');
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState('');
     const [taskError, setTaskError] = useState('');
@@ -490,6 +492,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             setTaskGpuMemoryMb(resources.gpu_memory_mb);
         }
         setGraphSelection({taskType: selectedTaskType, nodeId: candidateNodeIds[0]});
+        setActiveWorkspace('tasks');
         setTaskError('');
         window.requestAnimationFrame(() => {
             taskFormRef.current?.scrollIntoView?.({behavior: 'smooth', block: 'center'});
@@ -600,12 +603,8 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     <span className='ComputeClusterEyebrow'>OpenSight · model-work-node</span>
                     <h2>{zh ? '计算群' : 'Compute Cluster'}</h2>
                     <p>{zh
-                        ? status?.task_control?.phase7_complete
-                            ? '第七阶段已完成：跨地域节点发现、资产台账、定时计划与故障恢复均已验收。'
-                            : '第七阶段：发现各节点局域网资产，并持续记录变化与定时计划。'
-                        : status?.task_control?.phase7_complete
-                            ? 'Phase 7 complete: cross-region discovery, asset inventory, schedules, and recovery are accepted.'
-                            : 'Phase 7: discover node-local networks and retain changes and schedules.'}</p>
+                        ? '统一查看资源关系、工作调度、网络资产与节点状态。'
+                        : 'View resource relationships, work scheduling, network assets, and node status.'}</p>
                 </div>
                 <div className='ComputeClusterHeaderActions'>
                     <span
@@ -641,6 +640,21 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             {error && <div className='ComputeClusterError' role='alert'>{error}</div>}
             {taskError && <div className='ComputeClusterError' role='alert'>{taskError}</div>}
 
+            <nav className='ComputeWorkspaceNav' aria-label={zh ? '计算群工作区' : 'Compute cluster workspaces'}>
+                {([
+                    ['graph', zh ? '资源与关系' : 'Resources & relations', resourceGraph?.summary.entities ?? 0],
+                    ['tasks', zh ? '工作调度' : 'Work scheduling', tasks.length],
+                    ['network', zh ? '网络资产' : 'Network assets', lanAssets?.summary.total ?? 0],
+                    ['nodes', zh ? '节点详情' : 'Node details', nodes.length],
+                ] as Array<[ComputeWorkspace, string, number]>).map(([workspace, label, count]) => <button
+                    type='button'
+                    key={workspace}
+                    className={activeWorkspace === workspace ? 'active' : ''}
+                    aria-current={activeWorkspace === workspace ? 'page' : undefined}
+                    onClick={() => setActiveWorkspace(workspace)}
+                ><span>{label}</span><strong>{count}</strong></button>)}
+            </nav>
+
             <div className='ComputeClusterContent'>
                 {loading && <div className='ComputeClusterLoading'><span/>{zh ? '正在读取节点…' : 'Loading nodes…'}</div>}
                 {!loading && nodes.length === 0 && <div className='ComputeClusterEmpty'>
@@ -651,16 +665,17 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         : 'Mint a one-time enrollment token, then run model-work-node cluster join on the target machine.'}</p>
                     <code>model-work-node cluster join --control-url &lt;OpenSight URL&gt; --enrollment-token-file &lt;secret file&gt;</code>
                 </div>}
-                {!loading && resourceGraph && <ResourceKnowledgeGraph
-                    graph={resourceGraph}
-                    zh={zh}
-                    selectedTaskType={graphSelection?.taskType}
-                    onSelectWorkAgent={selectWorkAgent}
-                />}
-                {!loading && orchestrationEnabled && scheduler && <section className='ComputeSchedulerPanel'>
+                {!loading && activeWorkspace === 'graph' && <>
+                    {resourceGraph && <ResourceKnowledgeGraph
+                        graph={resourceGraph}
+                        zh={zh}
+                        selectedTaskType={graphSelection?.taskType}
+                        onSelectWorkAgent={selectWorkAgent}
+                    />}
+                    {orchestrationEnabled && scheduler && <section className='ComputeSchedulerPanel'>
                     <div className='ComputeSchedulerHeading'>
                         <div>
-                            <span>{zh ? '阶段 3 · 资源编排' : 'Phase 3 · Resource orchestration'}</span>
+                            <span>{zh ? '资源池' : 'Resource pool'}</span>
                             <h3>{zh ? '计算群调度池' : 'Compute-group scheduler'}</h3>
                             <p>{zh
                                 ? '按任务预留各节点容量；统一调配不等于把多台机器的物理内存合并。'
@@ -678,11 +693,12 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         <div><span>GPU</span><strong>{scheduler.available.gpu_count} / {scheduler.totals.gpu_count}</strong><small>{bytes(scheduler.available.gpu_memory_mb * 1024 ** 2, zh)} {zh ? '显存' : 'VRAM'}</small></div>
                         <div><span>{zh ? '活动预留' : 'Allocations'}</span><strong>{scheduler.active_allocations}</strong><small>{zh ? '随任务终态释放' : 'released at terminal state'}</small></div>
                     </div>
-                </section>}
-                {!loading && taskControlEnabled && <section className='ComputeTaskControl' ref={taskFormRef}>
+                    </section>}
+                </>}
+                {!loading && activeWorkspace === 'tasks' && taskControlEnabled && <section className='ComputeTaskControl' ref={taskFormRef}>
                     <div className='ComputeTaskControlHeading'>
                         <div>
-                            <span>{zh ? '阶段 4 · work agent' : 'Phase 4 · Work agent'}</span>
+                            <span>{zh ? '任务执行 · work agent' : 'Task execution · Work agent'}</span>
                             <h3>{zh ? '分发节点工作' : 'Dispatch node work'}</h3>
                             <p>{zh
                                 ? '可下发公开信息抓取与受限局域网发现；扫描范围由目标节点实时上报，拒绝公网、自定义端口、凭据与 Shell。'
@@ -796,13 +812,13 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         />)}
                     </div>}
                 </section>}
-                {!loading && !taskControlEnabled && nodes.length > 0 && <div className='ComputeTaskDisabled'>
+                {!loading && activeWorkspace === 'tasks' && !taskControlEnabled && nodes.length > 0 && <div className='ComputeTaskDisabled'>
                     {zh ? '任务控制令牌尚未配置，当前保持只读监控。' : 'Task control token is not configured; monitoring remains read-only.'}
                 </div>}
-                {!loading && status?.task_control?.lan_asset_inventory && lanAssets && <section className='ComputeLanAssets'>
+                {!loading && activeWorkspace === 'network' && status?.task_control?.lan_asset_inventory && lanAssets && <section className='ComputeLanAssets'>
                     <div className='ComputeLanAssetsHeading'>
                         <div>
-                            <span>{zh ? '阶段 7.2 · 持久化资产台账' : 'Phase 7.2 · Persistent asset inventory'}</span>
+                            <span>{zh ? '资产台账' : 'Asset inventory'}</span>
                             <h3>{zh ? '节点局域网资产' : 'Node LAN assets'}</h3>
                             <p>{zh
                                 ? '每次安全扫描都会与该节点上一次结果比较；历史资产不会因节点暂时离线而消失。'
@@ -833,10 +849,10 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         </article>)}
                     </div>}
                 </section>}
-                {!loading && status?.task_control?.lan_discovery_schedules && <section className='ComputeLanSchedules'>
+                {!loading && activeWorkspace === 'network' && status?.task_control?.lan_discovery_schedules && <section className='ComputeLanSchedules'>
                     <div className='ComputeLanAssetsHeading'>
                         <div>
-                            <span>{zh ? '阶段 7.3 · 定时发现' : 'Phase 7.3 · Scheduled discovery'}</span>
+                            <span>{zh ? '自动发现' : 'Automated discovery'}</span>
                             <h3>{zh ? '局域网扫描计划' : 'LAN discovery schedules'}</h3>
                             <p>{zh ? '计划由 Mac Client 后台运行；关闭 OpenSight 后仍继续，最短间隔 15 分钟。' : 'Schedules run in the Mac Client background after OpenSight closes; minimum interval is 15 minutes.'}</p>
                         </div>
@@ -873,11 +889,11 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         </div>
                     </article>)}</div>}
                 </section>}
-                {!loading && nodes.length > 0 && <div className='ComputeNodeSectionTitle'>
+                {!loading && activeWorkspace === 'nodes' && nodes.length > 0 && <div className='ComputeNodeSectionTitle'>
                     <strong>{zh ? '节点资源' : 'Node resources'}</strong>
                     <span>{nodes.length}</span>
                 </div>}
-                {!loading && nodes.map(node => <NodeCard key={node.node_id} node={node} zh={zh}/>)}
+                {!loading && activeWorkspace === 'nodes' && nodes.map(node => <NodeCard key={node.node_id} node={node} zh={zh}/>)}
             </div>
         </section>
     </div>;

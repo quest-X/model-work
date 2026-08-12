@@ -156,6 +156,55 @@
   font-size: 11px;
 }
 
+.ComputeWorkspaceNav {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.08);
+
+  button {
+    position: relative;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 0;
+    background: #202124;
+    color: rgba(255, 255, 255, 0.48);
+    cursor: pointer;
+    font-size: 11px;
+    transition: background 150ms ease, color 150ms ease;
+
+    &::after {
+      position: absolute;
+      right: 18px;
+      bottom: 0;
+      left: 18px;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: transparent;
+      content: '';
+    }
+    &:hover { background: #24262a; color: rgba(255, 255, 255, 0.78); }
+    &.active { background: #22252a; color: #fff; }
+    &.active::after { background: $primaryColor; }
+    strong {
+      min-width: 19px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.07);
+      padding: 2px 6px;
+      color: rgba(255, 255, 255, 0.48);
+      font-size: 9px;
+      font-weight: 500;
+      text-align: center;
+    }
+    &.active strong { background: rgba(51, 174, 247, 0.14); color: #79c9f8; }
+  }
+}
+
 .ComputeClusterContent {
   min-height: 0;
   flex: 1;
@@ -940,4 +989,6 @@
   .ComputeNodeGpuList > div { grid-template-columns: 1fr; }
   .ComputeNodeDeviceList > div { grid-template-columns: auto 1fr; }
   .ComputeDeviceMeta { align-items: flex-start; }
+  .ComputeWorkspaceNav button { min-height: 48px; flex-direction: column; gap: 3px; font-size: 9px; }
+  .ComputeWorkspaceNav button::after { right: 5px; left: 5px; }
 }

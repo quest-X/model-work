@@ -208,7 +208,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     return <section className='ComputeKnowledgePanel' aria-label={zh ? '资源知识图谱' : 'Resource knowledge graph'}>
         <div className='ComputeKnowledgeHeading'>
             <div>
-                <span>{zh ? '阶段 6 · 交互式资源编排' : 'Phase 6 · Interactive resource orchestration'}</span>
+                <span>{zh ? '资源关系 · 可交互' : 'Resource relations · Interactive'}</span>
                 <h3>{zh ? '计算群资源 Graph' : 'Compute cluster resource graph'}</h3>
                 <p>{zh
                     ? '节点和连线表达真实资源关系；点击实体可追踪上下游，点击可调用 work agent 可带入调度表单。'

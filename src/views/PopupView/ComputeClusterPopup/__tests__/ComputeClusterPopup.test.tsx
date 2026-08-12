@@ -11,7 +11,7 @@ jest.mock('../../../../logic/actions/PopupActions', () => ({
 jest.mock('../../../../services/ComputeClusterService', () => ({
     ComputeClusterService: {
         status: jest.fn(), nodes: jest.fn(), tasks: jest.fn(), scheduler: jest.fn(),
-        resourceGraph: jest.fn(),
+        resourceGraph: jest.fn(), lanScanTargets: jest.fn(),
         submitTask: jest.fn(), controlTask: jest.fn(),
     },
 }));
@@ -157,6 +157,19 @@ describe('ComputeClusterPopup', () => {
                 active: false, reason: 'not_console_allowlisted',
             }],
         });
+        service.lanScanTargets.mockResolvedValue({
+            version: 1,
+            group_id: 'group-1',
+            nodes: [{
+                node_id: 'node-12345678',
+                node_name: 'edge-01',
+                targets: [{
+                    interface: 'eth0', address: '192.168.50.20', cidr: '192.168.50.0/24',
+                    prefix_length: 24, interface_cidr: '192.168.50.0/24',
+                    narrowed: false, address_count: 254,
+                }],
+            }],
+        });
     });
 
     it('shows node, aggregate resources, and the phase-six boundary', async () => {
@@ -169,7 +182,7 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('2 个通道')).toBeInTheDocument();
         expect(screen.getByText('已归属')).toBeInTheDocument();
         expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
-        expect(screen.getByText('第六阶段：点击图谱中的 work agent，按实时网络依赖与节点资源完成安全调度。')).toBeInTheDocument();
+        expect(screen.getByText('第七阶段 7.1：从 MacBook 指定节点，发现节点所在私有局域网的在线设备与常用服务。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
         expect(screen.getAllByText('在线')).toHaveLength(2);
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
@@ -361,6 +374,44 @@ describe('ComputeClusterPopup', () => {
                 mode: 'background',
                 url: 'https://example.com/article',
                 seconds: undefined,
+            }),
+        ));
+    });
+
+    it('dispatches phase 7.1 only to a selected node-advertised private network', async () => {
+        const user = userEvent.setup();
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.3.0', protocol_version: 1,
+            admin_configured: true,
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['system.wait', 'information.web_fetch', 'network.lan_discovery'],
+                resource_orchestration: true,
+                work_agent_execution: true,
+                lan_discovery: true,
+                placement_modes: ['automatic', 'manual'],
+            },
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+        service.submitTask.mockResolvedValue({} as never);
+
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        const workType = await screen.findByRole('combobox', {name: '工作类型'});
+        await user.selectOptions(workType, 'network.lan_discovery');
+        await user.selectOptions(screen.getByRole('combobox', {name: '节点选择'}), 'node-12345678');
+
+        expect(screen.getByRole('combobox', {name: '扫描网段'})).toHaveValue('192.168.50.0/24');
+        expect(screen.getByText(/只扫描节点实时上报的私有网段/)).toBeInTheDocument();
+        expect(screen.getByRole('combobox', {name: '运行方式'})).toBeDisabled();
+
+        await user.click(screen.getByRole('button', {name: '定向下发'}));
+        await waitFor(() => expect(service.submitTask).toHaveBeenCalledWith(
+            expect.objectContaining({
+                node_id: 'node-12345678',
+                task_type: 'network.lan_discovery',
+                mode: 'background',
+                cidr: '192.168.50.0/24',
             }),
         ));
     });

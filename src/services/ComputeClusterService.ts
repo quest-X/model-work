@@ -72,6 +72,7 @@ export type ComputeClusterNode = {
     enabled: boolean;
     online: boolean;
     heartbeat_age_seconds: number;
+    lan_scan_targets?: ComputeLanScanTarget[];
 };
 
 export type ComputeClusterStatus = {
@@ -90,6 +91,7 @@ export type ComputeClusterStatus = {
         graph_interaction?: boolean;
         network_dependency_health?: boolean;
         managed_device_inventory?: boolean;
+        lan_discovery?: boolean;
         evidence_projection?: 'metadata-only-v1';
         placement_modes?: ('automatic' | 'manual')[];
     };
@@ -98,7 +100,37 @@ export type ComputeClusterStatus = {
 
 export type ComputeTaskMode = 'online' | 'background';
 export type ComputeTaskState = 'queued' | 'running' | 'paused' | 'succeeded' | 'failed' | 'cancelled';
-export type ComputeTaskType = 'system.wait' | 'information.web_fetch';
+export type ComputeTaskType = 'system.wait' | 'information.web_fetch' | 'network.lan_discovery';
+
+export type ComputeLanScanTarget = {
+    interface: string;
+    address: string;
+    cidr: string;
+    prefix_length: number;
+    interface_cidr: string;
+    narrowed: boolean;
+    address_count: number;
+};
+
+export type ComputeLanDiscoveryResult = {
+    schema_version: 'lan-discovery.console-result.v1';
+    scan_id: string;
+    cidr: string;
+    interface: string;
+    started_at: number;
+    finished_at: number;
+    addresses_scanned: number;
+    host_count: number;
+    ports_scanned: number[];
+    hosts: {address: string; hostname: string; mac: string; ports: {port: number; service: string}[]}[];
+    truncated: boolean;
+};
+
+export type ComputeLanScanTargetsResponse = {
+    version: 1;
+    group_id: string;
+    nodes: {node_id: string; node_name: string; targets: ComputeLanScanTarget[]}[];
+};
 
 export type ComputeWebFetchResult = {
     schema_version: 'webfetch.console-result.v1';
@@ -146,10 +178,10 @@ export type ComputeTask = {
     control_request?: 'pause' | 'cancel' | null;
     checkpoint?: Record<string, unknown> | null;
     progress?: {completed?: number; total?: number; unit?: string; percent?: number} | null;
-    result?: {elapsed_seconds: number} | ComputeWebFetchResult | null;
+    result?: {elapsed_seconds: number} | ComputeWebFetchResult | ComputeLanDiscoveryResult | null;
     error?: string | null;
     attempt: number;
-    parameters: {seconds?: number; url?: string};
+    parameters: {seconds?: number; url?: string; cidr?: string};
     resources?: Partial<ComputeResourceRequest>;
     placement?: {
         mode: 'automatic' | 'manual';
@@ -226,7 +258,7 @@ export type ComputeResourceGraphRelation = {
     source_id: string;
     target_id: string;
     active: boolean;
-    reason: 'available' | 'node_offline' | 'capability_missing' | 'dependency_unavailable' | 'not_console_allowlisted';
+    reason: 'available' | 'node_offline' | 'capability_missing' | 'scan_target_unavailable' | 'dependency_unavailable' | 'not_console_allowlisted';
 };
 
 export type ComputeResourceGraph = {
@@ -290,6 +322,10 @@ export class ComputeClusterService {
         return request('/resource-graph', signal);
     }
 
+    public static lanScanTargets(signal?: AbortSignal): Promise<ComputeLanScanTargetsResponse> {
+        return request('/lan-scan-targets', signal);
+    }
+
     public static submitTask(
         input: {
             node_id?: string;
@@ -297,6 +333,7 @@ export class ComputeClusterService {
             mode: ComputeTaskMode;
             seconds?: number;
             url?: string;
+            cidr?: string;
             lease_seconds?: number;
             resources?: ComputeResourceCapacity;
         },

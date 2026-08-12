@@ -585,6 +585,13 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     const windowToggleLabel = maximized
         ? (zh ? '还原计算群窗口' : 'Restore compute cluster window')
         : (zh ? '放大计算群窗口' : 'Maximize compute cluster window');
+    const serviceState = error ? 'error' : loading || refreshing ? 'syncing' : 'ready';
+    const serviceStateLabel = error
+        ? (zh ? '连接异常，正在自动重试' : 'Connection unavailable, retrying automatically')
+        : loading || refreshing
+            ? (zh ? '正在自动同步' : 'Synchronizing automatically')
+            : (zh ? '自动刷新正常' : 'Automatic refresh healthy');
+    const serviceVersion = `v${status?.version || '0.1.0'}`;
 
     return <div className={`ComputeClusterBackdrop${maximized ? ' maximized' : ''}`}>
         <section className={`ComputeClusterPopup${maximized ? ' maximized' : ''}`} aria-label={zh ? '计算群' : 'Compute Cluster'}>
@@ -601,12 +608,15 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                             : 'Phase 7: discover node-local networks and retain changes and schedules.'}</p>
                 </div>
                 <div className='ComputeClusterHeaderActions'>
-                    <span className={`ComputeClusterServiceState ${error ? 'error' : 'ready'}`}>
-                        <i/>{error ? (zh ? '连接异常' : 'Unavailable') : `v${status?.version || '0.1.0'}`}
+                    <span
+                        className={`ComputeClusterServiceState ${serviceState}`}
+                        role='status'
+                        aria-live='polite'
+                        aria-label={`${serviceStateLabel} · ${serviceVersion}`}
+                        title={`${serviceStateLabel} · ${zh ? '每 2 秒同步' : 'syncs every 2 seconds'}`}
+                    >
+                        <i aria-hidden='true'/><span>{serviceVersion}</span>
                     </span>
-                    <button type='button' disabled={refreshing} onClick={() => void refresh()}>
-                        {refreshing ? (zh ? '刷新中…' : 'Refreshing…') : (zh ? '刷新' : 'Refresh')}
-                    </button>
                     <button
                         type='button'
                         className='window-toggle'

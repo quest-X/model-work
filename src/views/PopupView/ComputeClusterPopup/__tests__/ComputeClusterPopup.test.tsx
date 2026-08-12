@@ -1,5 +1,5 @@
 import React from 'react';
-import {render, screen, waitFor} from '@testing-library/react';
+import {act, render, screen, waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Language} from '../../../../data/LanguageConfig';
 import {ComputeClusterService} from '../../../../services/ComputeClusterService';
@@ -207,6 +207,8 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('第七阶段：发现各节点局域网资产，并持续记录变化与定时计划。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
         expect(screen.getAllByText('在线')).toHaveLength(2);
+        expect(screen.queryByRole('button', {name: '刷新'})).not.toBeInTheDocument();
+        expect(screen.getByRole('status', {name: '自动刷新正常 · v0.1.0'})).toBeInTheDocument();
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
     });
 
@@ -228,6 +230,24 @@ describe('ComputeClusterPopup', () => {
         await user.click(restore);
         expect(popup).not.toHaveClass('maximized');
         expect(screen.getByRole('button', {name: '放大计算群窗口'})).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('refreshes the cluster automatically every two seconds', async () => {
+        jest.useFakeTimers();
+        try {
+            render(<ComputeClusterPopup language={Language.CHINESE}/>);
+            await act(async () => { await Promise.resolve(); });
+            expect(service.status).toHaveBeenCalledTimes(1);
+
+            await act(async () => {
+                jest.advanceTimersByTime(2000);
+                await Promise.resolve();
+            });
+            expect(service.status).toHaveBeenCalledTimes(2);
+            expect(screen.queryByRole('button', {name: '刷新'})).not.toBeInTheDocument();
+        } finally {
+            jest.useRealTimers();
+        }
     });
 
     it('renders the authoritative graph and clears focus from the canvas background', async () => {

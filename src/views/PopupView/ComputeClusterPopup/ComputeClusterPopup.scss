@@ -113,6 +113,22 @@
   &.error i { background: #ec6565; }
 }
 
+.ComputeClusterServiceState {
+  min-height: 30px;
+  cursor: help;
+
+  i { box-shadow: 0 0 0 3px rgba(85, 199, 123, 0.1); }
+  &.syncing i {
+    background: #66c2fa;
+    box-shadow: 0 0 0 3px rgba(102, 194, 250, 0.1);
+    animation: compute-status-pulse 1s ease-in-out infinite;
+  }
+  &.error i {
+    box-shadow: 0 0 0 3px rgba(236, 101, 101, 0.1);
+    animation: compute-status-pulse 1.4s ease-in-out infinite;
+  }
+}
+
 .ComputeClusterSummary {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
@@ -880,10 +896,15 @@
 }
 
 @keyframes compute-spin { to { transform: rotate(360deg); } }
+@keyframes compute-status-pulse {
+  50% { box-shadow: 0 0 0 6px transparent; opacity: 0.72; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .ComputeClusterBackdrop,
   .ComputeClusterPopup { transition: none; }
+  .ComputeClusterServiceState.syncing i,
+  .ComputeClusterServiceState.error i { animation: none; }
 }
 
 @media (max-width: 720px) {

@@ -815,40 +815,6 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                 {!loading && activeWorkspace === 'tasks' && !taskControlEnabled && nodes.length > 0 && <div className='ComputeTaskDisabled'>
                     {zh ? '任务控制令牌尚未配置，当前保持只读监控。' : 'Task control token is not configured; monitoring remains read-only.'}
                 </div>}
-                {!loading && activeWorkspace === 'network' && status?.task_control?.lan_asset_inventory && lanAssets && <section className='ComputeLanAssets'>
-                    <div className='ComputeLanAssetsHeading'>
-                        <div>
-                            <span>{zh ? '资产台账' : 'Asset inventory'}</span>
-                            <h3>{zh ? '节点局域网资产' : 'Node LAN assets'}</h3>
-                            <p>{zh
-                                ? '每次安全扫描都会与该节点上一次结果比较；历史资产不会因节点暂时离线而消失。'
-                                : 'Each bounded scan is compared with the node previous result; history remains when a node is temporarily offline.'}</p>
-                        </div>
-                        <div className='ComputeLanAssetStats'>
-                            <strong>{lanAssets.summary.online}</strong><span>{zh ? '在线' : 'online'}</span>
-                            <strong>{lanAssets.summary.new}</strong><span>{zh ? '新增' : 'new'}</span>
-                            <strong>{lanAssets.summary.changed}</strong><span>{zh ? '变化' : 'changed'}</span>
-                            <strong>{lanAssets.summary.offline}</strong><span>{zh ? '离线' : 'offline'}</span>
-                        </div>
-                    </div>
-                    {lanAssets.assets.length === 0 && <div className='ComputeLanAssetsEmpty'>
-                        {zh ? '尚无资产记录。完成一次“局域网设备发现”后会自动建立台账。' : 'No assets yet. Run LAN device discovery once to build the inventory.'}
-                    </div>}
-                    {lanAssets.assets.length > 0 && <div className='ComputeLanAssetList'>
-                        {lanAssets.assets.map(asset => <article key={asset.asset_id} className={asset.online ? 'online' : 'offline'}>
-                            <span className={`ComputeLanAssetState ${asset.change_type}`}>{asset.online
-                                ? asset.change_type === 'new' ? (zh ? '新增' : 'New')
-                                    : asset.change_type === 'changed' ? (zh ? '变化' : 'Changed')
-                                        : (zh ? '在线' : 'Online')
-                                : (zh ? '离线' : 'Offline')}</span>
-                            <div><strong>{asset.hostname || asset.address}</strong><small>{asset.address} · {asset.cidr}</small></div>
-                            <div><strong>{asset.node_name}</strong><small>{asset.mac || (zh ? '未获取 MAC' : 'MAC unavailable')}</small></div>
-                            <div className='ComputeLanAssetPorts'>{asset.ports.length
-                                ? asset.ports.map(port => <code key={port.port}>{port.service}:{port.port}</code>)
-                                : <small>{zh ? '未发现常用服务' : 'No common service found'}</small>}</div>
-                        </article>)}
-                    </div>}
-                </section>}
                 {!loading && activeWorkspace === 'network' && status?.task_control?.lan_discovery_schedules && <section className='ComputeLanSchedules'>
                     <div className='ComputeLanAssetsHeading'>
                         <div>
@@ -888,6 +854,40 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                             <button type='button' disabled={Boolean(scheduleBusy)} onClick={() => void controlSchedule(schedule, schedule.enabled ? 'pause' : 'resume')}>{schedule.enabled ? (zh ? '暂停' : 'Pause') : (zh ? '恢复' : 'Resume')}</button>
                         </div>
                     </article>)}</div>}
+                </section>}
+                {!loading && activeWorkspace === 'network' && status?.task_control?.lan_asset_inventory && lanAssets && <section className='ComputeLanAssets'>
+                    <div className='ComputeLanAssetsHeading'>
+                        <div>
+                            <span>{zh ? '资产台账' : 'Asset inventory'}</span>
+                            <h3>{zh ? '节点局域网资产' : 'Node LAN assets'}</h3>
+                            <p>{zh
+                                ? '每次安全扫描都会与该节点上一次结果比较；历史资产不会因节点暂时离线而消失。'
+                                : 'Each bounded scan is compared with the node previous result; history remains when a node is temporarily offline.'}</p>
+                        </div>
+                        <div className='ComputeLanAssetStats'>
+                            <strong>{lanAssets.summary.online}</strong><span>{zh ? '在线' : 'online'}</span>
+                            <strong>{lanAssets.summary.new}</strong><span>{zh ? '新增' : 'new'}</span>
+                            <strong>{lanAssets.summary.changed}</strong><span>{zh ? '变化' : 'changed'}</span>
+                            <strong>{lanAssets.summary.offline}</strong><span>{zh ? '离线' : 'offline'}</span>
+                        </div>
+                    </div>
+                    {lanAssets.assets.length === 0 && <div className='ComputeLanAssetsEmpty'>
+                        {zh ? '尚无资产记录。完成一次“局域网设备发现”后会自动建立台账。' : 'No assets yet. Run LAN device discovery once to build the inventory.'}
+                    </div>}
+                    {lanAssets.assets.length > 0 && <div className='ComputeLanAssetList'>
+                        {lanAssets.assets.map(asset => <article key={asset.asset_id} className={asset.online ? 'online' : 'offline'}>
+                            <span className={`ComputeLanAssetState ${asset.change_type}`}>{asset.online
+                                ? asset.change_type === 'new' ? (zh ? '新增' : 'New')
+                                    : asset.change_type === 'changed' ? (zh ? '变化' : 'Changed')
+                                        : (zh ? '在线' : 'Online')
+                                : (zh ? '离线' : 'Offline')}</span>
+                            <div><strong>{asset.hostname || asset.address}</strong><small>{asset.address} · {asset.cidr}</small></div>
+                            <div><strong>{asset.node_name}</strong><small>{asset.mac || (zh ? '未获取 MAC' : 'MAC unavailable')}</small></div>
+                            <div className='ComputeLanAssetPorts'>{asset.ports.length
+                                ? asset.ports.map(port => <code key={port.port}>{port.service}:{port.port}</code>)
+                                : <small>{zh ? '未发现常用服务' : 'No common service found'}</small>}</div>
+                        </article>)}
+                    </div>}
                 </section>}
                 {!loading && activeWorkspace === 'nodes' && nodes.length > 0 && <div className='ComputeNodeSectionTitle'>
                     <strong>{zh ? '节点资源' : 'Node resources'}</strong>

@@ -313,6 +313,19 @@
   background: linear-gradient(145deg, rgba(35, 63, 80, 0.36), rgba(31, 32, 35, 0.92));
 }
 
+.ComputeLanResult {
+  display: grid;
+  grid-template-columns: minmax(190px, .7fr) 1fr 1fr;
+  gap: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 9px 14px 12px;
+  > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; border-radius: 4px; background: rgba(13, 25, 32, .66); padding: 8px 10px; }
+  strong { overflow: hidden; color: #7ed2ff; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  span, small { overflow: hidden; color: rgba(255, 255, 255, .45); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+.ComputeLanHost { border-left: 2px solid rgba(85, 199, 123, .65); }
+
 .ComputeTaskControlHeading {
   display: flex;
   align-items: flex-start;

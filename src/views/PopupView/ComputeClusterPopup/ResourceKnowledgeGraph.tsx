@@ -25,6 +25,9 @@ const agentLabel = (
     if (entity.task_type === 'system.wait') {
         return zh ? '等待诊断 agent' : 'Wait diagnostic agent';
     }
+    if (entity.task_type === 'network.lan_discovery') {
+        return zh ? '局域网发现 agent' : 'LAN discovery agent';
+    }
     return entity.label;
 };
 
@@ -37,6 +40,7 @@ const reasonLabel = (reason: string, zh: boolean): string => {
         available: ['可调用', 'Callable'],
         node_offline: ['节点离线', 'Node offline'],
         capability_missing: ['能力未安装', 'Capability missing'],
+        scan_target_unavailable: ['未发现可扫描私网', 'No scannable private LAN'],
         dependency_unavailable: ['网络依赖不可用', 'Network dependency unavailable'],
         not_console_allowlisted: ['未接入控制台', 'Not console-enabled'],
     };

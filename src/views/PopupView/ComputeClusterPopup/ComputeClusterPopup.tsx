@@ -6,6 +6,8 @@ import {
     ComputeClusterNode,
     ComputeClusterService,
     ComputeClusterStatus,
+    ComputeLanDiscoveryResult,
+    ComputeLanScanTarget,
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
     ComputeSchedulerResponse,
@@ -73,7 +75,16 @@ const taskProgress = (task: ComputeTask): number => {
 
 const webFetchResult = (task: ComputeTask): ComputeWebFetchResult | null => {
     const result = task.result;
-    return result?.schema_version === 'webfetch.console-result.v1' ? result : null;
+    return result && 'schema_version' in result && result.schema_version === 'webfetch.console-result.v1'
+        ? result
+        : null;
+};
+
+const lanDiscoveryResult = (task: ComputeTask): ComputeLanDiscoveryResult | null => {
+    const result = task.result;
+    return result && 'schema_version' in result && result.schema_version === 'lan-discovery.console-result.v1'
+        ? result
+        : null;
 };
 
 const publicUrlValid = (value: string): boolean => {
@@ -112,14 +123,18 @@ const TaskCard: React.FC<TaskCardProps> = ({task, zh, busy, onControl}) => {
     const active = task.state === 'queued' || task.state === 'running';
     const finished = ['succeeded', 'failed', 'cancelled'].includes(task.state);
     const informationTask = task.task_type === 'information.web_fetch';
+    const discoveryTask = task.task_type === 'network.lan_discovery';
     const evidence = webFetchResult(task);
+    const discovery = lanDiscoveryResult(task);
     return <article className={`ComputeTaskCard ${task.state}`}>
         <div className='ComputeTaskIdentity'>
             <span className={`ComputeTaskState ${task.state}`}>{taskState(task.state, zh)}</span>
             <div>
                 <strong>{informationTask
                     ? (zh ? '公开信息抓取' : 'Public information fetch')
-                    : (zh ? '等待测试' : 'Wait test')} · {task.node_name}</strong>
+                    : discoveryTask
+                        ? (zh ? '局域网设备发现' : 'LAN device discovery')
+                        : (zh ? '等待测试' : 'Wait test')} · {task.node_name}</strong>
                 <small>{task.mode === 'online' ? (zh ? '在线任务' : 'Online') : (zh ? '后台任务' : 'Background')} · {task.task_id.slice(0, 8)}</small>
                 {task.placement && <small className='ComputeTaskPlacement'>
                     {task.placement.mode === 'automatic'
@@ -136,11 +151,13 @@ const TaskCard: React.FC<TaskCardProps> = ({task, zh, busy, onControl}) => {
                 ? (evidence
                     ? `${evidence.meaningful_chars} ${zh ? '有效字符' : 'meaningful chars'}`
                     : (zh ? '节点执行并保存证据' : 'Node execution and evidence'))
-                : `${Number(task.progress?.completed ?? task.checkpoint?.elapsed_seconds ?? 0).toFixed(1)} / ${Number(task.parameters.seconds ?? task.progress?.total ?? 0).toFixed(1)} s`}</small>
+                : discoveryTask
+                    ? `${discovery?.host_count ?? 0} ${zh ? '台设备' : 'hosts'} · ${Number(task.progress?.completed ?? 0)} / ${Number(task.progress?.total ?? 0)} ${zh ? '地址' : 'addresses'}`
+                    : `${Number(task.progress?.completed ?? task.checkpoint?.elapsed_seconds ?? 0).toFixed(1)} / ${Number(task.parameters.seconds ?? task.progress?.total ?? 0).toFixed(1)} s`}</small>
         </div>
         <div className='ComputeTaskActions'>
-            {active && !informationTask && <button type='button' disabled={busy} onClick={() => onControl(task, 'pause')}>{zh ? '暂停' : 'Pause'}</button>}
-            {task.state === 'paused' && !informationTask && <button type='button' disabled={busy} onClick={() => onControl(task, 'resume')}>{zh ? '恢复' : 'Resume'}</button>}
+            {active && !informationTask && !discoveryTask && <button type='button' disabled={busy} onClick={() => onControl(task, 'pause')}>{zh ? '暂停' : 'Pause'}</button>}
+            {task.state === 'paused' && !informationTask && !discoveryTask && <button type='button' disabled={busy} onClick={() => onControl(task, 'resume')}>{zh ? '恢复' : 'Resume'}</button>}
             {!finished && <button type='button' className='danger' disabled={busy} onClick={() => onControl(task, 'cancel')}>{zh ? '取消' : 'Cancel'}</button>}
         </div>
         {informationTask && <div className='ComputeTaskEvidence'>
@@ -154,6 +171,21 @@ const TaskCard: React.FC<TaskCardProps> = ({task, zh, busy, onControl}) => {
                     : (zh ? '正文与原始响应保留在执行节点' : 'Content and raw responses remain on the Node')}</small>
             </div>
             {evidence?.content_sha256 && <code title={evidence.content_sha256}>SHA-256 {evidence.content_sha256.slice(0, 12)}…</code>}
+        </div>}
+        {discoveryTask && <div className='ComputeLanResult'>
+            <div>
+                <strong>{discovery?.cidr || task.parameters.cidr}</strong>
+                <small>{discovery
+                    ? `${discovery.interface} · ${discovery.addresses_scanned} ${zh ? '个地址已扫描' : 'addresses scanned'}`
+                    : (zh ? '扫描由目标节点的局域网网卡发出' : 'Scan originates from the target node LAN')}</small>
+            </div>
+            {discovery?.hosts.map(host => <div className='ComputeLanHost' key={host.address}>
+                <strong>{host.address}</strong>
+                <span>{host.hostname || host.mac || (zh ? '在线设备' : 'Online device')}</span>
+                <small>{host.ports.length
+                    ? host.ports.map(port => `${port.port}/${port.service}`).join(' · ')
+                    : (zh ? '未发现白名单 TCP 服务' : 'No allowlisted TCP service')}</small>
+            </div>)}
         </div>}
         {task.error && <p>{task.error}</p>}
     </article>;
@@ -261,6 +293,8 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     } | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [controllingTask, setControllingTask] = useState('');
+    const [lanTargets, setLanTargets] = useState<Record<string, ComputeLanScanTarget[]>>({});
+    const [scanCidr, setScanCidr] = useState('');
     const mounted = useRef(true);
     const refreshingRef = useRef(false);
     const heartbeats = useRef<Record<string, number>>({});
@@ -295,7 +329,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             }
             if (nextStatus.task_control?.enabled) {
                 try {
-                    const [response, schedulerResponse, graphResponse] = await Promise.all([
+                    const [response, schedulerResponse, graphResponse, lanResponse] = await Promise.all([
                         ComputeClusterService.tasks(signal),
                         nextStatus.task_control.resource_orchestration
                             ? ComputeClusterService.scheduler(signal)
@@ -303,11 +337,19 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         nextStatus.task_control.resource_knowledge_graph
                             ? ComputeClusterService.resourceGraph(signal)
                             : Promise.resolve(null),
+                        nextStatus.task_control.lan_discovery
+                            ? ComputeClusterService.lanScanTargets(signal)
+                            : Promise.resolve(null),
                     ]);
                     if (mounted.current) {
                         setTasks(response.tasks);
                         setScheduler(schedulerResponse);
                         setResourceGraph(graphResponse);
+                        const nextTargets = Object.fromEntries(
+                            (lanResponse?.nodes || []).map(node => [node.node_id, node.targets])
+                        );
+                        setLanTargets(nextTargets);
+                        setScanCidr(current => current || Object.values(nextTargets)[0]?.[0]?.cidr || '');
                         setTaskError('');
                     }
                     const now = Date.now();
@@ -355,13 +397,18 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         };
     }, [refresh]);
 
+    // Task variants share one strictly typed dispatch boundary.
+    // eslint-disable-next-line complexity
     const submitTask = useCallback(async () => {
         const automatic = selectedNode === AUTO_PLACEMENT;
         const informationTask = taskType === 'information.web_fetch';
+        const discoveryTask = taskType === 'network.lan_discovery';
         if (
             !selectedNode
             || submitting
-            || (informationTask ? !publicUrlValid(taskUrl) : taskSeconds < 0 || taskSeconds > 3600)
+            || (discoveryTask
+                ? selectedNode === AUTO_PLACEMENT || !scanCidr
+                : (informationTask ? !publicUrlValid(taskUrl) : taskSeconds < 0 || taskSeconds > 3600))
             || !resourceRequestValid(taskCpu, taskMemoryGb, taskDiskGb, taskGpu, taskGpuMemoryMb)
         ) return;
         setSubmitting(true);
@@ -369,9 +416,10 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             await ComputeClusterService.submitTask({
                 node_id: automatic ? undefined : selectedNode,
                 task_type: taskType,
-                mode: informationTask ? 'background' : taskMode,
-                seconds: informationTask ? undefined : taskSeconds,
+                mode: informationTask || discoveryTask ? 'background' : taskMode,
+                seconds: informationTask || discoveryTask ? undefined : taskSeconds,
                 url: informationTask ? taskUrl : undefined,
+                cidr: discoveryTask ? scanCidr : undefined,
                 lease_seconds: 60,
                 resources: {
                     cpu_cores: taskCpu,
@@ -401,6 +449,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         taskSeconds,
         taskType,
         taskUrl,
+        scanCidr,
     ]);
 
     const selectWorkAgent = useCallback((
@@ -408,11 +457,14 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         candidateNodeIds: string[],
     ) => {
         if (!agent.callable || !agent.task_type || candidateNodeIds.length === 0) return;
-        const taskType = agent.task_type;
+        const selectedTaskType = agent.task_type;
         const resources = agent.recommended_resources;
-        setTaskType(taskType);
-        setTaskMode(taskType === 'information.web_fetch' ? 'background' : (agent.modes[0] || 'online'));
+        setTaskType(selectedTaskType);
+        setTaskMode(selectedTaskType === 'information.web_fetch' || selectedTaskType === 'network.lan_discovery' ? 'background' : (agent.modes[0] || 'online'));
         setSelectedNode(candidateNodeIds[0]);
+        if (selectedTaskType === 'network.lan_discovery') {
+            setScanCidr(lanTargets[candidateNodeIds[0]]?.[0]?.cidr || '');
+        }
         if (resources) {
             setTaskCpu(resources.cpu_cores);
             setTaskMemoryGb(Number((resources.memory_bytes / 1024 ** 3).toFixed(4)));
@@ -420,12 +472,12 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             setTaskGpu(resources.gpu_count);
             setTaskGpuMemoryMb(resources.gpu_memory_mb);
         }
-        setGraphSelection({taskType, nodeId: candidateNodeIds[0]});
+        setGraphSelection({taskType: selectedTaskType, nodeId: candidateNodeIds[0]});
         setTaskError('');
         window.requestAnimationFrame(() => {
             taskFormRef.current?.scrollIntoView?.({behavior: 'smooth', block: 'center'});
         });
-    }, []);
+    }, [lanTargets]);
 
     const controlTask = useCallback(async (
         task: ComputeTask,
@@ -460,6 +512,10 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         && status?.task_control?.work_agent_execution === true
         && status.task_control.allowed_task_types.includes('information.web_fetch');
     const informationTask = taskType === 'information.web_fetch';
+    const discoveryTask = taskType === 'network.lan_discovery';
+    const discoveryEnabled = taskControlEnabled
+        && status?.task_control?.lan_discovery === true
+        && status.task_control.allowed_task_types.includes('network.lan_discovery');
     const automaticPlacement = selectedNode === AUTO_PLACEMENT;
     const selectedNodeOnline = automaticPlacement
         ? nodes.some(node => node.online)
@@ -471,7 +527,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         taskGpu,
         taskGpuMemoryMb,
     );
-    const taskInputValid = informationTask
+    const taskInputValid = discoveryTask
+        ? discoveryEnabled && !automaticPlacement && Boolean(scanCidr)
+        : informationTask
         ? informationWorkAgentEnabled && publicUrlValid(taskUrl)
         : taskSeconds >= 0 && taskSeconds <= 3600;
 
@@ -482,8 +540,8 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     <span className='ComputeClusterEyebrow'>OpenSight · model-work-node</span>
                     <h2>{zh ? '计算群' : 'Compute Cluster'}</h2>
                     <p>{zh
-                        ? '第六阶段：点击图谱中的 work agent，按实时网络依赖与节点资源完成安全调度。'
-                        : 'Phase 6: select work agents in the graph and dispatch safely using live network and node resources.'}</p>
+                        ? '第七阶段 7.1：从 MacBook 指定节点，发现节点所在私有局域网的在线设备与常用服务。'
+                        : 'Phase 7.1: select a node from the MacBook and discover online devices and common services on its private LAN.'}</p>
                 </div>
                 <div className='ComputeClusterHeaderActions'>
                     <span className={`ComputeClusterServiceState ${error ? 'error' : 'ready'}`}>
@@ -552,12 +610,12 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                             <span>{zh ? '阶段 4 · work agent' : 'Phase 4 · Work agent'}</span>
                             <h3>{zh ? '分发节点工作' : 'Dispatch node work'}</h3>
                             <p>{zh
-                                ? '首个正式能力是公开信息抓取；私网地址、凭据、自由参数与 Shell 均被拒绝。'
-                                : 'The first production capability fetches public information; private targets, credentials, free-form payloads, and Shell are rejected.'}</p>
+                                ? '可下发公开信息抓取与受限局域网发现；扫描范围由目标节点实时上报，拒绝公网、自定义端口、凭据与 Shell。'
+                                : 'Dispatch public-information fetches or bounded LAN discovery; target nodes advertise the scan range, while public networks, custom ports, credentials, and Shell are rejected.'}</p>
                         </div>
                         <div className='ComputeTaskModeHelp'>
-                            <strong>{informationTask || taskMode === 'background' ? (zh ? '后台任务' : 'Background') : (zh ? '在线任务' : 'Online')}</strong>
-                            <span>{!informationTask && taskMode === 'online'
+                            <strong>{informationTask || discoveryTask || taskMode === 'background' ? (zh ? '后台任务' : 'Background') : (zh ? '在线任务' : 'Online')}</strong>
+                            <span>{!informationTask && !discoveryTask && taskMode === 'online'
                                 ? (zh ? '关闭页面并超过租约后自动取消' : 'Cancels after the lease when this console closes')
                                 : (zh ? '群主离线后节点仍继续执行' : 'Keeps running when the owner is offline')}</span>
                         </div>
@@ -566,7 +624,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         <strong>{zh ? '已从图谱带入' : 'Filled from graph'}</strong>
                         <span>{graphSelection.taskType === 'information.web_fetch'
                             ? (zh ? '公开信息采集 agent' : 'Public information agent')
-                            : (zh ? '等待诊断 agent' : 'Wait diagnostic agent')}</span>
+                            : graphSelection.taskType === 'network.lan_discovery'
+                                ? (zh ? '局域网发现 agent' : 'LAN discovery agent')
+                                : (zh ? '等待诊断 agent' : 'Wait diagnostic agent')}</span>
                         <span>{nodes.find(node => node.node_id === graphSelection.nodeId)?.name || graphSelection.nodeId}</span>
                         <span>CPU {taskCpu} · {taskMemoryGb} GB RAM · {taskDiskGb} GB Disk · GPU {taskGpu}</span>
                     </div>}
@@ -576,10 +636,18 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                             <select value={taskType} onChange={event => {
                                 const next = event.target.value as ComputeTaskType;
                                 setTaskType(next);
-                                setTaskMode(next === 'information.web_fetch' ? 'background' : 'online');
+                                setTaskMode(next === 'system.wait' ? 'online' : 'background');
+                                if (next === 'network.lan_discovery') {
+                                    const candidate = nodes.find(node => node.online && (lanTargets[node.node_id]?.length || 0) > 0);
+                                    setSelectedNode(candidate?.node_id || '');
+                                    setScanCidr(candidate ? lanTargets[candidate.node_id][0].cidr : '');
+                                } else if (!selectedNode) {
+                                    setSelectedNode(orchestrationEnabled ? AUTO_PLACEMENT : (nodes.find(node => node.online)?.node_id || ''));
+                                }
                                 setGraphSelection(null);
                             }}>
                                 <option value='information.web_fetch' disabled={!informationWorkAgentEnabled}>{zh ? '公开信息抓取' : 'Public information fetch'}</option>
+                                <option value='network.lan_discovery' disabled={!discoveryEnabled}>{zh ? '局域网设备发现' : 'LAN device discovery'}</option>
                                 <option value='system.wait'>{zh ? '等待测试' : 'Wait test'}</option>
                             </select>
                         </label>
@@ -587,9 +655,11 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                             <span>{zh ? '节点选择' : 'Node placement'}</span>
                             <select value={selectedNode} onChange={event => {
                                 setSelectedNode(event.target.value);
+                                const target = lanTargets[event.target.value]?.[0];
+                                setScanCidr(target?.cidr || '');
                                 setGraphSelection(null);
                             }}>
-                                {orchestrationEnabled && <option value={AUTO_PLACEMENT}>{zh ? '计算群自动调度（推荐）' : 'Automatic group placement (recommended)'}</option>}
+                                {orchestrationEnabled && !discoveryTask && <option value={AUTO_PLACEMENT}>{zh ? '计算群自动调度（推荐）' : 'Automatic group placement (recommended)'}</option>}
                                 {nodes.map(node => <option value={node.node_id} key={node.node_id} disabled={!node.online}>
                                     {node.name}{node.online ? '' : (zh ? '（离线）' : ' (offline)')}
                                 </option>)}
@@ -597,15 +667,21 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         </label>
                         <label>
                             <span>{zh ? '运行方式' : 'Mode'}</span>
-                            <select value={informationTask ? 'background' : taskMode} disabled={informationTask} onChange={event => setTaskMode(event.target.value as ComputeTaskMode)}>
+                            <select value={informationTask || discoveryTask ? 'background' : taskMode} disabled={informationTask || discoveryTask} onChange={event => setTaskMode(event.target.value as ComputeTaskMode)}>
                                 <option value='online'>{zh ? '在线任务' : 'Online task'}</option>
                                 <option value='background'>{zh ? '后台任务' : 'Background task'}</option>
                             </select>
                         </label>
                         <label>
-                            <span>{informationTask ? (zh ? '公开信息 URL' : 'Public information URL') : (zh ? '持续时间（秒）' : 'Duration (seconds)')}</span>
+                            <span>{informationTask ? (zh ? '公开信息 URL' : 'Public information URL') : discoveryTask ? (zh ? '扫描网段' : 'Scan network') : (zh ? '持续时间（秒）' : 'Duration (seconds)')}</span>
                             {informationTask
                                 ? <input type='url' value={taskUrl} onChange={event => setTaskUrl(event.target.value)} placeholder='https://example.com/article'/>
+                                : discoveryTask
+                                    ? <select value={scanCidr} onChange={event => setScanCidr(event.target.value)}>
+                                        {(lanTargets[selectedNode] || []).map(target => <option value={target.cidr} key={target.cidr}>
+                                            {target.cidr} · {target.interface}{target.narrowed ? (zh ? '（已收窄）' : ' (bounded)') : ''}
+                                        </option>)}
+                                    </select>
                                 : <input type='number' min={0} max={3600} value={taskSeconds} onChange={event => setTaskSeconds(Number(event.target.value))}/>}
                         </label>
                         <button
@@ -621,7 +697,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         <label><span>{zh ? '磁盘（GB）' : 'Disk (GB)'}</span><input type='number' min={0} step={0.0625} value={taskDiskGb} onChange={event => setTaskDiskGb(Number(event.target.value))}/></label>
                         <label><span>GPU {zh ? '数量' : 'count'}</span><input type='number' min={0} step={1} value={taskGpu} onChange={event => setTaskGpu(Number(event.target.value))}/></label>
                         <label><span>{zh ? '显存（MB）' : 'VRAM (MB)'}</span><input type='number' min={0} step={256} value={taskGpuMemoryMb} onChange={event => setTaskGpuMemoryMb(Number(event.target.value))}/></label>
-                        <p>{informationTask
+                        <p>{discoveryTask
+                            ? (zh ? '只扫描节点实时上报的私有网段，固定常用端口，最多 256 个地址；不执行漏洞、口令或公网扫描。' : 'Only live node-advertised private networks and fixed common ports are scanned, up to 256 addresses; no exploits, credentials, or public scans.')
+                            : informationTask
                             ? (zh ? '正文、原始响应和节点路径留在执行节点；控制台仅显示来源、状态与内容哈希。' : 'Content, raw responses, and paths stay on the Node; the console shows only source, status, and digest.')
                             : (zh ? '调度器会排除离线、过期、能力不匹配或资源不足的节点。' : 'Offline, stale, incompatible, or undersized nodes are excluded.')}</p>
                     </div>}

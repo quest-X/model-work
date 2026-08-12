@@ -250,10 +250,6 @@ describe('ComputeClusterPopup', () => {
         expect(node).toHaveAttribute('aria-pressed', 'true');
         await user.click(canvas);
         expect(node).toHaveAttribute('aria-pressed', 'false');
-
-        await user.click(node);
-        await user.keyboard('{Escape}');
-        expect(node).toHaveAttribute('aria-pressed', 'false');
         await waitFor(() => expect(service.resourceGraph).toHaveBeenCalledTimes(1));
     });
 

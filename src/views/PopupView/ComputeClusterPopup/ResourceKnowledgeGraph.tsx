@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useMemo, useState} from 'react';
 import {
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
@@ -205,15 +205,6 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
         ? graph.relations.filter(relation => relation.source_id === focusedEntityId || relation.target_id === focusedEntityId)
         : [];
 
-    useEffect(() => {
-        if (!focusedEntityId) return undefined;
-        const resetOnEscape = (event: KeyboardEvent): void => {
-            if (event.key === 'Escape') setFocusedEntityId(null);
-        };
-        window.addEventListener('keydown', resetOnEscape);
-        return () => window.removeEventListener('keydown', resetOnEscape);
-    }, [focusedEntityId]);
-
     return <section className='ComputeKnowledgePanel' aria-label={zh ? '资源知识图谱' : 'Resource knowledge graph'}>
         <div className='ComputeKnowledgeHeading'>
             <div>
@@ -321,7 +312,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                 </> : <>
                     <span>{zh ? '关系导航' : 'Relation navigation'}</span>
                     <strong>{zh ? '点击任一节点' : 'Select any node'}</strong>
-                    <small>{zh ? '高亮上下游关系；点击图谱空白处或按 Esc 取消聚焦。' : 'Highlight upstream and downstream relations; select empty canvas space or press Esc to clear focus.'}</small>
+                    <small>{zh ? '高亮上下游关系；点击图谱空白处取消聚焦。' : 'Highlight upstream and downstream relations; select empty canvas space to clear focus.'}</small>
                 </>}
             </aside>
         </div>

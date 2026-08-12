@@ -210,6 +210,25 @@ describe('ComputeClusterPopup', () => {
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
     });
 
+    it('maximizes and restores the compute cluster workspace', async () => {
+        const user = userEvent.setup();
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        const popup = screen.getByRole('region', {name: '计算群'});
+        const maximize = screen.getByRole('button', {name: '放大计算群窗口'});
+        expect(popup).not.toHaveClass('maximized');
+        expect(maximize).toHaveAttribute('aria-pressed', 'false');
+
+        await user.click(maximize);
+        expect(popup).toHaveClass('maximized');
+        const restore = screen.getByRole('button', {name: '还原计算群窗口'});
+        expect(restore).toHaveAttribute('aria-pressed', 'true');
+
+        await user.click(restore);
+        expect(popup).not.toHaveClass('maximized');
+        expect(screen.getByRole('button', {name: '放大计算群窗口'})).toHaveAttribute('aria-pressed', 'false');
+    });
+
     it('renders the authoritative graph and clears focus from the canvas background', async () => {
         const user = userEvent.setup();
         service.status.mockResolvedValue({

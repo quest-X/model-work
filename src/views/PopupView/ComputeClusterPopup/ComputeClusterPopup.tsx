@@ -276,6 +276,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     const [scheduler, setScheduler] = useState<ComputeSchedulerResponse | null>(null);
     const [resourceGraph, setResourceGraph] = useState<ComputeResourceGraph | null>(null);
     const [loading, setLoading] = useState(true);
+    const [maximized, setMaximized] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState('');
     const [taskError, setTaskError] = useState('');
@@ -581,8 +582,12 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         ? informationWorkAgentEnabled && publicUrlValid(taskUrl)
         : taskSeconds >= 0 && taskSeconds <= 3600;
 
+    const windowToggleLabel = maximized
+        ? (zh ? '还原计算群窗口' : 'Restore compute cluster window')
+        : (zh ? '放大计算群窗口' : 'Maximize compute cluster window');
+
     return <div className='ComputeClusterBackdrop'>
-        <section className='ComputeClusterPopup' aria-label={zh ? '计算群' : 'Compute Cluster'}>
+        <section className={`ComputeClusterPopup${maximized ? ' maximized' : ''}`} aria-label={zh ? '计算群' : 'Compute Cluster'}>
             <header>
                 <div>
                     <span className='ComputeClusterEyebrow'>OpenSight · model-work-node</span>
@@ -602,6 +607,14 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     <button type='button' disabled={refreshing} onClick={() => void refresh()}>
                         {refreshing ? (zh ? '刷新中…' : 'Refreshing…') : (zh ? '刷新' : 'Refresh')}
                     </button>
+                    <button
+                        type='button'
+                        className='window-toggle'
+                        aria-label={windowToggleLabel}
+                        aria-pressed={maximized}
+                        title={windowToggleLabel}
+                        onClick={() => setMaximized(current => !current)}
+                    ><i aria-hidden='true'/></button>
                     <button type='button' className='close' onClick={() => PopupActions.close()} aria-label={zh ? '关闭计算群' : 'Close compute cluster'}>×</button>
                 </div>
             </header>

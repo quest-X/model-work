@@ -204,7 +204,7 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('2 个通道')).toBeInTheDocument();
         expect(screen.getByText('已归属')).toBeInTheDocument();
         expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
-        expect(screen.getByText('第七阶段 7.2：持续记录各节点局域网资产，并识别新增、变化与离线设备。')).toBeInTheDocument();
+        expect(screen.getByText('第七阶段：发现各节点局域网资产，并持续记录变化与定时计划。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
         expect(screen.getAllByText('在线')).toHaveLength(2);
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
@@ -473,6 +473,7 @@ describe('ComputeClusterPopup', () => {
                 allowed_task_types: ['network.lan_discovery'],
                 resource_orchestration: true, lan_discovery: true,
                 lan_discovery_schedules: true,
+                phase7_complete: true, cross_region_recovery: true,
                 placement_modes: ['automatic', 'manual'],
             },
             nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
@@ -483,6 +484,7 @@ describe('ComputeClusterPopup', () => {
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByText('阶段 7.3 · 定时发现')).toBeInTheDocument();
+        expect(screen.getByText('第七阶段已完成：跨地域节点发现、资产台账、定时计划与故障恢复均已验收。')).toBeInTheDocument();
         expect(screen.getByText('已执行 2 次')).toBeInTheDocument();
         await user.selectOptions(screen.getByRole('combobox', {name: '计划节点'}), 'node-12345678');
         await user.click(screen.getByRole('button', {name: '创建计划'}));

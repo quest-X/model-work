@@ -588,8 +588,12 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     <span className='ComputeClusterEyebrow'>OpenSight · model-work-node</span>
                     <h2>{zh ? '计算群' : 'Compute Cluster'}</h2>
                     <p>{zh
-                        ? '第七阶段 7.2：持续记录各节点局域网资产，并识别新增、变化与离线设备。'
-                        : 'Phase 7.2: persist each node LAN inventory and identify new, changed, and offline devices.'}</p>
+                        ? status?.task_control?.phase7_complete
+                            ? '第七阶段已完成：跨地域节点发现、资产台账、定时计划与故障恢复均已验收。'
+                            : '第七阶段：发现各节点局域网资产，并持续记录变化与定时计划。'
+                        : status?.task_control?.phase7_complete
+                            ? 'Phase 7 complete: cross-region discovery, asset inventory, schedules, and recovery are accepted.'
+                            : 'Phase 7: discover node-local networks and retain changes and schedules.'}</p>
                 </div>
                 <div className='ComputeClusterHeaderActions'>
                     <span className={`ComputeClusterServiceState ${error ? 'error' : 'ready'}`}>

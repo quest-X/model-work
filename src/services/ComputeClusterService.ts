@@ -94,6 +94,8 @@ export type ComputeClusterStatus = {
         lan_discovery?: boolean;
         lan_asset_inventory?: boolean;
         lan_discovery_schedules?: boolean;
+        phase7_complete?: boolean;
+        cross_region_recovery?: boolean;
         evidence_projection?: 'metadata-only-v1';
         placement_modes?: ('automatic' | 'manual')[];
     };

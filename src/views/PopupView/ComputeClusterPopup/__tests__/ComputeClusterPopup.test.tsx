@@ -73,9 +73,9 @@ describe('ComputeClusterPopup', () => {
             active_allocations: 0, allocations: [],
         });
         service.resourceGraph.mockResolvedValue({
-            schema_version: 'resource-knowledge-graph.v2', group_id: 'group-1', generated_at: 1,
+            schema_version: 'resource-knowledge-graph.v3', group_id: 'group-1', generated_at: 1,
             summary: {
-                entities: 9, relations: 8, online_nodes: 1, compute_resources: 1,
+                entities: 10, relations: 9, online_nodes: 1, regions: 1, compute_resources: 1,
                 managed_devices: 1, network_dependencies: 3, healthy_network_dependencies: 3,
                 work_agents: 2, callable_work_agents: 2, interactive_work_agents: 2,
             },
@@ -83,8 +83,14 @@ describe('ComputeClusterPopup', () => {
                 entity_id: 'group:group-1', kind: 'compute_group', label: 'cross-region-lab',
                 state: 'available', callable: true, modes: [],
             }, {
+                entity_id: 'region:shanghai', kind: 'compute_region', label: '上海',
+                state: 'available', callable: true, modes: [], region_id: 'shanghai',
+                region_name: '上海', region_source: 'region_label', member_count: 1,
+                online_member_count: 1,
+            }, {
                 entity_id: 'node:node-12345678', kind: 'compute_node', label: 'edge-01',
                 state: 'available', callable: true, node_id: 'node-12345678', modes: [],
+                region_id: 'shanghai', region_name: '上海', region_source: 'region_label',
             }, {
                 entity_id: 'compute-resource:node-12345678', kind: 'compute_resource', label: 'edge-01 compute',
                 state: 'available', callable: true, node_id: 'node-12345678', modes: [],
@@ -136,6 +142,9 @@ describe('ComputeClusterPopup', () => {
             }],
             relations: [{
                 relation_id: 'contains:1', kind: 'contains', source_id: 'group:group-1',
+                target_id: 'region:shanghai', active: true, reason: 'available',
+            }, {
+                relation_id: 'contains:region:1', kind: 'contains', source_id: 'region:shanghai',
                 target_id: 'node:node-12345678', active: true, reason: 'available',
             }, {
                 relation_id: 'provides:1', kind: 'provides', source_id: 'node:node-12345678',
@@ -288,7 +297,7 @@ describe('ComputeClusterPopup', () => {
                 resource_orchestration: true,
                 work_agent_execution: true,
                 resource_knowledge_graph: true,
-                graph_schema: 'resource-knowledge-graph.v2',
+                graph_schema: 'resource-knowledge-graph.v3',
                 graph_interaction: true,
                 network_dependency_health: true,
                 managed_device_inventory: true,
@@ -319,12 +328,18 @@ describe('ComputeClusterPopup', () => {
         service.resourceGraph.mockResolvedValue({
             ...currentGraph,
             summary: {
-                ...currentGraph.summary, entities: 11, relations: 10,
-                online_nodes: 1, compute_resources: 2,
+                ...currentGraph.summary, entities: 13, relations: 12,
+                online_nodes: 1, regions: 2, compute_resources: 2,
             },
             entities: [...currentGraph.entities, {
+                entity_id: 'region:shandong', kind: 'compute_region', label: '山东',
+                state: 'unavailable', callable: false, modes: [], region_id: 'shandong',
+                region_name: '山东', region_source: 'region_label', member_count: 1,
+                online_member_count: 0,
+            }, {
                 entity_id: 'node:node-offline-87654321', kind: 'compute_node', label: 'edge-offline',
                 state: 'unavailable', callable: false, node_id: 'node-offline-87654321', modes: [],
+                region_id: 'shandong', region_name: '山东', region_source: 'region_label',
             }, {
                 entity_id: 'compute-resource:node-offline-87654321', kind: 'compute_resource',
                 label: 'edge-offline compute', state: 'unavailable', callable: false,
@@ -334,7 +349,10 @@ describe('ComputeClusterPopup', () => {
             }],
             relations: [...currentGraph.relations, {
                 relation_id: 'contains:offline', kind: 'contains', source_id: 'group:group-1',
-                target_id: 'node:node-offline-87654321', active: true, reason: 'available',
+                target_id: 'region:shandong', active: true, reason: 'node_offline',
+            }, {
+                relation_id: 'contains:region:offline', kind: 'contains', source_id: 'region:shandong',
+                target_id: 'node:node-offline-87654321', active: true, reason: 'node_offline',
             }, {
                 relation_id: 'provides:offline', kind: 'provides', source_id: 'node:node-offline-87654321',
                 target_id: 'compute-resource:node-offline-87654321', active: false, reason: 'node_offline',
@@ -343,18 +361,22 @@ describe('ComputeClusterPopup', () => {
 
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
-        expect(await screen.findByText('计算群连接 Graph')).toBeInTheDocument();
+        expect(await screen.findByText('计算群地域 Graph')).toBeInTheDocument();
         const resourceWorkspace = screen.getByRole('button', {name: '节点与传感器 3'}).closest('.ComputeClusterPopup');
         const schedulerPanel = resourceWorkspace?.querySelector('.ComputeSchedulerPanel');
         const graphPanel = resourceWorkspace?.querySelector('.ComputeKnowledgePanel');
         expect(schedulerPanel?.nextElementSibling).toBe(graphPanel);
-        expect(screen.getByText('运维拓扑 · 悬浮查看')).toBeInTheDocument();
+        expect(screen.getByText('地域拓扑 · 悬浮查看')).toBeInTheDocument();
         expect(screen.getByText('网络、资源与 agents 已隐藏，悬浮节点查看')).toBeInTheDocument();
         expect(screen.getByTestId('resource-node-link-graph')).toBeInTheDocument();
         expect(screen.getAllByTestId('resource-graph-node')).toHaveLength(3);
         expect(screen.getAllByTestId('resource-graph-edge')).toHaveLength(1);
         expect(screen.getByText('圆形 · 计算节点')).toBeInTheDocument();
-        expect(screen.getByText('圆角矩形 · 传感器')).toBeInTheDocument();
+        expect(screen.getByText('蓝色 · 传感器')).toBeInTheDocument();
+        expect(screen.getByText('黄色 · 执行器（预留）')).toBeInTheDocument();
+        expect(screen.getAllByTestId('resource-graph-region')).toHaveLength(2);
+        expect(screen.getByText('上海')).toBeInTheDocument();
+        expect(screen.getByText('山东')).toBeInTheDocument();
         expect(screen.getByText('绿色 · 在线')).toBeInTheDocument();
         expect(screen.getByText('红色 · 离线')).toBeInTheDocument();
         expect(graphPanel?.querySelector('[data-entity-kind="compute_group"]')).not.toBeInTheDocument();
@@ -369,19 +391,24 @@ describe('ComputeClusterPopup', () => {
         expect(offlineNode).toHaveAttribute('data-entity-kind', 'compute_node');
         expect(offlineNode).toHaveAttribute('data-entity-shape', 'circle');
         expect(offlineNode).toHaveAttribute('data-entity-state', 'unavailable');
+        expect(within(offlineNode).getByText('N-002')).toBeInTheDocument();
+        expect(offlineNode.querySelector('.ComputeGraphNodeState')).not.toBeInTheDocument();
         const camera = screen.getByRole('button', {name: '查看 IP CAMERA 传感器信息'});
         expect(camera).toHaveAttribute('data-entity-kind', 'managed_device');
         expect(camera).toHaveAttribute('data-entity-shape', 'rounded-rectangle');
+        expect(camera).toHaveClass('sensor');
+        expect(within(camera).getByText('S-003')).toBeInTheDocument();
 
         const onlineNode = screen.getByRole('button', {name: '查看 edge-01 节点信息'});
         await user.hover(onlineNode);
         const operationsCard = screen.getByRole('status', {name: 'edge-01 运维信息'});
+        expect(operationsCard).toHaveClass('anchored');
         expect(within(operationsCard).getByText('SSH 通路')).toBeInTheDocument();
         expect(within(operationsCard).getByText('公网出口')).toBeInTheDocument();
         expect(within(operationsCard).getByText('Tailscale 私有组网')).toBeInTheDocument();
         expect(within(operationsCard).getByText('可调用 agents')).toBeInTheDocument();
-        expect(within(operationsCard).getByText('公开信息采集')).toBeInTheDocument();
-        expect(within(operationsCard).getByText('等待诊断')).toBeInTheDocument();
+        expect(within(operationsCard).getByText(/A-\d{3} · 公开信息采集/)).toBeInTheDocument();
+        expect(within(operationsCard).getByText(/A-\d{3} · 等待诊断/)).toBeInTheDocument();
 
         await user.unhover(onlineNode);
         await user.hover(offlineNode);

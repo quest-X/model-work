@@ -269,9 +269,12 @@
   span { display: inline-flex; align-items: center; gap: 5px; }
   i { width: 6px; height: 6px; border-radius: 50%; background: #77727e; }
   i.callable { background: #68d68d; box-shadow: 0 0 6px rgba(104, 214, 141, 0.45); }
+  i.entity-shape { box-sizing: border-box; border: 1px solid rgba(205, 169, 252, 0.7); background: rgba(116, 77, 160, 0.5); }
+  i.entity-shape.circle { width: 9px; height: 9px; border-radius: 50%; }
+  i.entity-shape.rectangle { width: 13px; height: 9px; border-radius: 2px; }
   i.node-state { width: 8px; height: 8px; border: 1px solid rgba(255, 255, 255, 0.18); }
   i.node-state.online { background: #66dda0; box-shadow: 0 0 7px rgba(102, 221, 160, 0.52); }
-  i.node-state.offline { border-style: dashed; border-color: rgba(255, 143, 143, 0.72); background: rgba(255, 107, 107, 0.34); }
+  i.node-state.offline { border-color: rgba(255, 112, 112, 0.9); background: #d94c4c; box-shadow: 0 0 7px rgba(217, 76, 76, 0.38); }
   i.relation { width: 18px; height: 2px; border-radius: 999px; }
   i.contains { background: #c493ff; }
   i.capability { background: #5bc3ff; }
@@ -364,7 +367,8 @@
   &:hover { z-index: 4; border-color: rgba(208, 171, 255, 0.72); box-shadow: 0 9px 25px rgba(0, 0, 0, 0.35), 0 0 15px rgba(174, 111, 245, 0.14); transform: translate(-50%, calc(-50% - 2px)); }
   &:focus-visible { z-index: 5; outline: 2px solid rgba(101, 191, 246, 0.84); outline-offset: 3px; }
   &.unavailable { border-color: rgba(255, 255, 255, 0.11); filter: saturate(.55); }
-  &.state-unavailable.compute_resource { border-style: dashed; opacity: .7; }
+  &.state-unavailable { border-color: rgba(217, 76, 76, 0.72); }
+  &.state-unavailable.compute_resource { opacity: .7; }
   &.focused { z-index: 4; border-color: #d2a9ff; box-shadow: 0 0 0 2px rgba(193, 138, 255, 0.2), 0 0 24px rgba(173, 101, 248, 0.25); }
   &.selected { border-color: #6acbff; box-shadow: 0 0 0 2px rgba(85, 185, 239, 0.2), 0 0 22px rgba(85, 185, 239, 0.22); }
   > i {
@@ -418,9 +422,9 @@
     filter: none;
   }
   &.compute_node.node-offline {
-    border: 2px dashed rgba(255, 128, 128, 0.78);
-    background: radial-gradient(circle at 38% 30%, rgba(91, 70, 79, 0.96), rgba(43, 38, 43, 0.98) 68%);
-    box-shadow: 0 0 0 6px rgba(255, 107, 107, 0.035);
+    border: 2px solid rgba(226, 76, 76, 0.92);
+    background: radial-gradient(circle at 38% 30%, rgba(133, 52, 58, 0.96), rgba(57, 30, 34, 0.98) 68%);
+    box-shadow: 0 0 0 6px rgba(217, 76, 76, 0.05), 0 0 20px rgba(217, 76, 76, 0.14);
     filter: none;
   }
   .ComputeGraphNodeState {
@@ -447,11 +451,14 @@
     > i { background: #66dda0; box-shadow: 0 0 7px rgba(102, 221, 160, 0.64); }
   }
   &.node-offline .ComputeGraphNodeState {
-    border-style: dashed;
-    border-color: rgba(255, 128, 128, 0.48);
-    color: #ffabab;
-    > i { background: #ff7373; }
+    border-color: rgba(226, 76, 76, 0.58);
+    color: #ffaaaa;
+    > i { background: #e24c4c; box-shadow: 0 0 6px rgba(226, 76, 76, 0.48); }
   }
+  &.compute_resource,
+  &.work_agent,
+  &.network_dependency,
+  &.managed_device { border-radius: 8px; }
   &.compute_resource { width: 142px; border-color: rgba(83, 184, 240, 0.42); }
   &.work_agent {
     width: 154px;
@@ -461,7 +468,13 @@
     > span { color: rgba(117, 220, 158, 0.72); }
   }
   &.network_dependency { width: 112px; }
-  &.managed_device { width: 136px; border-color: rgba(241, 189, 103, 0.42); }
+  &.managed_device {
+    width: 136px;
+    border-color: rgba(241, 189, 103, 0.58);
+    background: linear-gradient(145deg, rgba(77, 57, 30, 0.9), rgba(29, 25, 21, 0.98));
+    > i { border-color: rgba(241, 189, 103, 0.52); background: #3b2d1c; color: #f4c978; }
+    > span { color: rgba(244, 201, 120, 0.72); }
+  }
 }
 
 .ComputeGraphScene.has-focus .ComputeGraphNode:not(.focused) {

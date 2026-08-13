@@ -40,6 +40,15 @@ interface GraphPoint {
     y: number;
 }
 
+type GraphEntityShape = 'circle' | 'rectangle';
+
+// Shape communicates entity category only; runtime state is expressed by color.
+const entityShape = (entity: ComputeResourceGraphEntity): GraphEntityShape => (
+    entity.kind === 'compute_group' || entity.kind === 'compute_node'
+        ? 'circle'
+        : 'rectangle'
+);
+
 const agentLabel = (
     entity: Pick<ComputeResourceGraphEntity, 'label' | 'task_type'>,
     zh: boolean,
@@ -258,11 +267,13 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
         </div>
 
         <div className='ComputeKnowledgeLegend'>
+            <span><i className='entity-shape circle'/>{zh ? '圆形 · 计算域 / 节点' : 'Circle · Domain / node'}</span>
+            <span><i className='entity-shape rectangle'/>{zh ? '矩形 · 资源 / Agent / 网络 / 设备' : 'Rectangle · Resource / Agent / network / device'}</span>
             <span><i className='relation contains'/>{zh ? '群组包含节点' : 'Group contains node'}</span>
             <span><i className='relation capability'/>{zh ? '提供 / 执行' : 'Provides / executes'}</span>
             <span><i className='relation dependency'/>{zh ? '依赖 / 管理' : 'Depends / manages'}</span>
-            <span><i className='node-state online'/>{zh ? '节点在线' : 'Node online'}</span>
-            <span><i className='node-state offline'/>{zh ? '节点离线' : 'Node offline'}</span>
+            <span><i className='node-state online'/>{zh ? '绿色 · 在线 / 可用' : 'Green · Online / available'}</span>
+            <span><i className='node-state offline'/>{zh ? '红色 · 离线 / 不可用' : 'Red · Offline / unavailable'}</span>
             <span><i className='callable'/>{zh ? '当前可调用' : 'Callable now'}</span>
             <code>{graph.schema_version}</code>
         </div>
@@ -334,6 +345,8 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                         aria-label={`${action} ${entityLabel(entity, zh)}`}
                         aria-pressed={focused}
                         data-testid='resource-graph-node'
+                        data-entity-kind={entity.kind}
+                        data-entity-shape={entityShape(entity)}
                         data-entity-state={entity.state}
                     >
                         <i>{graphNodeCode(entity)}</i>

@@ -608,7 +608,7 @@ describe('ComputeClusterPopup', () => {
         await screen.findByRole('navigation', {name: '计算群工作区'});
         await user.click(await screen.findByRole('button', {name: '终端连接 1'}));
         expect(await screen.findByText('节点终端连接')).toBeInTheDocument();
-        expect(screen.getByText(/网页不会读取节点地址/)).toBeInTheDocument();
+        expect(screen.getByText(/连接目标与认证材料由 Mac Client 保管/)).toBeInTheDocument();
         await user.click(screen.getByRole('button', {name: '连接终端'}));
         await waitFor(() => expect(service.startTerminal).toHaveBeenCalledWith('node-12345678'));
         const input = screen.getByRole('textbox', {name: '终端指令'});

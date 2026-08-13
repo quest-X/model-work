@@ -150,8 +150,8 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh}) 
                 <span>{zh ? '阶段 8 · 受控 SSH' : 'Phase 8 · Controlled SSH'}</span>
                 <h3>{zh ? '节点终端连接' : 'Node terminal connection'}</h3>
                 <p>{zh
-                    ? '终端由 Mac Client 建立；网页不会读取节点地址、SSH 用户或认证材料。'
-                    : 'The Mac Client owns the terminal; node addresses, SSH users, and credentials never reach the browser.'}</p>
+                    ? '连接目标与认证材料由 Mac Client 保管，不通过网页配置或接口返回；终端输出按原样展示。'
+                    : 'The Mac Client owns destinations and credentials; they are never configured or returned by the web API, while terminal output is shown verbatim.'}</p>
             </div>
             <div className={`ComputeTerminalState ${session?.state || 'idle'}`}>
                 <i/><strong>{session

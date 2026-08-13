@@ -290,13 +290,57 @@ describe('ComputeClusterPopup', () => {
                 managed_device_inventory: true,
                 placement_modes: ['automatic', 'manual'],
             },
-            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+            nodes: {total: 2, online: 1, gpu_total: 1, device_total: 1},
+        });
+
+        const currentNodes = await service.nodes();
+        service.nodes.mockClear();
+        service.nodes.mockResolvedValue([...currentNodes, {
+            ...currentNodes[0],
+            node_id: 'node-offline-87654321', installation_id: 'install-2', name: 'edge-offline',
+            network: {
+                ...currentNodes[0].network, online: false, ssh_available: false,
+                backend_state: 'Unavailable',
+            },
+            resources: {
+                ...currentNodes[0].resources, cpu_logical: 8,
+                memory_available_bytes: 12 * 1024 ** 3,
+            },
+            device_inventory: {state: 'ready', devices: []},
+            online: false, heartbeat_age_seconds: 20 * 3600,
+        }]);
+
+        const currentGraph = await service.resourceGraph();
+        service.resourceGraph.mockClear();
+        service.resourceGraph.mockResolvedValue({
+            ...currentGraph,
+            summary: {
+                ...currentGraph.summary, entities: 11, relations: 10,
+                online_nodes: 1, compute_resources: 2,
+            },
+            entities: [...currentGraph.entities, {
+                entity_id: 'node:node-offline-87654321', kind: 'compute_node', label: 'edge-offline',
+                state: 'unavailable', callable: false, node_id: 'node-offline-87654321', modes: [],
+            }, {
+                entity_id: 'compute-resource:node-offline-87654321', kind: 'compute_resource',
+                label: 'edge-offline compute', state: 'unavailable', callable: false,
+                node_id: 'node-offline-87654321', modes: [], platform: 'linux', architecture: 'x86_64',
+                cpu_logical: 8, memory_available_bytes: 12 * 1024 ** 3,
+                disk_free_bytes: 100 * 1024 ** 3, gpu_count: 0,
+            }],
+            relations: [...currentGraph.relations, {
+                relation_id: 'contains:offline', kind: 'contains', source_id: 'group:group-1',
+                target_id: 'node:node-offline-87654321', active: true, reason: 'available',
+            }, {
+                relation_id: 'provides:offline', kind: 'provides', source_id: 'node:node-offline-87654321',
+                target_id: 'compute-resource:node-offline-87654321', active: false, reason: 'node_offline',
+            }],
         });
 
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByText('计算群资源 Graph')).toBeInTheDocument();
-        const resourceWorkspace = screen.getByRole('button', {name: '资源与关系 9'}).closest('.ComputeClusterPopup');
+        const resourceWorkspace = screen.getByRole('button', {name: '资源与关系 11'}).closest('.ComputeClusterPopup');
         const schedulerPanel = resourceWorkspace?.querySelector('.ComputeSchedulerPanel');
         const graphPanel = resourceWorkspace?.querySelector('.ComputeKnowledgePanel');
         expect(schedulerPanel?.nextElementSibling).toBe(graphPanel);
@@ -304,15 +348,28 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('cross-region-lab')).toBeInTheDocument();
         expect(screen.getByText('resource-knowledge-graph.v2')).toBeInTheDocument();
         expect(screen.getByTestId('resource-node-link-graph')).toBeInTheDocument();
-        expect(screen.getAllByTestId('resource-graph-node')).toHaveLength(9);
-        expect(screen.getAllByTestId('resource-graph-edge')).toHaveLength(8);
+        expect(screen.getAllByTestId('resource-graph-node')).toHaveLength(11);
+        expect(screen.getAllByTestId('resource-graph-edge')).toHaveLength(10);
         expect(screen.getAllByText('公开信息采集 agent').length).toBeGreaterThanOrEqual(1);
         expect(screen.getAllByText('等待诊断 agent').length).toBeGreaterThanOrEqual(1);
         expect(screen.getByText('2/2')).toBeInTheDocument();
+        expect(screen.getByText('节点在线')).toBeInTheDocument();
+        expect(screen.getByText('节点离线')).toBeInTheDocument();
+        const graphStats = graphPanel?.querySelector('.ComputeKnowledgeStats');
+        expect(graphStats?.querySelector('.online strong')).toHaveTextContent('1');
+        expect(graphStats?.querySelector('.offline strong')).toHaveTextContent('1');
+        const offlineNode = screen.getByRole('button', {name: '查看 edge-offline'});
+        expect(offlineNode).toHaveClass('node-offline');
+        expect(offlineNode).toHaveAttribute('data-entity-state', 'unavailable');
+        expect(screen.getByText('上次上报 · CPU 8 · RAM 12.0G · GPU 0')).toBeInTheDocument();
         expect(screen.queryByRole('button', {name: '复位图谱'})).not.toBeInTheDocument();
 
         const node = screen.getByRole('button', {name: '查看 edge-01'});
         const canvas = screen.getByRole('figure', {name: '计算群资源节点关系图'});
+        await user.click(offlineNode);
+        expect(screen.getByText('离线，不参与调度')).toBeInTheDocument();
+        expect(screen.getByText('最近心跳 · 20 小时前')).toBeInTheDocument();
+        expect(screen.getByText('网络状态 · 连接不可用')).toBeInTheDocument();
         await user.click(node);
         expect(node).toHaveAttribute('aria-pressed', 'true');
         await user.click(canvas);

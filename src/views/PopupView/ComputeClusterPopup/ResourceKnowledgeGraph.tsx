@@ -1,5 +1,6 @@
 import React, {useMemo, useState} from 'react';
 import {
+    ComputeClusterNode,
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
     ComputeResourceGraphRelation,
@@ -8,6 +9,7 @@ import {
 
 interface ResourceKnowledgeGraphProps {
     graph: ComputeResourceGraph;
+    nodes: ComputeClusterNode[];
     zh: boolean;
     selectedTaskType?: ComputeTaskType;
     onSelectWorkAgent: (
@@ -15,6 +17,23 @@ interface ResourceKnowledgeGraphProps {
         candidateNodeIds: string[],
     ) => void;
 }
+
+const heartbeatLabel = (seconds: number | undefined, zh: boolean): string => {
+    if (seconds == null || !Number.isFinite(seconds)) return zh ? '时间未知' : 'unknown';
+    if (seconds < 10) return zh ? '刚刚' : 'just now';
+    if (seconds < 60) return zh ? `${Math.floor(seconds)} 秒前` : `${Math.floor(seconds)}s ago`;
+    if (seconds < 3600) return zh ? `${Math.floor(seconds / 60)} 分钟前` : `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return zh ? `${Math.floor(seconds / 3600)} 小时前` : `${Math.floor(seconds / 3600)}h ago`;
+    return zh ? `${Math.floor(seconds / 86400)} 天前` : `${Math.floor(seconds / 86400)}d ago`;
+};
+
+const networkStateLabel = (node: ComputeClusterNode | undefined, zh: boolean): string => {
+    if (!node) return zh ? '状态未知' : 'Unknown';
+    if (!node.online) return zh ? '连接不可用' : 'Unavailable';
+    return node.network.backend_state === 'Running'
+        ? (zh ? '连接正常' : 'Connected')
+        : (node.network.backend_state || (zh ? '状态未知' : 'Unknown'));
+};
 
 interface GraphPoint {
     x: number;
@@ -153,16 +172,24 @@ const entityLabel = (entity: ComputeResourceGraphEntity, zh: boolean): string =>
 
 // Every graph entity keeps its compact visual summary in one place.
 // eslint-disable-next-line complexity
-const entitySummary = (entity: ComputeResourceGraphEntity, zh: boolean): string => {
+const entitySummary = (
+    entity: ComputeResourceGraphEntity,
+    zh: boolean,
+    node?: ComputeClusterNode,
+): string => {
     if (entity.kind === 'compute_group') return zh ? '群主控制域' : 'Owner control domain';
     if (entity.kind === 'compute_node') {
-        return entity.state === 'available' ? (zh ? '在线节点' : 'Online node') : (zh ? '离线节点' : 'Offline node');
+        const heartbeat = heartbeatLabel(node?.heartbeat_age_seconds, zh);
+        return entity.state === 'available'
+            ? `${zh ? '在线' : 'Online'} · ${zh ? '心跳' : 'heartbeat'} ${heartbeat}`
+            : `${zh ? '离线' : 'Offline'} · ${zh ? '最后心跳' : 'last heartbeat'} ${heartbeat}`;
     }
     if (entity.kind === 'compute_resource') {
         const ram = entity.memory_available_bytes == null
             ? '—'
             : `${(entity.memory_available_bytes / 1024 ** 3).toFixed(1)}G`;
-        return `CPU ${entity.cpu_logical || 0} · RAM ${ram} · GPU ${entity.gpu_count || 0}`;
+        const resources = `CPU ${entity.cpu_logical || 0} · RAM ${ram} · GPU ${entity.gpu_count || 0}`;
+        return node && !node.online ? `${zh ? '上次上报' : 'Last reported'} · ${resources}` : resources;
     }
     if (entity.kind === 'work_agent') {
         return `${entity.available_node_count || 0} ${zh ? '个执行节点' : 'executors'} · ${entity.modes.map(mode => modeLabel(mode, zh)).join(' / ')}`;
@@ -189,6 +216,7 @@ const graphNodeCode = (entity: ComputeResourceGraphEntity): string => {
 // eslint-disable-next-line complexity
 export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     graph,
+    nodes: clusterNodes,
     zh,
     selectedTaskType,
     onSelectWorkAgent,
@@ -200,6 +228,11 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     );
     const points = useMemo(() => graphLayout(graph.entities), [graph.entities]);
     const nodes = graph.entities.filter(entity => entity.kind === 'compute_node');
+    const nodeIndex = useMemo(
+        () => new Map(clusterNodes.map(node => [node.node_id, node])),
+        [clusterNodes],
+    );
+    const offlineNodes = Math.max(0, nodes.length - graph.summary.online_nodes);
     const focusedEntity = focusedEntityId ? index.get(focusedEntityId) : undefined;
     const focusedRelations = focusedEntityId
         ? graph.relations.filter(relation => relation.source_id === focusedEntityId || relation.target_id === focusedEntityId)
@@ -217,6 +250,8 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
             <div className='ComputeKnowledgeStats'>
                 <div><strong>{graph.summary.entities}</strong><span>{zh ? '实体' : 'entities'}</span></div>
                 <div><strong>{graph.summary.relations}</strong><span>{zh ? '关系' : 'relations'}</span></div>
+                <div className='online'><strong>{graph.summary.online_nodes}</strong><span>{zh ? '在线节点' : 'online nodes'}</span></div>
+                <div className='offline'><strong>{offlineNodes}</strong><span>{zh ? '离线节点' : 'offline nodes'}</span></div>
                 <div><strong>{graph.summary.callable_work_agents}/{graph.summary.work_agents}</strong><span>{zh ? '可调用 agents' : 'callable agents'}</span></div>
                 <div><strong>{graph.summary.healthy_network_dependencies}/{graph.summary.network_dependencies}</strong><span>{zh ? '健康网络依赖' : 'healthy dependencies'}</span></div>
             </div>
@@ -226,6 +261,8 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
             <span><i className='relation contains'/>{zh ? '群组包含节点' : 'Group contains node'}</span>
             <span><i className='relation capability'/>{zh ? '提供 / 执行' : 'Provides / executes'}</span>
             <span><i className='relation dependency'/>{zh ? '依赖 / 管理' : 'Depends / manages'}</span>
+            <span><i className='node-state online'/>{zh ? '节点在线' : 'Node online'}</span>
+            <span><i className='node-state offline'/>{zh ? '节点离线' : 'Node offline'}</span>
             <span><i className='callable'/>{zh ? '当前可调用' : 'Callable now'}</span>
             <code>{graph.schema_version}</code>
         </div>
@@ -260,7 +297,10 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                     })}
                 </svg>
 
-                {graph.entities.map(entity => {
+                {graph.entities.map(
+                    // The compact graph node keeps entity-specific interaction and status in one render path.
+                    // eslint-disable-next-line complexity
+                    entity => {
                     const point = points.get(entity.entity_id);
                     if (!point) return null;
                     const candidateNodeIds = entity.kind === 'work_agent'
@@ -273,13 +313,17 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                         : [];
                     const selected = entity.kind === 'work_agent' && selectedTaskType === entity.task_type;
                     const focused = focusedEntityId === entity.entity_id;
+                    const node = entity.node_id ? nodeIndex.get(entity.node_id) : undefined;
+                    const nodeStateClass = entity.kind === 'compute_node'
+                        ? (entity.state === 'available' ? 'node-online' : 'node-offline')
+                        : '';
                     const action = entity.kind === 'work_agent' && entity.callable && candidateNodeIds.length
                         ? (zh ? '选择' : 'Select')
                         : (zh ? '查看' : 'Inspect');
                     return <button
                         type='button'
                         key={entity.entity_id}
-                        className={`ComputeGraphNode ${entity.kind} ${entity.callable ? 'callable' : 'unavailable'} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}`}
+                        className={`ComputeGraphNode ${entity.kind} state-${entity.state} ${entity.callable ? 'callable' : 'unavailable'} ${nodeStateClass} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}`}
                         style={{left: `${point.x}%`, top: `${point.y}%`}}
                         onClick={() => {
                             setFocusedEntityId(entity.entity_id);
@@ -290,22 +334,41 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                         aria-label={`${action} ${entityLabel(entity, zh)}`}
                         aria-pressed={focused}
                         data-testid='resource-graph-node'
+                        data-entity-state={entity.state}
                     >
                         <i>{graphNodeCode(entity)}</i>
+                        {entity.kind === 'compute_node' && <em className='ComputeGraphNodeState'>
+                            <i/>{entity.state === 'available' ? (zh ? '在线' : 'Online') : (zh ? '离线' : 'Offline')}
+                        </em>}
                         <span>{entityKindLabel(entity, zh)}</span>
                         <strong>{entityLabel(entity, zh)}</strong>
                         <small>{entity.kind === 'compute_group'
                             ? `${graph.summary.online_nodes}/${nodes.length} ${zh ? '节点在线' : 'nodes online'}`
-                            : entitySummary(entity, zh)}</small>
+                            : entitySummary(entity, zh, node)}</small>
                     </button>;
-                })}
+                    },
+                )}
 
             </div>
             <aside className={`ComputeGraphInspector ${focusedEntity ? 'visible' : ''}`} aria-live='polite'>
                 {focusedEntity ? <>
                     <span>{entityKindLabel(focusedEntity, zh)} · {focusedEntity.callable ? (zh ? '可调用' : 'Callable') : (zh ? '只读' : 'Read only')}</span>
                     <strong>{entityLabel(focusedEntity, zh)}</strong>
-                    <small>{entitySummary(focusedEntity, zh)}</small>
+                    <small>{entitySummary(
+                        focusedEntity,
+                        zh,
+                        focusedEntity.node_id ? nodeIndex.get(focusedEntity.node_id) : undefined,
+                    )}</small>
+                    {focusedEntity.kind === 'compute_node' && (() => {
+                        const node = focusedEntity.node_id ? nodeIndex.get(focusedEntity.node_id) : undefined;
+                        return <div className='ComputeGraphInspectorFacts'>
+                            <em className={node?.online ? 'online' : 'offline'}>{node?.online
+                                ? (zh ? '在线并参与调度' : 'Online and schedulable')
+                                : (zh ? '离线，不参与调度' : 'Offline, excluded from scheduling')}</em>
+                            <em>{zh ? '最近心跳' : 'Last heartbeat'} · {heartbeatLabel(node?.heartbeat_age_seconds, zh)}</em>
+                            <em>{zh ? '网络状态' : 'Network'} · {networkStateLabel(node, zh)}</em>
+                        </div>;
+                    })()}
                     <div>{focusedRelations.map(relation => <em key={relation.relation_id} className={relation.active ? 'active' : ''}>
                         {relationLabel(relation, zh)} · {reasonLabel(relation.reason, zh)}
                     </em>)}</div>

@@ -692,6 +692,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     </section>}
                     {resourceGraph && <ResourceKnowledgeGraph
                         graph={resourceGraph}
+                        nodes={nodes}
                         zh={zh}
                         selectedTaskType={graphSelection?.taskType}
                         onSelectWorkAgent={selectWorkAgent}

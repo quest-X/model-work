@@ -254,6 +254,8 @@
   > div { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
   strong { color: #d6b8ff; font-size: 14px; }
   span { color: rgba(255, 255, 255, 0.36); font-size: 8px; white-space: nowrap; }
+  .online strong { color: #66dda0; }
+  .offline strong { color: #ff8f8f; }
 }
 
 .ComputeKnowledgeLegend {
@@ -267,6 +269,9 @@
   span { display: inline-flex; align-items: center; gap: 5px; }
   i { width: 6px; height: 6px; border-radius: 50%; background: #77727e; }
   i.callable { background: #68d68d; box-shadow: 0 0 6px rgba(104, 214, 141, 0.45); }
+  i.node-state { width: 8px; height: 8px; border: 1px solid rgba(255, 255, 255, 0.18); }
+  i.node-state.online { background: #66dda0; box-shadow: 0 0 7px rgba(102, 221, 160, 0.52); }
+  i.node-state.offline { border-style: dashed; border-color: rgba(255, 143, 143, 0.72); background: rgba(255, 107, 107, 0.34); }
   i.relation { width: 18px; height: 2px; border-radius: 999px; }
   i.contains { background: #c493ff; }
   i.capability { background: #5bc3ff; }
@@ -359,6 +364,7 @@
   &:hover { z-index: 4; border-color: rgba(208, 171, 255, 0.72); box-shadow: 0 9px 25px rgba(0, 0, 0, 0.35), 0 0 15px rgba(174, 111, 245, 0.14); transform: translate(-50%, calc(-50% - 2px)); }
   &:focus-visible { z-index: 5; outline: 2px solid rgba(101, 191, 246, 0.84); outline-offset: 3px; }
   &.unavailable { border-color: rgba(255, 255, 255, 0.11); filter: saturate(.55); }
+  &.state-unavailable.compute_resource { border-style: dashed; opacity: .7; }
   &.focused { z-index: 4; border-color: #d2a9ff; box-shadow: 0 0 0 2px rgba(193, 138, 255, 0.2), 0 0 24px rgba(173, 101, 248, 0.25); }
   &.selected { border-color: #6acbff; box-shadow: 0 0 0 2px rgba(85, 185, 239, 0.2), 0 0 22px rgba(85, 185, 239, 0.22); }
   > i {
@@ -405,6 +411,47 @@
     border-color: rgba(170, 111, 241, 0.58);
     background: radial-gradient(circle at 38% 30%, rgba(109, 68, 154, 0.96), rgba(49, 34, 68, 0.98) 68%);
   }
+  &.compute_node.node-online {
+    border: 2px solid rgba(102, 221, 160, 0.9);
+    background: radial-gradient(circle at 38% 30%, rgba(47, 129, 89, 0.98), rgba(24, 65, 48, 0.98) 68%);
+    box-shadow: 0 0 0 6px rgba(102, 221, 160, 0.06), 0 0 24px rgba(102, 221, 160, 0.22);
+    filter: none;
+  }
+  &.compute_node.node-offline {
+    border: 2px dashed rgba(255, 128, 128, 0.78);
+    background: radial-gradient(circle at 38% 30%, rgba(91, 70, 79, 0.96), rgba(43, 38, 43, 0.98) 68%);
+    box-shadow: 0 0 0 6px rgba(255, 107, 107, 0.035);
+    filter: none;
+  }
+  .ComputeGraphNodeState {
+    position: absolute;
+    right: -18px;
+    bottom: 5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    background: rgba(16, 18, 21, 0.94);
+    padding: 3px 6px;
+    color: rgba(255, 255, 255, 0.74);
+    font-size: 7px;
+    font-style: normal;
+    font-weight: 700;
+    white-space: nowrap;
+    > i { width: 6px; height: 6px; border-radius: 50%; background: #92979c; }
+  }
+  &.node-online .ComputeGraphNodeState {
+    border-color: rgba(102, 221, 160, 0.38);
+    color: #8ce7b5;
+    > i { background: #66dda0; box-shadow: 0 0 7px rgba(102, 221, 160, 0.64); }
+  }
+  &.node-offline .ComputeGraphNodeState {
+    border-style: dashed;
+    border-color: rgba(255, 128, 128, 0.48);
+    color: #ffabab;
+    > i { background: #ff7373; }
+  }
   &.compute_resource { width: 142px; border-color: rgba(83, 184, 240, 0.42); }
   &.work_agent {
     width: 154px;
@@ -441,6 +488,24 @@
   em { border-radius: 999px; background: rgba(255, 255, 255, 0.05); padding: 3px 5px; color: rgba(255, 255, 255, 0.38); font-size: 6px; font-style: normal; }
   em.active { background: rgba(84, 204, 135, 0.1); color: #73d799; }
   &.visible { border-color: rgba(197, 161, 247, 0.34); }
+}
+
+.ComputeGraphInspectorFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 3px;
+  em {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.035);
+    padding: 4px 7px;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 8px;
+    font-style: normal;
+  }
+  em.online { border-color: rgba(102, 221, 160, 0.24); color: #84dfab; }
+  em.offline { border-style: dashed; border-color: rgba(255, 128, 128, 0.3); color: #ff9d9d; }
 }
 
 .ComputeSchedulerPanel {

@@ -86,7 +86,7 @@
   }
 }
 
-.ComputeClusterPopup.maximized .ComputeClusterHeaderActions .window-toggle i {
+.ComputeClusterHeaderActions .window-toggle.maximize i {
   transform: translate(2px, -2px);
   &::before {
     position: absolute;

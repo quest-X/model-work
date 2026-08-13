@@ -619,7 +619,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     </span>
                     <button
                         type='button'
-                        className='window-toggle'
+                        className={`window-toggle ${maximized ? 'restore' : 'maximize'}`}
                         aria-label={windowToggleLabel}
                         aria-pressed={maximized}
                         title={windowToggleLabel}

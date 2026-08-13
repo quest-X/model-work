@@ -267,7 +267,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                 )}
 
                 {hoveredEntity && <aside
-                    className={`ComputeGraphHoverCard ${hoveredPoint && hoveredPoint.x > 50 ? 'align-left' : 'align-right'}`}
+                    className={`ComputeGraphHoverCard ${hoveredPoint && hoveredPoint.x > 50 ? 'align-left' : 'align-right'} ${hoveredPoint && hoveredPoint.y > 50 ? 'align-bottom' : 'align-top'}`}
                     role='status'
                     aria-label={`${hoveredEntity.label} ${zh ? '运维信息' : 'operations details'}`}
                 >

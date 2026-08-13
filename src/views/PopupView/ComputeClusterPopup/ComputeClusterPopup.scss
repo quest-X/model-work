@@ -511,7 +511,6 @@
 
 .ComputeGraphHoverCard {
   position: absolute;
-  top: 14px;
   z-index: 7;
   display: flex;
   flex-direction: column;
@@ -527,6 +526,8 @@
   backdrop-filter: blur(12px);
   &.align-left { left: 14px; }
   &.align-right { right: 14px; }
+  &.align-top { top: 14px; }
+  &.align-bottom { bottom: 14px; }
   > span { color: rgba(195, 154, 252, 0.74); font-size: 8px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
   > strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
   > small { color: rgba(255, 255, 255, 0.5); font-size: 8px; }

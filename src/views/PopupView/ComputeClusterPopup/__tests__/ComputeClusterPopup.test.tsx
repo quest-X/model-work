@@ -358,7 +358,10 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getAllByText('等待诊断 agent').length).toBeGreaterThanOrEqual(1);
         expect(screen.getByText('2/2')).toBeInTheDocument();
         expect(screen.getByText('圆形 · 计算域 / 节点')).toBeInTheDocument();
-        expect(screen.getByText('矩形 · 资源 / Agent / 网络 / 设备')).toBeInTheDocument();
+        expect(screen.getByText('卡片 · 计算资源')).toBeInTheDocument();
+        expect(screen.getByText('六边形 · Agent')).toBeInTheDocument();
+        expect(screen.getByText('胶囊形 · 网络依赖')).toBeInTheDocument();
+        expect(screen.getByText('矩形 · 托管设备')).toBeInTheDocument();
         expect(screen.getByText('绿色 · 在线 / 可用')).toBeInTheDocument();
         expect(screen.getByText('红色 · 离线 / 不可用')).toBeInTheDocument();
         const graphStats = graphPanel?.querySelector('.ComputeKnowledgeStats');
@@ -372,6 +375,15 @@ describe('ComputeClusterPopup', () => {
         const camera = screen.getByRole('button', {name: '查看 IP CAMERA'});
         expect(camera).toHaveAttribute('data-entity-kind', 'managed_device');
         expect(camera).toHaveAttribute('data-entity-shape', 'rectangle');
+        const agent = screen.getByRole('button', {name: '选择 公开信息采集 agent'});
+        expect(agent).toHaveAttribute('data-entity-kind', 'work_agent');
+        expect(agent).toHaveAttribute('data-entity-shape', 'hexagon');
+        const network = screen.getByRole('button', {name: '查看 公网出口'});
+        expect(network).toHaveAttribute('data-entity-kind', 'network_dependency');
+        expect(network).toHaveAttribute('data-entity-shape', 'capsule');
+        const resource = screen.getByRole('button', {name: '查看 edge-01 compute'});
+        expect(resource).toHaveAttribute('data-entity-kind', 'compute_resource');
+        expect(resource).toHaveAttribute('data-entity-shape', 'card');
         expect(screen.getByText('上次上报 · CPU 8 · RAM 12.0G · GPU 0')).toBeInTheDocument();
         expect(screen.queryByRole('button', {name: '复位图谱'})).not.toBeInTheDocument();
 

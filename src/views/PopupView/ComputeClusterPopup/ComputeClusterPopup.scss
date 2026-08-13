@@ -260,6 +260,7 @@
 
 .ComputeKnowledgeLegend {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -271,7 +272,10 @@
   i.callable { background: #68d68d; box-shadow: 0 0 6px rgba(104, 214, 141, 0.45); }
   i.entity-shape { box-sizing: border-box; border: 1px solid rgba(205, 169, 252, 0.7); background: rgba(116, 77, 160, 0.5); }
   i.entity-shape.circle { width: 9px; height: 9px; border-radius: 50%; }
-  i.entity-shape.rectangle { width: 13px; height: 9px; border-radius: 2px; }
+  i.entity-shape.card { width: 13px; height: 9px; border-color: rgba(83, 184, 240, 0.72); border-radius: 3px; background: rgba(46, 106, 140, 0.5); }
+  i.entity-shape.hexagon { width: 13px; height: 10px; border: 0; border-radius: 0; background: rgba(84, 204, 135, 0.7); clip-path: polygon(22% 0, 78% 0, 100% 50%, 78% 100%, 22% 100%, 0 50%); }
+  i.entity-shape.capsule { width: 15px; height: 8px; border-color: rgba(207, 130, 242, 0.7); border-radius: 999px; background: rgba(116, 73, 135, 0.56); }
+  i.entity-shape.rectangle { width: 13px; height: 9px; border-color: rgba(241, 189, 103, 0.72); border-radius: 1px; background: rgba(118, 85, 40, 0.56); }
   i.node-state { width: 8px; height: 8px; border: 1px solid rgba(255, 255, 255, 0.18); }
   i.node-state.online { background: #66dda0; box-shadow: 0 0 7px rgba(102, 221, 160, 0.52); }
   i.node-state.offline { border-color: rgba(255, 112, 112, 0.9); background: #d94c4c; box-shadow: 0 0 7px rgba(217, 76, 76, 0.38); }
@@ -455,22 +459,34 @@
     color: #ffaaaa;
     > i { background: #e24c4c; box-shadow: 0 0 6px rgba(226, 76, 76, 0.48); }
   }
-  &.compute_resource,
-  &.work_agent,
-  &.network_dependency,
-  &.managed_device { border-radius: 8px; }
-  &.compute_resource { width: 142px; border-color: rgba(83, 184, 240, 0.42); }
+  &.compute_resource {
+    width: 142px;
+    border-color: rgba(83, 184, 240, 0.42);
+    border-radius: 10px;
+  }
   &.work_agent {
     width: 154px;
-    border-color: rgba(84, 204, 135, 0.38);
+    min-height: 64px;
+    border: 0;
+    border-radius: 0;
     background: linear-gradient(145deg, rgba(26, 74, 54, 0.9), rgba(18, 27, 25, 0.98));
-    > i { border-color: rgba(84, 204, 135, 0.52); background: #19382b; color: #7cdfa2; }
+    padding: 9px 22px;
+    clip-path: polygon(9% 0, 91% 0, 100% 50%, 91% 100%, 9% 100%, 0 50%);
+    box-shadow: inset 0 0 0 2px rgba(84, 204, 135, 0.42), 0 8px 22px rgba(0, 0, 0, 0.24);
+    > i { top: 4px; left: 18px; width: 18px; height: 18px; border-color: rgba(84, 204, 135, 0.52); background: #19382b; color: #7cdfa2; }
     > span { color: rgba(117, 220, 158, 0.72); }
   }
-  &.network_dependency { width: 112px; }
+  &.network_dependency {
+    width: 126px;
+    min-height: 52px;
+    border-color: rgba(207, 130, 242, 0.46);
+    border-radius: 999px;
+    background: linear-gradient(145deg, rgba(62, 43, 75, 0.94), rgba(23, 22, 28, 0.98));
+  }
   &.managed_device {
     width: 136px;
     border-color: rgba(241, 189, 103, 0.58);
+    border-radius: 2px;
     background: linear-gradient(145deg, rgba(77, 57, 30, 0.9), rgba(29, 25, 21, 0.98));
     > i { border-color: rgba(241, 189, 103, 0.52); background: #3b2d1c; color: #f4c978; }
     > span { color: rgba(244, 201, 120, 0.72); }

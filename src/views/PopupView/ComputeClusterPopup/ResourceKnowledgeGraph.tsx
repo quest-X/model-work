@@ -40,14 +40,20 @@ interface GraphPoint {
     y: number;
 }
 
-type GraphEntityShape = 'circle' | 'rectangle';
+type GraphEntityShape = 'circle' | 'card' | 'hexagon' | 'capsule' | 'rectangle';
 
 // Shape communicates entity category only; runtime state is expressed by color.
-const entityShape = (entity: ComputeResourceGraphEntity): GraphEntityShape => (
-    entity.kind === 'compute_group' || entity.kind === 'compute_node'
-        ? 'circle'
-        : 'rectangle'
-);
+const entityShape = (entity: ComputeResourceGraphEntity): GraphEntityShape => {
+    const shapes: Record<ComputeResourceGraphEntity['kind'], GraphEntityShape> = {
+        compute_group: 'circle',
+        compute_node: 'circle',
+        compute_resource: 'card',
+        work_agent: 'hexagon',
+        network_dependency: 'capsule',
+        managed_device: 'rectangle',
+    };
+    return shapes[entity.kind];
+};
 
 const agentLabel = (
     entity: Pick<ComputeResourceGraphEntity, 'label' | 'task_type'>,
@@ -268,7 +274,10 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
 
         <div className='ComputeKnowledgeLegend'>
             <span><i className='entity-shape circle'/>{zh ? '圆形 · 计算域 / 节点' : 'Circle · Domain / node'}</span>
-            <span><i className='entity-shape rectangle'/>{zh ? '矩形 · 资源 / Agent / 网络 / 设备' : 'Rectangle · Resource / Agent / network / device'}</span>
+            <span><i className='entity-shape card'/>{zh ? '卡片 · 计算资源' : 'Card · Compute resource'}</span>
+            <span><i className='entity-shape hexagon'/>{zh ? '六边形 · Agent' : 'Hexagon · Agent'}</span>
+            <span><i className='entity-shape capsule'/>{zh ? '胶囊形 · 网络依赖' : 'Capsule · Network dependency'}</span>
+            <span><i className='entity-shape rectangle'/>{zh ? '矩形 · 托管设备' : 'Rectangle · Managed device'}</span>
             <span><i className='relation contains'/>{zh ? '群组包含节点' : 'Group contains node'}</span>
             <span><i className='relation capability'/>{zh ? '提供 / 执行' : 'Provides / executes'}</span>
             <span><i className='relation dependency'/>{zh ? '依赖 / 管理' : 'Depends / manages'}</span>

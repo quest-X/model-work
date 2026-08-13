@@ -353,14 +353,21 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getAllByText('公开信息采集 agent').length).toBeGreaterThanOrEqual(1);
         expect(screen.getAllByText('等待诊断 agent').length).toBeGreaterThanOrEqual(1);
         expect(screen.getByText('2/2')).toBeInTheDocument();
-        expect(screen.getByText('节点在线')).toBeInTheDocument();
-        expect(screen.getByText('节点离线')).toBeInTheDocument();
+        expect(screen.getByText('圆形 · 计算域 / 节点')).toBeInTheDocument();
+        expect(screen.getByText('矩形 · 资源 / Agent / 网络 / 设备')).toBeInTheDocument();
+        expect(screen.getByText('绿色 · 在线 / 可用')).toBeInTheDocument();
+        expect(screen.getByText('红色 · 离线 / 不可用')).toBeInTheDocument();
         const graphStats = graphPanel?.querySelector('.ComputeKnowledgeStats');
         expect(graphStats?.querySelector('.online strong')).toHaveTextContent('1');
         expect(graphStats?.querySelector('.offline strong')).toHaveTextContent('1');
         const offlineNode = screen.getByRole('button', {name: '查看 edge-offline'});
         expect(offlineNode).toHaveClass('node-offline');
+        expect(offlineNode).toHaveAttribute('data-entity-kind', 'compute_node');
+        expect(offlineNode).toHaveAttribute('data-entity-shape', 'circle');
         expect(offlineNode).toHaveAttribute('data-entity-state', 'unavailable');
+        const camera = screen.getByRole('button', {name: '查看 IP CAMERA'});
+        expect(camera).toHaveAttribute('data-entity-kind', 'managed_device');
+        expect(camera).toHaveAttribute('data-entity-shape', 'rectangle');
         expect(screen.getByText('上次上报 · CPU 8 · RAM 12.0G · GPU 0')).toBeInTheDocument();
         expect(screen.queryByRole('button', {name: '复位图谱'})).not.toBeInTheDocument();
 

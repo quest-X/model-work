@@ -149,15 +149,18 @@ const graphLayout = (entities: ComputeResourceGraphEntity[]): Map<string, GraphP
         points.set(resource.entity_id, {x: parent?.x ?? spread(resources.length, 16, 84)[index], y: 8});
     });
 
-    nodes.forEach(node => {
-        const parent = points.get(node.entity_id);
-        const owned = dependencies.filter(dependency => dependency.node_id === node.node_id);
-        const offsets = spread(owned.length, -13, 13);
-        owned.forEach((dependency, index) => points.set(dependency.entity_id, {
-            x: Math.max(7, Math.min(93, (parent?.x ?? 50) + offsets[index])),
-            y: 60,
-        }));
-    });
+    // Network channels form one evenly spaced row. Grouping them by node first
+    // preserves ownership while preventing adjacent node groups from colliding.
+    const nodeIds = new Set(nodes.map(node => node.node_id));
+    const orderedDependencies = [
+        ...nodes.flatMap(node => dependencies.filter(dependency => dependency.node_id === node.node_id)),
+        ...dependencies.filter(dependency => !nodeIds.has(dependency.node_id)),
+    ];
+    const dependencyXs = spread(orderedDependencies.length, 6, 94);
+    orderedDependencies.forEach((dependency, index) => points.set(dependency.entity_id, {
+        x: dependencyXs[index],
+        y: 60,
+    }));
 
     agents.forEach((agent, index) => points.set(agent.entity_id, {
         x: spread(agents.length, agents.length === 1 ? 50 : 24, agents.length === 1 ? 50 : 76)[index],

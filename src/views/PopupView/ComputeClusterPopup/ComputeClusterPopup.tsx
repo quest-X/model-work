@@ -596,6 +596,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             ? (zh ? '正在自动同步' : 'Synchronizing automatically')
             : (zh ? '自动刷新正常' : 'Automatic refresh healthy');
     const serviceVersion = `v${status?.version || '0.1.0'}`;
+    const operationsGraphEntityCount = resourceGraph?.entities.filter(entity =>
+        entity.kind === 'compute_node' || entity.kind === 'managed_device',
+    ).length ?? 0;
 
     return <div className={`ComputeClusterBackdrop${maximized ? ' maximized' : ''}`}>
         <section className={`ComputeClusterPopup${maximized ? ' maximized' : ''}`} aria-label={zh ? '计算群' : 'Compute Cluster'}>
@@ -643,7 +646,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
 
             <nav className='ComputeWorkspaceNav' aria-label={zh ? '计算群工作区' : 'Compute cluster workspaces'}>
                 {([
-                    ['graph', zh ? '资源与关系' : 'Resources & relations', resourceGraph?.summary.entities ?? 0],
+                    ['graph', zh ? '节点与传感器' : 'Nodes & sensors', operationsGraphEntityCount],
                     ['tasks', zh ? '工作调度' : 'Work scheduling', tasks.length],
                     ['network', zh ? '网络资产' : 'Network assets', lanAssets?.summary.total ?? 0],
                     ['nodes', zh ? '节点详情' : 'Node details', nodes.length],

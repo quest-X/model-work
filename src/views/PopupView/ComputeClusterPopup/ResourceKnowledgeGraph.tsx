@@ -3,19 +3,22 @@ import {
     ComputeClusterNode,
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
-    ComputeResourceGraphRelation,
-    ComputeTaskType,
 } from '../../../services/ComputeClusterService';
 
 interface ResourceKnowledgeGraphProps {
     graph: ComputeResourceGraph;
     nodes: ComputeClusterNode[];
     zh: boolean;
-    selectedTaskType?: ComputeTaskType;
+    selectedTaskType?: string;
     onSelectWorkAgent: (
         agent: ComputeResourceGraphEntity,
         candidateNodeIds: string[],
     ) => void;
+}
+
+interface GraphPoint {
+    x: number;
+    y: number;
 }
 
 const heartbeatLabel = (seconds: number | undefined, zh: boolean): string => {
@@ -27,382 +30,293 @@ const heartbeatLabel = (seconds: number | undefined, zh: boolean): string => {
     return zh ? `${Math.floor(seconds / 86400)} 天前` : `${Math.floor(seconds / 86400)}d ago`;
 };
 
-const networkStateLabel = (node: ComputeClusterNode | undefined, zh: boolean): string => {
-    if (!node) return zh ? '状态未知' : 'Unknown';
-    if (!node.online) return zh ? '连接不可用' : 'Unavailable';
-    return node.network.backend_state === 'Running'
-        ? (zh ? '连接正常' : 'Connected')
-        : (node.network.backend_state || (zh ? '状态未知' : 'Unknown'));
-};
-
-interface GraphPoint {
-    x: number;
-    y: number;
-}
-
-type GraphEntityShape = 'circle' | 'card' | 'hexagon' | 'capsule' | 'rectangle';
-
-// Shape communicates entity category only; runtime state is expressed by color.
-const entityShape = (entity: ComputeResourceGraphEntity): GraphEntityShape => {
-    const shapes: Record<ComputeResourceGraphEntity['kind'], GraphEntityShape> = {
-        compute_group: 'circle',
-        compute_node: 'circle',
-        compute_resource: 'card',
-        work_agent: 'hexagon',
-        network_dependency: 'capsule',
-        managed_device: 'rectangle',
-    };
-    return shapes[entity.kind];
-};
-
-const agentLabel = (
-    entity: Pick<ComputeResourceGraphEntity, 'label' | 'task_type'>,
-    zh: boolean,
-): string => {
-    if (entity.task_type === 'information.web_fetch') {
-        return zh ? '公开信息采集 agent' : 'Public information agent';
-    }
-    if (entity.task_type === 'system.wait') {
-        return zh ? '等待诊断 agent' : 'Wait diagnostic agent';
-    }
-    if (entity.task_type === 'network.lan_discovery') {
-        return zh ? '局域网发现 agent' : 'LAN discovery agent';
-    }
-    return entity.label;
-};
-
-const modeLabel = (mode: string, zh: boolean): string => mode === 'background'
-    ? (zh ? '后台' : 'Background')
-    : (zh ? '在线' : 'Online');
-
-const reasonLabel = (reason: string, zh: boolean): string => {
-    const labels: Record<string, [string, string]> = {
-        available: ['可调用', 'Callable'],
-        node_offline: ['节点离线', 'Node offline'],
-        capability_missing: ['能力未安装', 'Capability missing'],
-        scan_target_unavailable: ['未发现可扫描私网', 'No scannable private LAN'],
-        dependency_unavailable: ['网络依赖不可用', 'Network dependency unavailable'],
-        not_console_allowlisted: ['未接入控制台', 'Not console-enabled'],
-    };
-    return (labels[reason] || [reason, reason])[zh ? 0 : 1];
-};
-
-const relationLabel = (relation: ComputeResourceGraphRelation, zh: boolean): string => {
-    const labels: Record<ComputeResourceGraphRelation['kind'], [string, string]> = {
-        contains: ['包含', 'contains'],
-        provides: ['提供', 'provides'],
-        can_execute: ['可执行', 'can execute'],
-        manages: ['管理', 'manages'],
-        depends_on: ['依赖', 'depends on'],
-    };
-    return labels[relation.kind][zh ? 0 : 1];
-};
-
-const entityKindLabel = (entity: ComputeResourceGraphEntity, zh: boolean): string => {
-    const labels: Record<ComputeResourceGraphEntity['kind'], [string, string]> = {
-        compute_group: ['计算群', 'Compute group'],
-        compute_node: ['计算节点', 'Compute node'],
-        compute_resource: ['计算资源', 'Compute resource'],
-        work_agent: ['WORK AGENT', 'WORK AGENT'],
-        managed_device: ['托管设备', 'Managed device'],
-        network_dependency: ['网络依赖', 'Network dependency'],
-    };
-    return labels[entity.kind][zh ? 0 : 1];
-};
-
-const dependencyLabel = (entity: ComputeResourceGraphEntity, zh: boolean): string => {
-    const labels: Record<string, [string, string]> = {
-        tailscale: ['Tailscale 组网', 'Tailscale network'],
-        control_ssh: ['SSH 控制链路', 'SSH control'],
-        public_http: ['公网出口', 'Public egress'],
-    };
-    const key = entity.dependency_id || entity.label;
-    return (labels[key] || [entity.label, entity.label])[zh ? 0 : 1];
-};
-
 const spread = (count: number, minimum: number, maximum: number): number[] => {
     if (count <= 0) return [];
     if (count === 1) return [(minimum + maximum) / 2];
     return Array.from({length: count}, (_, index) => minimum + (maximum - minimum) * index / (count - 1));
 };
 
-const graphLayout = (entities: ComputeResourceGraphEntity[]): Map<string, GraphPoint> => {
+const visibleEntity = (entity: ComputeResourceGraphEntity): boolean =>
+    entity.kind === 'compute_node' || entity.kind === 'managed_device';
+
+const operationsLayout = (
+    entities: ComputeResourceGraphEntity[],
+    relations: ComputeResourceGraph['relations'],
+): Map<string, GraphPoint> => {
     const points = new Map<string, GraphPoint>();
-    const group = entities.find(entity => entity.kind === 'compute_group');
     const nodes = entities.filter(entity => entity.kind === 'compute_node');
-    const resources = entities.filter(entity => entity.kind === 'compute_resource');
-    const agents = entities.filter(entity => entity.kind === 'work_agent');
     const devices = entities.filter(entity => entity.kind === 'managed_device');
-    const dependencies = entities.filter(entity => entity.kind === 'network_dependency');
+    const nodeXs = spread(nodes.length, nodes.length === 1 ? 50 : 16, nodes.length === 1 ? 50 : 84);
 
-    if (group) points.set(group.entity_id, {x: 50, y: 45});
-    const nodeXs = spread(nodes.length, nodes.length === 1 ? 50 : 20, nodes.length === 1 ? 50 : 80);
-    nodes.forEach((node, index) => points.set(node.entity_id, {x: nodeXs[index], y: 25}));
+    nodes.forEach((node, index) => points.set(node.entity_id, {x: nodeXs[index], y: 31}));
 
-    const pointForNodeId = (nodeId?: string | null): GraphPoint | undefined => {
-        const owner = nodes.find(node => node.node_id === nodeId);
-        return owner ? points.get(owner.entity_id) : undefined;
-    };
-
-    resources.forEach((resource, index) => {
-        const parent = pointForNodeId(resource.node_id);
-        points.set(resource.entity_id, {x: parent?.x ?? spread(resources.length, 16, 84)[index], y: 8});
+    const deviceGroups = new Map<string, ComputeResourceGraphEntity[]>();
+    devices.forEach(device => {
+        const ownerRelation = relations.find(relation =>
+            relation.kind === 'manages' && relation.target_id === device.entity_id,
+        );
+        const ownerId = ownerRelation?.source_id || `unowned:${device.node_id || 'unknown'}`;
+        deviceGroups.set(ownerId, [...(deviceGroups.get(ownerId) || []), device]);
     });
 
-    // Network channels form one evenly spaced row. Grouping them by node first
-    // preserves ownership while preventing adjacent node groups from colliding.
-    const nodeIds = new Set(nodes.map(node => node.node_id));
-    const orderedDependencies = [
-        ...nodes.flatMap(node => dependencies.filter(dependency => dependency.node_id === node.node_id)),
-        ...dependencies.filter(dependency => !nodeIds.has(dependency.node_id)),
-    ];
-    const dependencyXs = spread(orderedDependencies.length, 6, 94);
-    orderedDependencies.forEach((dependency, index) => points.set(dependency.entity_id, {
-        x: dependencyXs[index],
-        y: 60,
-    }));
-
-    agents.forEach((agent, index) => points.set(agent.entity_id, {
-        x: spread(agents.length, agents.length === 1 ? 50 : 24, agents.length === 1 ? 50 : 76)[index],
-        y: 79,
-    }));
-
-    devices.forEach((device, index) => {
-        const parent = pointForNodeId(device.node_id);
-        const siblingIndex = devices.filter(item => item.node_id === device.node_id).indexOf(device);
-        points.set(device.entity_id, {
-            x: Math.max(10, Math.min(90, (parent?.x ?? spread(devices.length, 18, 82)[index]) + siblingIndex * 12)),
-            y: 93,
+    let unownedIndex = 0;
+    deviceGroups.forEach((ownedDevices, ownerId) => {
+        const owner = points.get(ownerId);
+        const offsets = spread(ownedDevices.length, ownedDevices.length === 1 ? 0 : -9, ownedDevices.length === 1 ? 0 : 9);
+        ownedDevices.forEach((device, index) => {
+            const fallback = spread(devices.length, 14, 86)[unownedIndex++] ?? 50;
+            points.set(device.entity_id, {
+                x: Math.max(8, Math.min(92, (owner?.x ?? fallback) + offsets[index])),
+                y: 73,
+            });
         });
-    });
-
-    entities.filter(entity => !points.has(entity.entity_id)).forEach((entity, index, unknown) => {
-        points.set(entity.entity_id, {x: spread(unknown.length, 12, 88)[index], y: 92});
     });
     return points;
 };
 
-const entityLabel = (entity: ComputeResourceGraphEntity, zh: boolean): string => {
-    if (entity.kind === 'work_agent') return agentLabel(entity, zh);
-    if (entity.kind === 'network_dependency') return dependencyLabel(entity, zh);
+const agentLabel = (
+    entity: Pick<ComputeResourceGraphEntity, 'label' | 'task_type'>,
+    zh: boolean,
+): string => {
+    if (entity.task_type === 'information.web_fetch') return zh ? '公开信息采集' : 'Public information';
+    if (entity.task_type === 'system.wait') return zh ? '等待诊断' : 'Wait diagnostic';
+    if (entity.task_type === 'network.lan_discovery') return zh ? '局域网发现' : 'LAN discovery';
     return entity.label;
 };
 
-// Every graph entity keeps its compact visual summary in one place.
-// eslint-disable-next-line complexity
-const entitySummary = (
-    entity: ComputeResourceGraphEntity,
-    zh: boolean,
-    node?: ComputeClusterNode,
-): string => {
-    if (entity.kind === 'compute_group') return zh ? '群主控制域' : 'Owner control domain';
-    if (entity.kind === 'compute_node') {
-        const heartbeat = heartbeatLabel(node?.heartbeat_age_seconds, zh);
-        return entity.state === 'available'
-            ? `${zh ? '在线' : 'Online'} · ${zh ? '心跳' : 'heartbeat'} ${heartbeat}`
-            : `${zh ? '离线' : 'Offline'} · ${zh ? '最后心跳' : 'last heartbeat'} ${heartbeat}`;
-    }
-    if (entity.kind === 'compute_resource') {
-        const ram = entity.memory_available_bytes == null
-            ? '—'
-            : `${(entity.memory_available_bytes / 1024 ** 3).toFixed(1)}G`;
-        const resources = `CPU ${entity.cpu_logical || 0} · RAM ${ram} · GPU ${entity.gpu_count || 0}`;
-        return node && !node.online ? `${zh ? '上次上报' : 'Last reported'} · ${resources}` : resources;
-    }
-    if (entity.kind === 'work_agent') {
-        return `${entity.available_node_count || 0} ${zh ? '个执行节点' : 'executors'} · ${entity.modes.map(mode => modeLabel(mode, zh)).join(' / ')}`;
-    }
-    if (entity.kind === 'managed_device') {
-        return `${entity.device_model || (zh ? '型号未知' : 'Unknown model')} · ${entity.channels || 0} ${zh ? '通道' : 'channels'}`;
-    }
-    return entity.callable ? (zh ? '链路健康' : 'Healthy') : (zh ? '链路不可用' : 'Unavailable');
+const availabilityLabel = (available: boolean, zh: boolean): string =>
+    available ? (zh ? '可用' : 'Available') : (zh ? '不可用' : 'Unavailable');
+
+const sensorKindLabel = (entity: ComputeResourceGraphEntity, zh: boolean): string => {
+    if (entity.device_kind === 'camera') return zh ? '摄像头传感器' : 'Camera sensor';
+    return zh ? '传感器' : 'Sensor';
 };
 
-const graphNodeCode = (entity: ComputeResourceGraphEntity): string => {
-    const codes: Record<ComputeResourceGraphEntity['kind'], string> = {
-        compute_group: 'OS',
-        compute_node: 'N',
-        compute_resource: 'R',
-        work_agent: 'A',
-        managed_device: 'D',
-        network_dependency: 'NET',
+const deviceStatusLabel = (status: string | null | undefined, zh: boolean): string => {
+    const labels: Record<string, [string, string]> = {
+        registered: ['已注册', 'Registered'],
+        online: ['在线', 'Online'],
+        offline: ['离线', 'Offline'],
+        unavailable: ['不可用', 'Unavailable'],
     };
-    return codes[entity.kind];
+    return (labels[status || ''] || [status || '未知', status || 'Unknown'])[zh ? 0 : 1];
 };
 
-// Graph entity variants share one interactive canvas so relation state stays consistent.
+// The operations canvas intentionally keeps all bilingual visual and hover states in one component.
 // eslint-disable-next-line complexity
 export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     graph,
     nodes: clusterNodes,
     zh,
-    selectedTaskType,
-    onSelectWorkAgent,
 }) => {
-    const [focusedEntityId, setFocusedEntityId] = useState<string | null>(null);
+    const [hoveredEntityId, setHoveredEntityId] = useState<string | null>(null);
     const index = useMemo(
         () => new Map(graph.entities.map(entity => [entity.entity_id, entity])),
         [graph.entities],
     );
-    const points = useMemo(() => graphLayout(graph.entities), [graph.entities]);
-    const nodes = graph.entities.filter(entity => entity.kind === 'compute_node');
     const nodeIndex = useMemo(
         () => new Map(clusterNodes.map(node => [node.node_id, node])),
         [clusterNodes],
     );
-    const offlineNodes = Math.max(0, nodes.length - graph.summary.online_nodes);
-    const focusedEntity = focusedEntityId ? index.get(focusedEntityId) : undefined;
-    const focusedRelations = focusedEntityId
-        ? graph.relations.filter(relation => relation.source_id === focusedEntityId || relation.target_id === focusedEntityId)
-        : [];
+    const visibleEntities = useMemo(
+        () => graph.entities.filter(visibleEntity),
+        [graph.entities],
+    );
+    const visibleEntityIds = useMemo(
+        () => new Set(visibleEntities.map(entity => entity.entity_id)),
+        [visibleEntities],
+    );
+    const visibleRelations = useMemo(
+        () => graph.relations.filter(relation =>
+            relation.kind === 'manages'
+            && visibleEntityIds.has(relation.source_id)
+            && visibleEntityIds.has(relation.target_id),
+        ),
+        [graph.relations, visibleEntityIds],
+    );
+    const points = useMemo(
+        () => operationsLayout(visibleEntities, graph.relations),
+        [graph.relations, visibleEntities],
+    );
+    const graphNodes = visibleEntities.filter(entity => entity.kind === 'compute_node');
+    const sensors = visibleEntities.filter(entity => entity.kind === 'managed_device');
+    const offlineNodes = graphNodes.filter(entity => entity.state !== 'available').length;
+    const sshReachableNodes = graphNodes.filter(entity => {
+        const node = entity.node_id ? nodeIndex.get(entity.node_id) : undefined;
+        return node?.online && node.network.ssh_available;
+    }).length;
+    const hoveredEntity = hoveredEntityId ? index.get(hoveredEntityId) : undefined;
+    const hoveredPoint = hoveredEntityId ? points.get(hoveredEntityId) : undefined;
 
-    return <section className='ComputeKnowledgePanel' aria-label={zh ? '资源知识图谱' : 'Resource knowledge graph'}>
+    const dependencyFor = (nodeEntity: ComputeResourceGraphEntity, dependencyId: string): boolean => {
+        const relation = graph.relations.find(item =>
+            item.kind === 'depends_on'
+            && item.source_id === nodeEntity.entity_id
+            && index.get(item.target_id)?.dependency_id === dependencyId,
+        );
+        if (relation) return relation.active && index.get(relation.target_id)?.state === 'available';
+        const node = nodeEntity.node_id ? nodeIndex.get(nodeEntity.node_id) : undefined;
+        if (dependencyId === 'control_ssh') return Boolean(node?.online && node.network.ssh_available);
+        if (dependencyId === 'tailscale') return Boolean(node?.online && node.network.online);
+        return node?.network_dependencies.some(item => item.dependency_id === dependencyId && item.state === 'healthy') ?? false;
+    };
+
+    const callableAgentsFor = (nodeEntity: ComputeResourceGraphEntity): ComputeResourceGraphEntity[] =>
+        graph.relations
+            .filter(relation => relation.kind === 'can_execute'
+                && relation.source_id === nodeEntity.entity_id
+                && relation.active)
+            .map(relation => index.get(relation.target_id))
+            .filter((entity): entity is ComputeResourceGraphEntity => Boolean(entity && entity.kind === 'work_agent'));
+
+    const ownerFor = (device: ComputeResourceGraphEntity): ComputeResourceGraphEntity | undefined => {
+        const relation = graph.relations.find(item => item.kind === 'manages' && item.target_id === device.entity_id);
+        return relation ? index.get(relation.source_id) : undefined;
+    };
+
+    return <section className='ComputeKnowledgePanel' aria-label={zh ? '节点与传感器拓扑' : 'Node and sensor topology'}>
         <div className='ComputeKnowledgeHeading'>
             <div>
-                <span>{zh ? '资源关系 · 可交互' : 'Resource relations · Interactive'}</span>
-                <h3>{zh ? '计算群资源 Graph' : 'Compute cluster resource graph'}</h3>
+                <span>{zh ? '运维拓扑 · 悬浮查看' : 'Operations topology · Hover to inspect'}</span>
+                <h3>{zh ? '计算群连接 Graph' : 'Compute cluster connectivity graph'}</h3>
                 <p>{zh
-                    ? '节点和连线表达真实资源关系；点击实体可追踪上下游，点击可调用 work agent 可带入调度表单。'
-                    : 'Nodes and edges show authoritative resource relations. Inspect any entity or select a callable work agent to fill the dispatch form.'}</p>
+                    ? '仅显示可管理的计算节点与传感器；SSH、公网、Tailscale 和 agents 收进节点悬浮信息。'
+                    : 'Only managed compute nodes and sensors are visible. SSH, public egress, Tailscale, and agents appear on hover.'}</p>
             </div>
             <div className='ComputeKnowledgeStats'>
-                <div><strong>{graph.summary.entities}</strong><span>{zh ? '实体' : 'entities'}</span></div>
-                <div><strong>{graph.summary.relations}</strong><span>{zh ? '关系' : 'relations'}</span></div>
-                <div className='online'><strong>{graph.summary.online_nodes}</strong><span>{zh ? '在线节点' : 'online nodes'}</span></div>
-                <div className='offline'><strong>{offlineNodes}</strong><span>{zh ? '离线节点' : 'offline nodes'}</span></div>
-                <div><strong>{graph.summary.callable_work_agents}/{graph.summary.work_agents}</strong><span>{zh ? '可调用 agents' : 'callable agents'}</span></div>
-                <div><strong>{graph.summary.healthy_network_dependencies}/{graph.summary.network_dependencies}</strong><span>{zh ? '健康网络依赖' : 'healthy dependencies'}</span></div>
+                <div><strong>{graphNodes.length}</strong><span>{zh ? '计算节点' : 'compute nodes'}</span></div>
+                <div className='online'><strong>{graph.summary.online_nodes}</strong><span>{zh ? '在线' : 'online'}</span></div>
+                <div className='offline'><strong>{offlineNodes}</strong><span>{zh ? '离线' : 'offline'}</span></div>
+                <div><strong>{sshReachableNodes}</strong><span>{zh ? 'SSH 可连接' : 'SSH reachable'}</span></div>
+                <div><strong>{sensors.length}</strong><span>{zh ? '传感器' : 'sensors'}</span></div>
             </div>
         </div>
 
         <div className='ComputeKnowledgeLegend'>
-            <span><i className='entity-shape circle'/>{zh ? '圆形 · 计算域 / 节点' : 'Circle · Domain / node'}</span>
-            <span><i className='entity-shape card'/>{zh ? '卡片 · 计算资源' : 'Card · Compute resource'}</span>
-            <span><i className='entity-shape hexagon'/>{zh ? '六边形 · Agent' : 'Hexagon · Agent'}</span>
-            <span><i className='entity-shape capsule'/>{zh ? '胶囊形 · 网络依赖' : 'Capsule · Network dependency'}</span>
-            <span><i className='entity-shape rectangle'/>{zh ? '矩形 · 托管设备' : 'Rectangle · Managed device'}</span>
-            <span><i className='relation contains'/>{zh ? '群组包含节点' : 'Group contains node'}</span>
-            <span><i className='relation capability'/>{zh ? '提供 / 执行' : 'Provides / executes'}</span>
-            <span><i className='relation dependency'/>{zh ? '依赖 / 管理' : 'Depends / manages'}</span>
-            <span><i className='node-state online'/>{zh ? '绿色 · 在线 / 可用' : 'Green · Online / available'}</span>
-            <span><i className='node-state offline'/>{zh ? '红色 · 离线 / 不可用' : 'Red · Offline / unavailable'}</span>
-            <span><i className='callable'/>{zh ? '当前可调用' : 'Callable now'}</span>
-            <code>{graph.schema_version}</code>
+            <span><i className='entity-shape circle'/>{zh ? '圆形 · 计算节点' : 'Circle · Compute node'}</span>
+            <span><i className='entity-shape rounded-rectangle'/>{zh ? '圆角矩形 · 传感器' : 'Rounded rectangle · Sensor'}</span>
+            <span><i className='node-state online'/>{zh ? '绿色 · 在线' : 'Green · Online'}</span>
+            <span><i className='node-state offline'/>{zh ? '红色 · 离线' : 'Red · Offline'}</span>
+            <span><i className='relation sensor-link'/>{zh ? '节点管理传感器' : 'Node manages sensor'}</span>
+            <small>{zh ? '网络、资源与 agents 已隐藏，悬浮节点查看' : 'Networks, resources, and agents are hidden; hover a node to inspect'}</small>
         </div>
 
         <div className='ComputeGraphViewport'>
             <div
-                className={`ComputeGraphScene ${focusedEntityId ? 'has-focus' : ''}`}
+                className='ComputeGraphScene operations-only'
                 role='figure'
-                aria-label={zh ? '计算群资源节点关系图' : 'Compute cluster resource node-link graph'}
-                tabIndex={0}
-                onClick={event => {
-                    if (event.target === event.currentTarget) setFocusedEntityId(null);
-                }}
+                aria-label={zh ? '计算群节点与传感器关系图' : 'Compute cluster node and sensor graph'}
             >
-                <svg className='ComputeGraphEdges' viewBox='0 0 1000 520' preserveAspectRatio='none' data-testid='resource-node-link-graph' aria-hidden='true'>
-                    {graph.relations.map(relation => {
+                <svg className='ComputeGraphEdges' viewBox='0 0 1000 440' preserveAspectRatio='none' data-testid='resource-node-link-graph' aria-hidden='true'>
+                    {visibleRelations.map(relation => {
                         const source = points.get(relation.source_id);
                         const target = points.get(relation.target_id);
                         if (!source || !target) return null;
-                        const connected = focusedEntityId === relation.source_id || focusedEntityId === relation.target_id;
-                        const muted = Boolean(focusedEntityId) && !connected;
                         return <line
                             key={relation.relation_id}
                             x1={source.x * 10}
-                            y1={source.y * 5.2}
+                            y1={source.y * 4.4}
                             x2={target.x * 10}
-                            y2={target.y * 5.2}
-                            className={`ComputeGraphEdge ${relation.kind} ${relation.active ? 'active' : 'inactive'} ${connected ? 'focused' : ''} ${muted ? 'muted' : ''}`}
+                            y2={target.y * 4.4}
+                            className={`ComputeGraphEdge manages ${relation.active ? 'active' : 'inactive'}`}
                             data-testid='resource-graph-edge'
-                            data-relation-kind={relation.kind}
+                            data-relation-kind='manages'
                         />;
                     })}
                 </svg>
 
-                {graph.entities.map(
-                    // The compact graph node keeps entity-specific interaction and status in one render path.
+                {visibleEntities.map(
+                    // Visible node and sensor variants share one accessible interaction path.
                     // eslint-disable-next-line complexity
                     entity => {
                     const point = points.get(entity.entity_id);
                     if (!point) return null;
-                    const candidateNodeIds = entity.kind === 'work_agent'
-                        ? graph.relations
-                            .filter(relation => relation.kind === 'can_execute'
-                                && relation.target_id === entity.entity_id
-                                && relation.active)
-                            .map(relation => index.get(relation.source_id)?.node_id)
-                            .filter((nodeId): nodeId is string => Boolean(nodeId))
-                        : [];
-                    const selected = entity.kind === 'work_agent' && selectedTaskType === entity.task_type;
-                    const focused = focusedEntityId === entity.entity_id;
                     const node = entity.node_id ? nodeIndex.get(entity.node_id) : undefined;
-                    const nodeStateClass = entity.kind === 'compute_node'
-                        ? (entity.state === 'available' ? 'node-online' : 'node-offline')
-                        : '';
-                    const action = entity.kind === 'work_agent' && entity.callable && candidateNodeIds.length
-                        ? (zh ? '选择' : 'Select')
-                        : (zh ? '查看' : 'Inspect');
+                    const isNode = entity.kind === 'compute_node';
+                    const isHovered = hoveredEntityId === entity.entity_id;
                     return <button
                         type='button'
                         key={entity.entity_id}
-                        className={`ComputeGraphNode ${entity.kind} state-${entity.state} ${entity.callable ? 'callable' : 'unavailable'} ${nodeStateClass} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}`}
+                        className={`ComputeGraphNode ${entity.kind} state-${entity.state} ${isNode
+                            ? (entity.state === 'available' ? 'node-online' : 'node-offline')
+                            : 'sensor-node'} ${isHovered ? 'focused' : ''}`}
                         style={{left: `${point.x}%`, top: `${point.y}%`}}
-                        onClick={() => {
-                            setFocusedEntityId(entity.entity_id);
-                            if (entity.kind === 'work_agent' && entity.callable && candidateNodeIds.length) {
-                                onSelectWorkAgent(entity, candidateNodeIds);
-                            }
-                        }}
-                        aria-label={`${action} ${entityLabel(entity, zh)}`}
-                        aria-pressed={focused}
+                        onMouseEnter={() => setHoveredEntityId(entity.entity_id)}
+                        onMouseLeave={() => setHoveredEntityId(current => current === entity.entity_id ? null : current)}
+                        onFocus={() => setHoveredEntityId(entity.entity_id)}
+                        onBlur={() => setHoveredEntityId(current => current === entity.entity_id ? null : current)}
+                        aria-label={isNode
+                            ? `${zh ? '查看' : 'Inspect'} ${entity.label} ${zh ? '节点信息' : 'node details'}`
+                            : `${zh ? '查看' : 'Inspect'} ${entity.label} ${zh ? '传感器信息' : 'sensor details'}`}
                         data-testid='resource-graph-node'
                         data-entity-kind={entity.kind}
-                        data-entity-shape={entityShape(entity)}
+                        data-entity-shape={isNode ? 'circle' : 'rounded-rectangle'}
                         data-entity-state={entity.state}
                     >
-                        <i>{graphNodeCode(entity)}</i>
-                        {entity.kind === 'compute_node' && <em className='ComputeGraphNodeState'>
+                        <i>{isNode ? 'N' : 'SENSOR'}</i>
+                        {isNode && <em className='ComputeGraphNodeState'>
                             <i/>{entity.state === 'available' ? (zh ? '在线' : 'Online') : (zh ? '离线' : 'Offline')}
                         </em>}
-                        <span>{entityKindLabel(entity, zh)}</span>
-                        <strong>{entityLabel(entity, zh)}</strong>
-                        <small>{entity.kind === 'compute_group'
-                            ? `${graph.summary.online_nodes}/${nodes.length} ${zh ? '节点在线' : 'nodes online'}`
-                            : entitySummary(entity, zh, node)}</small>
+                        <span>{isNode ? (zh ? '计算节点' : 'Compute node') : sensorKindLabel(entity, zh)}</span>
+                        <strong>{entity.label}</strong>
+                        <small>{isNode
+                            ? `${zh ? '心跳' : 'Heartbeat'} ${heartbeatLabel(node?.heartbeat_age_seconds, zh)}`
+                            : `${entity.device_model || (zh ? '型号未知' : 'Unknown model')} · ${entity.channels || 0} ${zh ? '通道' : 'channels'}`}</small>
                     </button>;
                     },
                 )}
 
+                {hoveredEntity && <aside
+                    className={`ComputeGraphHoverCard ${hoveredPoint && hoveredPoint.x > 50 ? 'align-left' : 'align-right'} ${hoveredPoint && hoveredPoint.y > 50 ? 'align-bottom' : 'align-top'}`}
+                    role='status'
+                    aria-label={`${hoveredEntity.label} ${zh ? '运维信息' : 'operations details'}`}
+                >
+                    {/* The node card derives transport and agent state from authoritative graph relations. */}
+                    {/* eslint-disable-next-line complexity */}
+                    {hoveredEntity.kind === 'compute_node' ? (() => {
+                        const node = hoveredEntity.node_id ? nodeIndex.get(hoveredEntity.node_id) : undefined;
+                        const agents = callableAgentsFor(hoveredEntity);
+                        const sshAvailable = dependencyFor(hoveredEntity, 'control_ssh');
+                        const publicAvailable = dependencyFor(hoveredEntity, 'public_http');
+                        const tailscaleAvailable = dependencyFor(hoveredEntity, 'tailscale');
+                        return <>
+                            <span>{zh ? '计算节点 · 运维信息' : 'Compute node · Operations'}</span>
+                            <strong>{hoveredEntity.label}</strong>
+                            <small className={node?.online ? 'online' : 'offline'}>{node?.online
+                                ? `${zh ? '在线 · 心跳' : 'Online · heartbeat'} ${heartbeatLabel(node.heartbeat_age_seconds, zh)}`
+                                : `${zh ? '离线 · 最后心跳' : 'Offline · last heartbeat'} ${heartbeatLabel(node?.heartbeat_age_seconds, zh)}`}</small>
+                            <div className='ComputeGraphHoverRoutes'>
+                                <div className={sshAvailable ? 'available' : 'unavailable'}>
+                                    <span>{zh ? 'SSH 通路' : 'SSH route'}</span><strong>{availabilityLabel(sshAvailable, zh)}</strong>
+                                    <small>{node?.network.self_name || node?.network.addresses.join(' · ') || (zh ? '地址待节点上报' : 'Address pending')}</small>
+                                </div>
+                                <div className={publicAvailable ? 'available' : 'unavailable'}>
+                                    <span>{zh ? '公网出口' : 'Public egress'}</span><strong>{availabilityLabel(publicAvailable, zh)}</strong>
+                                    <small>{zh ? '公开网络访问' : 'Public network access'}</small>
+                                </div>
+                                <div className={tailscaleAvailable ? 'available' : 'unavailable'}>
+                                    <span>{zh ? 'Tailscale 私有组网' : 'Tailscale private overlay'}</span><strong>{availabilityLabel(tailscaleAvailable, zh)}</strong>
+                                    <small>{node?.network.tailnet || (zh ? '私有链路' : 'Private route')}</small>
+                                </div>
+                            </div>
+                            <div className='ComputeGraphHoverAgents'>
+                                <span>{zh ? '可调用 agents' : 'Callable agents'}</span>
+                                {agents.length ? <div>{agents.map(agent => <em key={agent.entity_id}>{agentLabel(agent, zh)}</em>)}</div>
+                                    : <small>{zh ? '暂无可调用 agent' : 'No callable agent'}</small>}
+                            </div>
+                        </>;
+                    })() : <>
+                        <span>{sensorKindLabel(hoveredEntity, zh)} · {deviceStatusLabel(hoveredEntity.device_status, zh)}</span>
+                        <strong>{hoveredEntity.label}</strong>
+                        <small>{hoveredEntity.device_model || (zh ? '型号未知' : 'Unknown model')}</small>
+                        <div className='ComputeGraphSensorFacts'>
+                            <em>{hoveredEntity.channels || 0} {zh ? '个通道' : 'channels'}</em>
+                            <em>{zh ? '接入方式' : 'Provider'} · {hoveredEntity.provider || '—'}</em>
+                            <em>{zh ? '归属节点' : 'Owner'} · {ownerFor(hoveredEntity)?.label || (zh ? '未归属' : 'Unassigned')}</em>
+                        </div>
+                    </>}
+                </aside>}
             </div>
-            <aside className={`ComputeGraphInspector ${focusedEntity ? 'visible' : ''}`} aria-live='polite'>
-                {focusedEntity ? <>
-                    <span>{entityKindLabel(focusedEntity, zh)} · {focusedEntity.callable ? (zh ? '可调用' : 'Callable') : (zh ? '只读' : 'Read only')}</span>
-                    <strong>{entityLabel(focusedEntity, zh)}</strong>
-                    <small>{entitySummary(
-                        focusedEntity,
-                        zh,
-                        focusedEntity.node_id ? nodeIndex.get(focusedEntity.node_id) : undefined,
-                    )}</small>
-                    {focusedEntity.kind === 'compute_node' && (() => {
-                        const node = focusedEntity.node_id ? nodeIndex.get(focusedEntity.node_id) : undefined;
-                        return <div className='ComputeGraphInspectorFacts'>
-                            <em className={node?.online ? 'online' : 'offline'}>{node?.online
-                                ? (zh ? '在线并参与调度' : 'Online and schedulable')
-                                : (zh ? '离线，不参与调度' : 'Offline, excluded from scheduling')}</em>
-                            <em>{zh ? '最近心跳' : 'Last heartbeat'} · {heartbeatLabel(node?.heartbeat_age_seconds, zh)}</em>
-                            <em>{zh ? '网络状态' : 'Network'} · {networkStateLabel(node, zh)}</em>
-                        </div>;
-                    })()}
-                    <div>{focusedRelations.map(relation => <em key={relation.relation_id} className={relation.active ? 'active' : ''}>
-                        {relationLabel(relation, zh)} · {reasonLabel(relation.reason, zh)}
-                    </em>)}</div>
-                </> : <>
-                    <span>{zh ? '关系导航' : 'Relation navigation'}</span>
-                    <strong>{zh ? '点击任一节点' : 'Select any node'}</strong>
-                    <small>{zh ? '高亮上下游关系；点击图谱空白处取消聚焦。' : 'Highlight upstream and downstream relations; select empty canvas space to clear focus.'}</small>
-                </>}
-            </aside>
         </div>
     </section>;
 };

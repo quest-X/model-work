@@ -1,5 +1,5 @@
 import React from 'react';
-import {act, render, screen, waitFor} from '@testing-library/react';
+import {act, render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Language} from '../../../../data/LanguageConfig';
 import {ComputeClusterService} from '../../../../services/ComputeClusterService';
@@ -218,7 +218,7 @@ describe('ComputeClusterPopup', () => {
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByRole('navigation', {name: '计算群工作区'})).toBeInTheDocument();
-        expect(screen.getByRole('button', {name: '资源与关系 0'})).toHaveAttribute('aria-current', 'page');
+        expect(screen.getByRole('button', {name: '节点与传感器 0'})).toHaveAttribute('aria-current', 'page');
         await user.click(await screen.findByRole('button', {name: '节点详情 1'}));
         expect(screen.getByText('edge-01')).toBeInTheDocument();
         expect(screen.getByText('NVIDIA RTX 4090')).toBeInTheDocument();
@@ -277,7 +277,7 @@ describe('ComputeClusterPopup', () => {
         }
     });
 
-    it('renders the authoritative graph and clears focus from the canvas background', async () => {
+    it('shows only compute nodes and sensors while moving operations data into hover cards', async () => {
         const user = userEvent.setup();
         service.status.mockResolvedValue({
             state: 'ready', version: '0.1.0', protocol_version: 1,
@@ -343,112 +343,58 @@ describe('ComputeClusterPopup', () => {
 
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
-        expect(await screen.findByText('计算群资源 Graph')).toBeInTheDocument();
-        const resourceWorkspace = screen.getByRole('button', {name: '资源与关系 11'}).closest('.ComputeClusterPopup');
+        expect(await screen.findByText('计算群连接 Graph')).toBeInTheDocument();
+        const resourceWorkspace = screen.getByRole('button', {name: '节点与传感器 3'}).closest('.ComputeClusterPopup');
         const schedulerPanel = resourceWorkspace?.querySelector('.ComputeSchedulerPanel');
         const graphPanel = resourceWorkspace?.querySelector('.ComputeKnowledgePanel');
         expect(schedulerPanel?.nextElementSibling).toBe(graphPanel);
-        expect(screen.getByText('资源关系 · 可交互')).toBeInTheDocument();
-        expect(screen.getByText('cross-region-lab')).toBeInTheDocument();
-        expect(screen.getByText('resource-knowledge-graph.v2')).toBeInTheDocument();
+        expect(screen.getByText('运维拓扑 · 悬浮查看')).toBeInTheDocument();
+        expect(screen.getByText('网络、资源与 agents 已隐藏，悬浮节点查看')).toBeInTheDocument();
         expect(screen.getByTestId('resource-node-link-graph')).toBeInTheDocument();
-        expect(screen.getAllByTestId('resource-graph-node')).toHaveLength(11);
-        expect(screen.getAllByTestId('resource-graph-edge')).toHaveLength(10);
-        expect(screen.getAllByText('公开信息采集 agent').length).toBeGreaterThanOrEqual(1);
-        expect(screen.getAllByText('等待诊断 agent').length).toBeGreaterThanOrEqual(1);
-        expect(screen.getByText('2/2')).toBeInTheDocument();
-        expect(screen.getByText('圆形 · 计算域 / 节点')).toBeInTheDocument();
-        expect(screen.getByText('卡片 · 计算资源')).toBeInTheDocument();
-        expect(screen.getByText('六边形 · Agent')).toBeInTheDocument();
-        expect(screen.getByText('胶囊形 · 网络依赖')).toBeInTheDocument();
-        expect(screen.getByText('矩形 · 托管设备')).toBeInTheDocument();
-        expect(screen.getByText('绿色 · 在线 / 可用')).toBeInTheDocument();
-        expect(screen.getByText('红色 · 离线 / 不可用')).toBeInTheDocument();
+        expect(screen.getAllByTestId('resource-graph-node')).toHaveLength(3);
+        expect(screen.getAllByTestId('resource-graph-edge')).toHaveLength(1);
+        expect(screen.getByText('圆形 · 计算节点')).toBeInTheDocument();
+        expect(screen.getByText('圆角矩形 · 传感器')).toBeInTheDocument();
+        expect(screen.getByText('绿色 · 在线')).toBeInTheDocument();
+        expect(screen.getByText('红色 · 离线')).toBeInTheDocument();
+        expect(graphPanel?.querySelector('[data-entity-kind="compute_group"]')).not.toBeInTheDocument();
+        expect(graphPanel?.querySelector('[data-entity-kind="compute_resource"]')).not.toBeInTheDocument();
+        expect(graphPanel?.querySelector('[data-entity-kind="network_dependency"]')).not.toBeInTheDocument();
+        expect(graphPanel?.querySelector('[data-entity-kind="work_agent"]')).not.toBeInTheDocument();
         const graphStats = graphPanel?.querySelector('.ComputeKnowledgeStats');
         expect(graphStats?.querySelector('.online strong')).toHaveTextContent('1');
         expect(graphStats?.querySelector('.offline strong')).toHaveTextContent('1');
-        const offlineNode = screen.getByRole('button', {name: '查看 edge-offline'});
+        const offlineNode = screen.getByRole('button', {name: '查看 edge-offline 节点信息'});
         expect(offlineNode).toHaveClass('node-offline');
         expect(offlineNode).toHaveAttribute('data-entity-kind', 'compute_node');
         expect(offlineNode).toHaveAttribute('data-entity-shape', 'circle');
         expect(offlineNode).toHaveAttribute('data-entity-state', 'unavailable');
-        const camera = screen.getByRole('button', {name: '查看 IP CAMERA'});
+        const camera = screen.getByRole('button', {name: '查看 IP CAMERA 传感器信息'});
         expect(camera).toHaveAttribute('data-entity-kind', 'managed_device');
-        expect(camera).toHaveAttribute('data-entity-shape', 'rectangle');
-        const agent = screen.getByRole('button', {name: '选择 公开信息采集 agent'});
-        expect(agent).toHaveAttribute('data-entity-kind', 'work_agent');
-        expect(agent).toHaveAttribute('data-entity-shape', 'hexagon');
-        const network = screen.getByRole('button', {name: '查看 公网出口'});
-        expect(network).toHaveAttribute('data-entity-kind', 'network_dependency');
-        expect(network).toHaveAttribute('data-entity-shape', 'capsule');
-        const resource = screen.getByRole('button', {name: '查看 edge-01 compute'});
-        expect(resource).toHaveAttribute('data-entity-kind', 'compute_resource');
-        expect(resource).toHaveAttribute('data-entity-shape', 'card');
-        expect(screen.getByText('上次上报 · CPU 8 · RAM 12.0G · GPU 0')).toBeInTheDocument();
-        expect(screen.queryByRole('button', {name: '复位图谱'})).not.toBeInTheDocument();
+        expect(camera).toHaveAttribute('data-entity-shape', 'rounded-rectangle');
 
-        const node = screen.getByRole('button', {name: '查看 edge-01'});
-        const canvas = screen.getByRole('figure', {name: '计算群资源节点关系图'});
-        await user.click(offlineNode);
-        expect(screen.getByText('离线，不参与调度')).toBeInTheDocument();
-        expect(screen.getByText('最近心跳 · 20 小时前')).toBeInTheDocument();
-        expect(screen.getByText('网络状态 · 连接不可用')).toBeInTheDocument();
-        await user.click(node);
-        expect(node).toHaveAttribute('aria-pressed', 'true');
-        await user.click(canvas);
-        expect(node).toHaveAttribute('aria-pressed', 'false');
+        const onlineNode = screen.getByRole('button', {name: '查看 edge-01 节点信息'});
+        await user.hover(onlineNode);
+        const operationsCard = screen.getByRole('status', {name: 'edge-01 运维信息'});
+        expect(within(operationsCard).getByText('SSH 通路')).toBeInTheDocument();
+        expect(within(operationsCard).getByText('公网出口')).toBeInTheDocument();
+        expect(within(operationsCard).getByText('Tailscale 私有组网')).toBeInTheDocument();
+        expect(within(operationsCard).getByText('可调用 agents')).toBeInTheDocument();
+        expect(within(operationsCard).getByText('公开信息采集')).toBeInTheDocument();
+        expect(within(operationsCard).getByText('等待诊断')).toBeInTheDocument();
+
+        await user.unhover(onlineNode);
+        await user.hover(offlineNode);
+        const offlineCard = screen.getByRole('status', {name: 'edge-offline 运维信息'});
+        expect(within(offlineCard).getByText('离线 · 最后心跳 20 小时前')).toBeInTheDocument();
+
+        await user.unhover(offlineNode);
+        await user.hover(camera);
+        const sensorCard = screen.getByRole('status', {name: 'IP CAMERA 运维信息'});
+        expect(within(sensorCard).getByText('DS-2CD2686FWDA2-IZS')).toBeInTheDocument();
+        expect(within(sensorCard).getByText('2 个通道')).toBeInTheDocument();
+        expect(within(sensorCard).getByText('归属节点 · edge-01')).toBeInTheDocument();
         await waitFor(() => expect(service.resourceGraph).toHaveBeenCalledTimes(1));
-    });
-
-    it('uses a graph work-agent button to fill a directed task and recommended resources', async () => {
-        const user = userEvent.setup();
-        service.status.mockResolvedValue({
-            state: 'ready', version: '0.2.0', protocol_version: 1,
-            admin_configured: true,
-            task_control: {
-                enabled: true,
-                allowed_task_types: ['system.wait', 'information.web_fetch'],
-                resource_orchestration: true,
-                work_agent_execution: true,
-                resource_knowledge_graph: true,
-                graph_schema: 'resource-knowledge-graph.v2',
-                graph_interaction: true,
-                network_dependency_health: true,
-                managed_device_inventory: true,
-                placement_modes: ['automatic', 'manual'],
-            },
-            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
-        });
-        service.submitTask.mockResolvedValue({} as never);
-
-        render(<ComputeClusterPopup language={Language.CHINESE}/>);
-
-        const agentButton = await screen.findByRole('button', {name: '选择 公开信息采集 agent'});
-        expect(agentButton).toBeEnabled();
-        await user.click(agentButton);
-
-        expect(screen.getByRole('button', {name: '工作调度 0'})).toHaveAttribute('aria-current', 'page');
-        expect(screen.getByText('已从图谱带入')).toBeInTheDocument();
-        expect(screen.getByRole('combobox', {name: '工作类型'})).toHaveValue('information.web_fetch');
-        expect(screen.getByRole('combobox', {name: '节点选择'})).toHaveValue('node-12345678');
-        expect(screen.getByRole('spinbutton', {name: 'CPU 核心'})).toHaveValue(0.5);
-        expect(screen.getByRole('spinbutton', {name: '内存（GB）'})).toHaveValue(0.25);
-        expect(screen.getByRole('spinbutton', {name: '磁盘（GB）'})).toHaveValue(0.0625);
-
-        await user.click(screen.getByRole('button', {name: '定向下发'}));
-        await waitFor(() => expect(service.submitTask).toHaveBeenCalledWith(
-            expect.objectContaining({
-                node_id: 'node-12345678',
-                task_type: 'information.web_fetch',
-                resources: {
-                    cpu_cores: 0.5,
-                    memory_bytes: 256 * 1024 ** 2,
-                    disk_bytes: 64 * 1024 ** 2,
-                    gpu_count: 0,
-                    gpu_memory_mb: 0,
-                },
-            }),
-        ));
     });
 
     it('shows task dispatch, durable progress, and controls when enabled', async () => {

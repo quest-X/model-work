@@ -13,6 +13,8 @@ jest.mock('../../../../services/ComputeClusterService', () => ({
         status: jest.fn(), nodes: jest.fn(), tasks: jest.fn(), scheduler: jest.fn(),
         resourceGraph: jest.fn(), lanScanTargets: jest.fn(), lanAssets: jest.fn(),
         lanSchedules: jest.fn(), createLanSchedule: jest.fn(), controlLanSchedule: jest.fn(),
+        terminalTargets: jest.fn(), startTerminal: jest.fn(), terminal: jest.fn(),
+        terminalInput: jest.fn(), terminalControl: jest.fn(),
         submitTask: jest.fn(), controlTask: jest.fn(),
     },
 }));
@@ -192,6 +194,23 @@ describe('ComputeClusterPopup', () => {
                 last_run_at: null, last_task_id: null, last_error: null, run_count: 2,
             }],
         });
+        service.terminalTargets.mockResolvedValue({
+            version: 1, enabled: true,
+            targets: [{
+                node_id: 'node-12345678', node_name: 'edge-01', platform: 'linux',
+                online: true, available: true, active_session_id: null, reason: 'available',
+            }],
+        });
+        const terminalSession = {
+            version: 1 as const, session_id: 'terminal-session-1', node_id: 'node-12345678',
+            node_name: 'edge-01', state: 'running' as const, created_at: 1,
+            last_activity_at: 1, cursor: 0, output: '', output_truncated: false,
+            exit_code: null, error: null,
+        };
+        service.startTerminal.mockResolvedValue(terminalSession);
+        service.terminal.mockResolvedValue(terminalSession);
+        service.terminalInput.mockResolvedValue(terminalSession);
+        service.terminalControl.mockResolvedValue({...terminalSession, state: 'closed'});
     });
 
     it('shows node, aggregate resources, and the phase-six boundary', async () => {
@@ -208,7 +227,7 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('2 个通道')).toBeInTheDocument();
         expect(screen.getByText('已归属')).toBeInTheDocument();
         expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
-        expect(screen.getByText('统一查看资源关系、工作调度、网络资产与节点状态。')).toBeInTheDocument();
+        expect(screen.getByText('统一查看资源关系、工作调度、网络资产、节点状态与终端连接。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
         expect(screen.getAllByText('在线')).toHaveLength(2);
         expect(screen.queryByRole('button', {name: '刷新'})).not.toBeInTheDocument();
@@ -568,6 +587,36 @@ describe('ComputeClusterPopup', () => {
         }));
         await user.click(screen.getByRole('button', {name: '立即执行'}));
         await waitFor(() => expect(service.controlLanSchedule).toHaveBeenCalledWith('schedule-1', 'run-now'));
+    });
+
+    it('opens a private Client-owned SSH terminal and sends a command', async () => {
+        const user = userEvent.setup();
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.5.0', protocol_version: 1,
+            admin_configured: true,
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['system.wait'],
+                terminal_sessions: true,
+                phase8_terminal: true,
+            },
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        await screen.findByRole('navigation', {name: '计算群工作区'});
+        await user.click(await screen.findByRole('button', {name: '终端连接 1'}));
+        expect(await screen.findByText('节点终端连接')).toBeInTheDocument();
+        expect(screen.getByText(/网页不会读取节点地址/)).toBeInTheDocument();
+        await user.click(screen.getByRole('button', {name: '连接终端'}));
+        await waitFor(() => expect(service.startTerminal).toHaveBeenCalledWith('node-12345678'));
+        const input = screen.getByRole('textbox', {name: '终端指令'});
+        await user.type(input, 'uname -a');
+        await user.click(screen.getByRole('button', {name: '发送'}));
+        await waitFor(() => expect(service.terminalInput).toHaveBeenCalledWith(
+            'terminal-session-1', 'uname -a\n',
+        ));
     });
 
     it('shows enrollment guidance when the cluster is empty', async () => {

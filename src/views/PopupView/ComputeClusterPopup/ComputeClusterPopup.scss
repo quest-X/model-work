@@ -158,7 +158,7 @@
 
 .ComputeWorkspaceNav {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 1px;
   flex: 0 0 auto;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -499,6 +499,95 @@
   background: linear-gradient(145deg, rgba(83, 61, 27, .31), rgba(30, 31, 33, .94));
 }
 .ComputeLanSchedules { @extend .ComputeLanAssets; border-color: rgba(173, 128, 239, .28); background: linear-gradient(145deg, rgba(62, 43, 91, .31), rgba(30, 31, 33, .94)); }
+
+.ComputeTerminalPanel {
+  overflow: hidden;
+  border: 1px solid rgba(80, 205, 139, .28);
+  border-radius: 7px;
+  background: linear-gradient(145deg, rgba(24, 65, 46, .42), rgba(18, 21, 23, .98));
+  box-shadow: 0 18px 45px rgba(0, 0, 0, .22);
+}
+
+.ComputeTerminalHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, .07);
+  padding: 16px 18px 14px;
+  > div:first-child > span { color: #73d799; font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  h3 { margin: 4px 0 3px; font-size: 15px; }
+  p { margin: 0; color: rgba(255, 255, 255, .46); font-size: 9px; }
+}
+
+.ComputeTerminalState {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .05);
+  padding: 6px 9px;
+  color: rgba(255, 255, 255, .45);
+  font-size: 9px;
+  i { width: 7px; height: 7px; border-radius: 50%; background: #6c7174; }
+  &.running { color: #82db9e; i { background: #55c77b; box-shadow: 0 0 8px rgba(85, 199, 123, .65); } }
+  &.connecting { color: #7bd0ff; i { background: #51baf4; animation: compute-pulse 1s infinite; } }
+  &.failed { color: #e89893; i { background: #d66363; } }
+}
+
+.ComputeTerminalToolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  label { display: flex; min-width: 300px; flex: 1; flex-direction: column; gap: 5px; }
+  label > span { color: rgba(255, 255, 255, .4); font-size: 8px; }
+  select, button { height: 32px; border: 1px solid rgba(255, 255, 255, .14); border-radius: 4px; background: #15191a; padding: 0 10px; color: rgba(255, 255, 255, .82); font-size: 9px; }
+  button { border-color: rgba(85, 199, 123, .48); cursor: pointer; }
+  button.danger { border-color: rgba(214, 99, 99, .45); color: #eaa29e; }
+  button:disabled { opacity: .4; cursor: wait; }
+}
+
+.ComputeTerminalScreen {
+  box-sizing: border-box;
+  width: calc(100% - 36px);
+  height: clamp(280px, 48vh, 620px);
+  overflow: auto;
+  margin: 0 18px;
+  border: 1px solid rgba(112, 229, 162, .16);
+  border-radius: 5px 5px 0 0;
+  background: #090d0c;
+  padding: 16px;
+  color: #b7edca;
+  font: 11px/1.55 SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ComputeTerminalInput {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 9px;
+  margin: 0 18px;
+  border: 1px solid rgba(112, 229, 162, .16);
+  border-top: 0;
+  border-radius: 0 0 5px 5px;
+  background: #0d1210;
+  padding: 8px 10px;
+  > span { color: #55c77b; font: 12px SFMono-Regular, Consolas, monospace; }
+  input { min-width: 0; border: 0; outline: 0; background: transparent; color: #d9f5e3; font: 11px SFMono-Regular, Consolas, monospace; }
+  button { height: 28px; border: 1px solid rgba(85, 199, 123, .4); border-radius: 4px; background: rgba(35, 102, 64, .35); padding: 0 11px; color: #91e1ac; font-size: 9px; cursor: pointer; }
+  button:disabled, input:disabled { opacity: .4; cursor: not-allowed; }
+}
+
+.ComputeTerminalError { margin: 0 18px 10px; border-radius: 4px; background: rgba(214, 99, 99, .13); padding: 8px 10px; color: #eaa29e; font-size: 9px; }
+.ComputeTerminalBoundary { display: block; padding: 10px 18px 14px; color: rgba(255, 255, 255, .34); font-size: 8px; }
+
+@keyframes compute-pulse {
+  0%, 100% { opacity: .45; transform: scale(.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
 .ComputeLanScheduleCreate { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 520px; }
 .ComputeLanScheduleCreate select, .ComputeLanScheduleCreate button,
 .ComputeLanScheduleActions button { height: 29px; border: 1px solid rgba(255, 255, 255, .13); border-radius: 4px; background: #17181a; padding: 0 9px; color: rgba(255, 255, 255, .78); font-size: 9px; }

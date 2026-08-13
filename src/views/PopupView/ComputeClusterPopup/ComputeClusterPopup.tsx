@@ -21,13 +21,14 @@ import {
 import {AppState} from '../../../store';
 import './ComputeClusterPopup.scss';
 import {ResourceKnowledgeGraph} from './ResourceKnowledgeGraph';
+import {ComputeTerminalPanel} from './ComputeTerminalPanel';
 
 interface IProps {
     language: Language;
 }
 
 const AUTO_PLACEMENT = '__automatic__';
-type ComputeWorkspace = 'graph' | 'tasks' | 'network' | 'nodes';
+type ComputeWorkspace = 'graph' | 'tasks' | 'network' | 'nodes' | 'terminal';
 
 const bytes = (value: number | null, zh: boolean): string => {
     if (value === null || !Number.isFinite(value)) return zh ? '未知' : 'Unknown';
@@ -603,8 +604,8 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     <span className='ComputeClusterEyebrow'>OpenSight · model-work-node</span>
                     <h2>{zh ? '计算群' : 'Compute Cluster'}</h2>
                     <p>{zh
-                        ? '统一查看资源关系、工作调度、网络资产与节点状态。'
-                        : 'View resource relationships, work scheduling, network assets, and node status.'}</p>
+                        ? '统一查看资源关系、工作调度、网络资产、节点状态与终端连接。'
+                        : 'View resource relationships, work scheduling, network assets, node status, and terminal access.'}</p>
                 </div>
                 <div className='ComputeClusterHeaderActions'>
                     <span
@@ -646,6 +647,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     ['tasks', zh ? '工作调度' : 'Work scheduling', tasks.length],
                     ['network', zh ? '网络资产' : 'Network assets', lanAssets?.summary.total ?? 0],
                     ['nodes', zh ? '节点详情' : 'Node details', nodes.length],
+                    ['terminal', zh ? '终端连接' : 'Terminal', nodes.filter(node => node.online && node.network.ssh_available).length],
                 ] as Array<[ComputeWorkspace, string, number]>).map(([workspace, label, count]) => <button
                     type='button'
                     key={workspace}
@@ -889,6 +891,10 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         </article>)}
                     </div>}
                 </section>}
+                {!loading && activeWorkspace === 'terminal' && status?.task_control?.terminal_sessions && <ComputeTerminalPanel zh={zh}/>}
+                {!loading && activeWorkspace === 'terminal' && !status?.task_control?.terminal_sessions && <div className='ComputeTaskDisabled'>
+                    {zh ? 'Mac Client 尚未启用终端控制。' : 'Terminal control is not enabled on the Mac Client.'}
+                </div>}
                 {!loading && activeWorkspace === 'nodes' && nodes.length > 0 && <div className='ComputeNodeSectionTitle'>
                     <strong>{zh ? '节点资源' : 'Node resources'}</strong>
                     <span>{nodes.length}</span>

@@ -96,6 +96,8 @@ export type ComputeClusterStatus = {
         lan_discovery_schedules?: boolean;
         phase7_complete?: boolean;
         cross_region_recovery?: boolean;
+        terminal_sessions?: boolean;
+        phase8_terminal?: boolean;
         evidence_projection?: 'metadata-only-v1';
         placement_modes?: ('automatic' | 'manual')[];
     };
@@ -201,6 +203,37 @@ export type ComputeLanSchedulesResponse = {
     group_id: string;
     summary: {total: number; enabled: number; paused: number; failed: number};
     schedules: ComputeLanSchedule[];
+};
+
+export type ComputeTerminalTarget = {
+    node_id: string;
+    node_name: string;
+    platform: string;
+    online: boolean;
+    available: boolean;
+    active_session_id?: string | null;
+    reason: 'available' | 'node_offline' | 'ssh_unavailable';
+};
+
+export type ComputeTerminalTargetsResponse = {
+    version: 1;
+    enabled: boolean;
+    targets: ComputeTerminalTarget[];
+};
+
+export type ComputeTerminalSession = {
+    version: 1;
+    session_id: string;
+    node_id: string;
+    node_name: string;
+    state: 'connecting' | 'running' | 'closed' | 'failed';
+    created_at: number;
+    last_activity_at: number;
+    cursor: number;
+    output: string;
+    output_truncated: boolean;
+    exit_code?: number | null;
+    error?: string | null;
 };
 
 export type ComputeWebFetchResult = {
@@ -403,6 +436,44 @@ export class ComputeClusterService {
 
     public static lanSchedules(signal?: AbortSignal): Promise<ComputeLanSchedulesResponse> {
         return request('/lan-schedules', signal);
+    }
+
+    public static terminalTargets(signal?: AbortSignal): Promise<ComputeTerminalTargetsResponse> {
+        return request('/terminal-targets', signal);
+    }
+
+    public static startTerminal(nodeId: string, signal?: AbortSignal): Promise<ComputeTerminalSession> {
+        return request('/terminals', signal, {
+            method: 'POST', body: JSON.stringify({node_id: nodeId}),
+        });
+    }
+
+    public static terminal(
+        sessionId: string,
+        cursor = 0,
+        signal?: AbortSignal,
+    ): Promise<ComputeTerminalSession> {
+        return request(`/terminals/${encodeURIComponent(sessionId)}?cursor=${cursor}`, signal);
+    }
+
+    public static terminalInput(
+        sessionId: string,
+        input: string,
+        signal?: AbortSignal,
+    ): Promise<ComputeTerminalSession> {
+        return request(`/terminals/${encodeURIComponent(sessionId)}/input`, signal, {
+            method: 'POST', body: JSON.stringify({input}),
+        });
+    }
+
+    public static terminalControl(
+        sessionId: string,
+        action: 'interrupt' | 'close',
+        signal?: AbortSignal,
+    ): Promise<ComputeTerminalSession> {
+        return request(`/terminals/${encodeURIComponent(sessionId)}/${action}`, signal, {
+            method: 'POST', body: '{}',
+        });
     }
 
     public static createLanSchedule(

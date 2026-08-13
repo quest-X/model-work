@@ -87,7 +87,7 @@ export type ComputeClusterStatus = {
         resource_orchestration?: boolean;
         work_agent_execution?: boolean;
         resource_knowledge_graph?: boolean;
-        graph_schema?: 'resource-knowledge-graph.v2';
+        graph_schema?: 'resource-knowledge-graph.v2' | 'resource-knowledge-graph.v3';
         graph_interaction?: boolean;
         network_dependency_health?: boolean;
         managed_device_inventory?: boolean;
@@ -326,7 +326,7 @@ export type ComputeSchedulerResponse = {
 
 export type ComputeResourceGraphEntity = {
     entity_id: string;
-    kind: 'compute_group' | 'compute_node' | 'compute_resource' | 'work_agent' | 'managed_device' | 'network_dependency';
+    kind: 'compute_group' | 'compute_region' | 'compute_node' | 'compute_resource' | 'work_agent' | 'managed_device' | 'network_dependency';
     label: string;
     state: 'available' | 'degraded' | 'unavailable';
     callable: boolean;
@@ -354,6 +354,11 @@ export type ComputeResourceGraphEntity = {
     required_for?: ComputeTaskType[];
     required_network_dependencies?: string[];
     recommended_resources?: ComputeResourceRequest | null;
+    region_id?: string | null;
+    region_name?: string | null;
+    region_source?: 'region_label' | 'site_label' | 'unassigned' | null;
+    member_count?: number | null;
+    online_member_count?: number | null;
 };
 
 export type ComputeResourceGraphRelation = {
@@ -366,13 +371,14 @@ export type ComputeResourceGraphRelation = {
 };
 
 export type ComputeResourceGraph = {
-    schema_version: 'resource-knowledge-graph.v2';
+    schema_version: 'resource-knowledge-graph.v2' | 'resource-knowledge-graph.v3';
     group_id: string;
     generated_at: number;
     summary: {
         entities: number;
         relations: number;
         online_nodes: number;
+        regions?: number;
         compute_resources: number;
         managed_devices: number;
         network_dependencies: number;

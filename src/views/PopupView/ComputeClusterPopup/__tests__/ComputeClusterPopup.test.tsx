@@ -238,7 +238,9 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
         expect(screen.getByText('统一查看资源关系、工作调度、网络资产、节点状态与终端连接。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
-        expect(screen.getAllByText('在线')).toHaveLength(2);
+        const availability = screen.getByText('在线可用节点 / 总节点').closest('div');
+        expect(availability).not.toBeNull();
+        expect(within(availability as HTMLElement).getByText('1 / 1')).toHaveClass('online');
         expect(screen.queryByRole('button', {name: '刷新'})).not.toBeInTheDocument();
         expect(screen.getByRole('status', {name: '自动刷新正常 · v0.1.0'})).toBeInTheDocument();
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
@@ -448,6 +450,7 @@ describe('ComputeClusterPopup', () => {
 
         rerender(<ComputeClusterPopup language={Language.ENGLISH}/>);
 
+        expect(screen.getByText('Online / Total nodes')).toBeInTheDocument();
         expect(await screen.findByText('shanghai')).toBeInTheDocument();
         expect(screen.queryByText('上海')).not.toBeInTheDocument();
     });

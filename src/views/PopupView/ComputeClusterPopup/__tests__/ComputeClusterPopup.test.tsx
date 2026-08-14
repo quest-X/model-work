@@ -424,6 +424,34 @@ describe('ComputeClusterPopup', () => {
         await waitFor(() => expect(service.resourceGraph).toHaveBeenCalledTimes(1));
     });
 
+    it('shows Chinese region names in Chinese and pinyin region IDs in English', async () => {
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.1.0', protocol_version: 1,
+            admin_configured: true,
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['system.wait', 'information.web_fetch'],
+                resource_orchestration: true,
+                work_agent_execution: true,
+                resource_knowledge_graph: true,
+                graph_schema: 'resource-knowledge-graph.v3',
+                graph_interaction: true,
+                network_dependency_health: true,
+                managed_device_inventory: true,
+                placement_modes: ['automatic', 'manual'],
+            },
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+        const {rerender} = render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        expect(await screen.findByText('上海')).toBeInTheDocument();
+
+        rerender(<ComputeClusterPopup language={Language.ENGLISH}/>);
+
+        expect(await screen.findByText('shanghai')).toBeInTheDocument();
+        expect(screen.queryByText('上海')).not.toBeInTheDocument();
+    });
+
     it('shows task dispatch, durable progress, and controls when enabled', async () => {
         const user = userEvent.setup();
         service.status.mockResolvedValue({

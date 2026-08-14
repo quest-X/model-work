@@ -88,6 +88,7 @@ const displayCodes = (entities: ComputeResourceGraphEntity[]): Map<string, strin
 const operationsTopology = (
     entities: ComputeResourceGraphEntity[],
     relations: ComputeResourceGraph['relations'],
+    zh: boolean,
 ): OperationsTopology => {
     const points = new Map<string, GraphPoint>();
     const nodes = entities.filter(entity => entity.kind === 'compute_node');
@@ -96,7 +97,9 @@ const operationsTopology = (
     const regionRecords = new Map<string, Omit<GraphRegion, 'left' | 'width'>>();
     regionEntities.forEach(region => regionRecords.set(region.entity_id, {
         entityId: region.entity_id,
-        label: region.region_name || region.label,
+        label: zh
+            ? (region.region_name || region.region_id || region.label)
+            : (region.region_id || region.region_name || region.label),
         state: region.state,
         memberCount: region.member_count || 0,
         onlineMemberCount: region.online_member_count || 0,
@@ -111,7 +114,9 @@ const operationsTopology = (
         if (!regionRecords.has(regionId)) {
             regionRecords.set(regionId, {
                 entityId: regionId,
-                label: node.region_name || node.region_id || '未分配地域',
+                label: zh
+                    ? (node.region_name || node.region_id || '未分配地域')
+                    : (node.region_id || node.region_name || 'unassigned'),
                 state: node.state,
                 memberCount: 0,
                 onlineMemberCount: 0,
@@ -234,8 +239,8 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
         [graph.relations, visibleEntityIds],
     );
     const topology = useMemo(
-        () => operationsTopology(graph.entities, graph.relations),
-        [graph.entities, graph.relations],
+        () => operationsTopology(graph.entities, graph.relations, zh),
+        [graph.entities, graph.relations, zh],
     );
     const points = topology.points;
     const codes = useMemo(() => displayCodes(graph.entities), [graph.entities]);

@@ -633,8 +633,10 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
             </header>
 
             <div className='ComputeClusterSummary'>
-                <div><span>{zh ? '节点' : 'Nodes'}</span><strong>{totals.total}</strong></div>
-                <div><span>{zh ? '在线' : 'Online'}</span><strong className='online'>{totals.online}</strong></div>
+                <div>
+                    <span>{zh ? '在线可用节点 / 总节点' : 'Online / Total nodes'}</span>
+                    <strong className='online'>{totals.online} / {totals.total}</strong>
+                </div>
                 <div><span>{zh ? '逻辑 CPU' : 'Logical CPUs'}</span><strong>{totals.cpu}</strong></div>
                 <div><span>GPU</span><strong>{totals.gpus}</strong></div>
                 <div><span>{zh ? '设备' : 'Devices'}</span><strong>{totals.devices}</strong></div>

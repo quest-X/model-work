@@ -298,14 +298,9 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
         </div>
 
         <div className='ComputeKnowledgeLegend'>
-            <span><i className='entity-shape region'/>{zh ? '区域 · 地域' : 'Area · Region'}</span>
-            <span><i className='entity-shape circle'/>{zh ? '圆形 · 计算节点' : 'Circle · Compute node'}</span>
-            <span><i className='entity-shape rounded-rectangle sensor'/>{zh ? '蓝色 · 传感器' : 'Blue · Sensor'}</span>
-            <span><i className='entity-shape rounded-rectangle actuator'/>{zh ? '黄色 · 执行器（预留）' : 'Yellow · Actuator (reserved)'}</span>
-            <span><i className='node-state online'/>{zh ? '绿色 · 在线' : 'Green · Online'}</span>
-            <span><i className='node-state offline'/>{zh ? '红色 · 离线' : 'Red · Offline'}</span>
-            <span><i className='relation sensor-link'/>{zh ? '节点管理传感器' : 'Node manages sensor'}</span>
-            <small>{zh ? '网络、资源与 agents 已隐藏，悬浮节点查看' : 'Networks, resources, and agents are hidden; hover a node to inspect'}</small>
+            <span><i className='entity-shape region'/>{zh ? '地域' : 'Region'}</span>
+            <span><i className='entity-shape circle'/>{zh ? '计算节点' : 'Compute node'}</span>
+            <span><i className='entity-shape rounded-rectangle sensor'/>{zh ? '传感器' : 'Sensor'}</span>
         </div>
 
         <div className='ComputeGraphViewport'>

@@ -246,6 +246,45 @@ describe('ComputeClusterPopup', () => {
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
     });
 
+    it('sorts node resources by region, availability, and node name', async () => {
+        const user = userEvent.setup();
+        const [baseNode] = await service.nodes();
+        service.nodes.mockResolvedValue([
+            {...baseNode, node_id: 'shanghai-offline', name: 'shanghai-z', online: false},
+            {...baseNode, node_id: 'shanghai-online', name: 'shanghai-a', online: true},
+            {...baseNode, node_id: 'shandong-online', name: 'shandong-a', online: true},
+        ]);
+        const graph = await service.resourceGraph();
+        service.resourceGraph.mockResolvedValue({
+            ...graph,
+            entities: [
+                ...graph.entities,
+                {
+                    entity_id: 'node:shanghai-offline', kind: 'compute_node', label: 'shanghai-z',
+                    state: 'unavailable', callable: false, node_id: 'shanghai-offline', modes: [],
+                    region_id: 'shanghai', region_name: '上海', region_source: 'region_label',
+                },
+                {
+                    entity_id: 'node:shanghai-online', kind: 'compute_node', label: 'shanghai-a',
+                    state: 'available', callable: true, node_id: 'shanghai-online', modes: [],
+                    region_id: 'shanghai', region_name: '上海', region_source: 'region_label',
+                },
+                {
+                    entity_id: 'node:shandong-online', kind: 'compute_node', label: 'shandong-a',
+                    state: 'available', callable: true, node_id: 'shandong-online', modes: [],
+                    region_id: 'shandong', region_name: '山东', region_source: 'region_label',
+                },
+            ],
+        });
+
+        const {container} = render(<ComputeClusterPopup language={Language.CHINESE}/>);
+        await user.click(await screen.findByRole('button', {name: '节点详情 3'}));
+
+        const nodeNames = Array.from(container.querySelectorAll('.ComputeNodeCard h3'))
+            .map(element => element.textContent);
+        expect(nodeNames).toEqual(['shandong-a', 'shanghai-a', 'shanghai-z']);
+    });
+
     it('maximizes and restores the compute cluster workspace', async () => {
         const user = userEvent.setup();
         render(<ComputeClusterPopup language={Language.CHINESE}/>);

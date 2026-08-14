@@ -558,6 +558,24 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         activeTasks: tasks.filter(task => task.state === 'queued' || task.state === 'running').length,
     }), [nodes, status, tasks]);
 
+    const sortedNodes = useMemo(() => {
+        const regionByNode = new Map(
+            (resourceGraph?.entities || [])
+                .filter(entity => entity.kind === 'compute_node' && entity.node_id)
+                .map(entity => [entity.node_id as string, entity.region_id || entity.region_name || 'unassigned'])
+        );
+        const collator = new Intl.Collator('en', {numeric: true, sensitivity: 'base'});
+        return [...nodes].sort((left, right) => {
+            const regionOrder = collator.compare(
+                regionByNode.get(left.node_id) || 'unassigned',
+                regionByNode.get(right.node_id) || 'unassigned',
+            );
+            if (regionOrder !== 0) return regionOrder;
+            if (left.online !== right.online) return left.online ? -1 : 1;
+            return collator.compare(left.name, right.name);
+        });
+    }, [nodes, resourceGraph]);
+
     const taskControlEnabled = status?.task_control?.enabled === true;
     const orchestrationEnabled = taskControlEnabled
         && status?.task_control?.resource_orchestration === true;
@@ -905,7 +923,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     <strong>{zh ? '节点资源' : 'Node resources'}</strong>
                     <span>{nodes.length}</span>
                 </div>}
-                {!loading && activeWorkspace === 'nodes' && nodes.map(node => <NodeCard key={node.node_id} node={node} zh={zh}/>)}
+                {!loading && activeWorkspace === 'nodes' && sortedNodes.map(node => <NodeCard key={node.node_id} node={node} zh={zh}/>)}
             </div>
         </section>
     </div>;

@@ -23,7 +23,8 @@ interface GraphPoint {
 
 interface GraphRegion {
     entityId: string;
-    label: string;
+    regionId: string;
+    regionName: string;
     state: ComputeResourceGraphEntity['state'];
     memberCount: number;
     onlineMemberCount: number;
@@ -88,7 +89,6 @@ const displayCodes = (entities: ComputeResourceGraphEntity[]): Map<string, strin
 const operationsTopology = (
     entities: ComputeResourceGraphEntity[],
     relations: ComputeResourceGraph['relations'],
-    zh: boolean,
 ): OperationsTopology => {
     const points = new Map<string, GraphPoint>();
     const nodes = entities.filter(entity => entity.kind === 'compute_node');
@@ -97,9 +97,8 @@ const operationsTopology = (
     const regionRecords = new Map<string, Omit<GraphRegion, 'left' | 'width'>>();
     regionEntities.forEach(region => regionRecords.set(region.entity_id, {
         entityId: region.entity_id,
-        label: zh
-            ? (region.region_name || region.region_id || region.label)
-            : (region.region_id || region.region_name || region.label),
+        regionId: region.region_id || region.region_name || region.label,
+        regionName: region.region_name || region.region_id || region.label,
         state: region.state,
         memberCount: region.member_count || 0,
         onlineMemberCount: region.online_member_count || 0,
@@ -114,9 +113,8 @@ const operationsTopology = (
         if (!regionRecords.has(regionId)) {
             regionRecords.set(regionId, {
                 entityId: regionId,
-                label: zh
-                    ? (node.region_name || node.region_id || '未分配地域')
-                    : (node.region_id || node.region_name || 'unassigned'),
+                regionId: node.region_id || node.region_name || 'unassigned',
+                regionName: node.region_name || node.region_id || '未分配地域',
                 state: node.state,
                 memberCount: 0,
                 onlineMemberCount: 0,
@@ -133,7 +131,7 @@ const operationsTopology = (
     });
     const orderedRegions = [...regionRecords.values()]
         .filter(region => region.nodeIds.length > 0)
-        .sort((left, right) => left.label.localeCompare(right.label) || left.entityId.localeCompare(right.entityId));
+        .sort((left, right) => left.regionId.localeCompare(right.regionId) || left.entityId.localeCompare(right.entityId));
     const gap = 2;
     const regionWidth = orderedRegions.length
         ? (96 - gap * Math.max(0, orderedRegions.length - 1)) / orderedRegions.length
@@ -239,8 +237,8 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
         [graph.relations, visibleEntityIds],
     );
     const topology = useMemo(
-        () => operationsTopology(graph.entities, graph.relations, zh),
-        [graph.entities, graph.relations, zh],
+        () => operationsTopology(graph.entities, graph.relations),
+        [graph.entities, graph.relations],
     );
     const points = topology.points;
     const codes = useMemo(() => displayCodes(graph.entities), [graph.entities]);
@@ -324,7 +322,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                     data-testid='resource-graph-region'
                 >
                     <span>{zh ? '地域' : 'Region'}</span>
-                    <strong>{region.label}</strong>
+                    <strong>{zh ? region.regionName : region.regionId}</strong>
                     <small>{region.onlineMemberCount}/{region.memberCount} {zh ? '节点在线' : 'nodes online'}</small>
                 </div>)}
                 <svg className='ComputeGraphEdges' viewBox='0 0 1000 440' preserveAspectRatio='none' data-testid='resource-node-link-graph' aria-hidden='true'>

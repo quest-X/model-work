@@ -139,6 +139,11 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
         props.updateActivePopupTypeAction(PopupWindowType.L2G_RETRIEVAL);
     };
 
+    const openModelInspector = () => {
+        setActiveServicesDropdown(null);
+        props.updateActivePopupTypeAction(PopupWindowType.MODEL_INSPECTOR);
+    };
+
     const openCameraConnect = () => {
         setActiveServicesDropdown(null);
         props.updateActivePopupTypeAction(PopupWindowType.CAMERA_CONNECT);
@@ -321,6 +326,12 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                                         <div className='Marker'/>
                                         <img src='ico/ai.png' alt='l2g-retrieval'/>
                                         {currentTexts.modelManagement.l2gRetrieval}
+                                    </div>
+                                    <div className='DropDownMenuContentOption active'
+                                        onClick={openModelInspector}>
+                                        <div className='Marker'/>
+                                        <img src='ico/eye.png' alt='model-inspector'/>
+                                        {currentTexts.modelManagement.modelInspector}
                                     </div>
                                     {cameraConnectAvailable && <div className='DropDownMenuContentOption active'
                                         onClick={openCameraConnect}>

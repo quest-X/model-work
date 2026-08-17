@@ -343,6 +343,7 @@ export interface LanguageTexts {
         taskCenter: string;
         vectorDb: string;
         l2gRetrieval: string;
+        modelInspector: string;
         cameraConnect: string;
         computeCluster: string;
         manage: string;
@@ -860,6 +861,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
             taskCenter: '任务中心',
             vectorDb: '向量数据库',
             l2gRetrieval: '视觉检索',
+            modelInspector: '透视',
             cameraConnect: '连接相机',
             computeCluster: '计算群',
             manage: '管理',
@@ -1352,6 +1354,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
             taskCenter: 'Task Center',
             vectorDb: 'Vector Database',
             l2gRetrieval: 'Visual Retrieval',
+            modelInspector: 'Inspect',
             cameraConnect: 'Connect Camera',
             computeCluster: 'Compute Cluster',
             manage: 'Manage',

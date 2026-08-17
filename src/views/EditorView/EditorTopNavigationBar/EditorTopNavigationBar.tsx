@@ -43,8 +43,6 @@ import { submitNewNotification, deleteNotificationById } from '../../../store/no
 import { getTimelineRange, FrameRange } from '../VideoTimeline/VideoTimeline';
 import { NotificationUtil } from '../../../utils/NotificationUtil';
 import { inferModelTaskFromName } from '../../../utils/ModelTaskUtil';
-import {ModelInspectorTrigger} from './ModelInspectorTrigger';
-import {VisualSearchTrigger} from './VisualSearchTrigger';
 import {CanvasMultiViewTrigger} from '../MultiView/CanvasMultiViewTrigger';
 import {runDirectVisualSearch} from '../../../services/DirectVisualSearchService';
 const BUTTON_SIZE: ISize = { width: 30, height: 30 };
@@ -200,7 +198,6 @@ interface IProps {
     imagesData: ImageData[];
     hasDetectionModel: boolean;
     hasExtensionEngine: boolean;
-    modelInspectorBackendKey: string;
     updateActiveLabelType: (activeLabelType: LabelType) => any;
     updateActiveLabelViewType: (activeLabelViewType: LabelType) => any;
 }
@@ -235,7 +232,6 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
         imagesData,
         hasDetectionModel,
         hasExtensionEngine,
-        modelInspectorBackendKey,
         updateActiveLabelType,
         updateActiveLabelViewType,
     }) => {
@@ -1257,27 +1253,6 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
             }, [imagesData, activeImageIndex, isSAMLoaded, smartAnnotationActive, samNegativeMode, smartAnnotationOnClick, smartAnnotationOnDoubleClick, isTrackingModelLoaded, trackingOnClick, trackingMode, trackingInProgress, currentTexts, eraserMode, eraserFineMode, eraserOnClick, language])}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', gap: 6, height: '100%' }}>
-                <VisualSearchTrigger
-                    disabled={imagesData.length === 0}
-                    hasExtensionEngine={hasExtensionEngine}
-                    language={language}
-                    onOpen={() => {
-                        void (async () => {
-                            if (!await launchConfiguredSimilaritySearch()) {
-                                setShowInferenceMenu(true);
-                                openSimilarityConfig();
-                            }
-                        })();
-                    }}
-                />
-                <ModelInspectorTrigger
-                    key={modelInspectorBackendKey}
-                    backendKey={modelInspectorBackendKey}
-                    disabled={imagesData.length === 0}
-                    hasExtensionEngine={hasExtensionEngine}
-                    language={language}
-                    onOpen={() => updateActivePopupTypeAction(PopupWindowType.MODEL_INSPECTOR)}
-                />
                 <div ref={inferenceMenuRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                     <button
                         disabled={isFullImageInferenceInProgress}
@@ -1745,12 +1720,6 @@ const mapStateToProps = (state: AppState) => ({
     imagesData: state.labels.imagesData,
     hasDetectionModel: AIModelsSelector.hasModelsOfType(state, 'core') || DetectionAPIDetector.isEnabled(),
     hasExtensionEngine: AIModelsSelector.hasModelsOfType(state, 'extension'),
-    modelInspectorBackendKey: [
-        state.aimodels.activeModelId || '',
-        ...state.aimodels.models
-            .filter(model => model.modelType === 'core' || model.modelType === 'extension')
-            .map(model => `${model.id}:${model.url}:${model.isActive}`),
-    ].join('|'),
 });
 
 export default connect(

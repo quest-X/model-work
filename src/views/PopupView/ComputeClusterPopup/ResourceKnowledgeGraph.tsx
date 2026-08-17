@@ -283,7 +283,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     return <section className='ComputeKnowledgePanel' aria-label={zh ? '节点与传感器拓扑' : 'Node and sensor topology'}>
         <div className='ComputeKnowledgeHeading'>
             <div>
-                <span>{zh ? '地域拓扑 · 悬浮查看 / 单击固定' : 'Regional topology · Hover / click to pin'}</span>
+                <span>{zh ? '地域拓扑 · 悬浮查看 / 双击固定' : 'Regional topology · Hover / double-click to pin'}</span>
                 <h3>{zh ? '计算群地域 Graph' : 'Compute cluster regional graph'}</h3>
                 <p>{zh
                     ? '计算群按地域归组计算节点，节点再连接传感器；SSH、公网、Tailscale 和 agents 收进节点就近信息卡。'
@@ -311,6 +311,10 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                 style={{minWidth: `${Math.max(720, topology.regions.length * 390)}px`}}
                 role='figure'
                 aria-label={zh ? '计算群节点与传感器关系图' : 'Compute cluster node and sensor graph'}
+                onClick={event => {
+                    const target = event.target as Element;
+                    if (!target.closest('[data-testid="resource-graph-node"]')) setPinnedEntityId(null);
+                }}
             >
                 {topology.regions.map(region => <div
                     key={region.entityId}
@@ -363,12 +367,9 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                         onMouseLeave={() => setHoveredEntityId(current => current === entity.entity_id ? null : current)}
                         onFocus={() => setHoveredEntityId(entity.entity_id)}
                         onBlur={() => setHoveredEntityId(current => current === entity.entity_id ? null : current)}
-                        onClick={() => {
-                            if (isNode) setPinnedEntityId(entity.entity_id);
-                        }}
                         onDoubleClick={() => {
                             if (!isNode) return;
-                            setPinnedEntityId(current => current === entity.entity_id ? null : current);
+                            setPinnedEntityId(current => current === entity.entity_id ? null : entity.entity_id);
                             setHoveredEntityId(current => current === entity.entity_id ? null : current);
                         }}
                         aria-pressed={isNode ? isPinned : undefined}
@@ -411,8 +412,8 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                         const tailscaleAvailable = dependencyFor(inspectedEntity, 'tailscale');
                         return <>
                             <span>{zh
-                                ? `计算节点 ${codes.get(inspectedEntity.entity_id)} · 运维信息${pinnedEntityId === inspectedEntity.entity_id ? ' · 已固定（双击节点取消）' : ''}`
-                                : `Compute node ${codes.get(inspectedEntity.entity_id)} · Operations${pinnedEntityId === inspectedEntity.entity_id ? ' · Pinned (double-click node to unpin)' : ''}`}</span>
+                                ? `计算节点 ${codes.get(inspectedEntity.entity_id)} · 运维信息${pinnedEntityId === inspectedEntity.entity_id ? ' · 已固定（双击节点或点击空白取消）' : ''}`
+                                : `Compute node ${codes.get(inspectedEntity.entity_id)} · Operations${pinnedEntityId === inspectedEntity.entity_id ? ' · Pinned (double-click node or click blank space to unpin)' : ''}`}</span>
                             <strong>{inspectedEntity.label}</strong>
                             <small className={node?.online ? 'online' : 'offline'}>{node?.online
                                 ? `${zh ? '在线 · 心跳' : 'Online · heartbeat'} ${heartbeatLabel(node.heartbeat_age_seconds, zh)}`

@@ -537,6 +537,9 @@
       > i { border-color: rgba(244, 194, 83, 0.62); background: #443318; color: #f6ce72; }
     }
   }
+  &.compute_node.pinned {
+    box-shadow: 0 0 0 4px rgba(91, 195, 255, 0.18), 0 0 28px rgba(91, 195, 255, 0.3);
+  }
 }
 
 .ComputeGraphHoverCard {
@@ -554,6 +557,7 @@
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42), 0 0 24px rgba(133, 77, 199, 0.12);
   pointer-events: none;
   backdrop-filter: blur(12px);
+  &.pinned { border-color: rgba(91, 195, 255, 0.72); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42), 0 0 26px rgba(91, 195, 255, 0.18); }
   &.align-left { left: 14px; }
   &.align-right { right: 14px; }
   &.align-top { top: 14px; }

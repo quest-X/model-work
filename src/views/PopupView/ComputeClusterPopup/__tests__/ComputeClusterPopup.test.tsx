@@ -407,7 +407,7 @@ describe('ComputeClusterPopup', () => {
         const schedulerPanel = resourceWorkspace?.querySelector('.ComputeSchedulerPanel');
         const graphPanel = resourceWorkspace?.querySelector('.ComputeKnowledgePanel');
         expect(schedulerPanel?.nextElementSibling).toBe(graphPanel);
-        expect(screen.getByText('地域拓扑 · 悬浮查看')).toBeInTheDocument();
+        expect(screen.getByText('地域拓扑 · 悬浮查看 / 单击固定')).toBeInTheDocument();
         expect(screen.getByTestId('resource-node-link-graph')).toBeInTheDocument();
         expect(screen.getAllByTestId('resource-graph-node')).toHaveLength(3);
         expect(screen.getAllByTestId('resource-graph-edge')).toHaveLength(1);
@@ -452,7 +452,18 @@ describe('ComputeClusterPopup', () => {
         expect(within(operationsCard).getByText(/A-\d{3} · 公开信息采集/)).toBeInTheDocument();
         expect(within(operationsCard).getByText(/A-\d{3} · 等待诊断/)).toBeInTheDocument();
 
+        await user.click(onlineNode);
+        expect(onlineNode).toHaveAttribute('aria-pressed', 'true');
+        expect(onlineNode).toHaveClass('pinned');
+        expect(operationsCard).toHaveClass('pinned');
+        expect(within(operationsCard).getByText(/已固定（双击节点取消）/)).toBeInTheDocument();
         await user.unhover(onlineNode);
+        expect(screen.getByRole('status', {name: 'edge-01 运维信息'})).toBeInTheDocument();
+        await user.dblClick(onlineNode);
+        expect(onlineNode).toHaveAttribute('aria-pressed', 'false');
+        expect(onlineNode).not.toHaveClass('pinned');
+        expect(screen.queryByRole('status', {name: 'edge-01 运维信息'})).not.toBeInTheDocument();
+
         await user.hover(offlineNode);
         const offlineCard = screen.getByRole('status', {name: 'edge-offline 运维信息'});
         expect(within(offlineCard).getByText('离线 · 最后心跳 20 小时前')).toBeInTheDocument();

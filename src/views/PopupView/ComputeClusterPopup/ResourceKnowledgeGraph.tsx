@@ -212,6 +212,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     zh,
 }) => {
     const [hoveredEntityId, setHoveredEntityId] = useState<string | null>(null);
+    const [pinnedEntityId, setPinnedEntityId] = useState<string | null>(null);
     const index = useMemo(
         () => new Map(graph.entities.map(entity => [entity.entity_id, entity])),
         [graph.entities],
@@ -249,8 +250,9 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
         const node = entity.node_id ? nodeIndex.get(entity.node_id) : undefined;
         return node?.online && node.network.ssh_available;
     }).length;
-    const hoveredEntity = hoveredEntityId ? index.get(hoveredEntityId) : undefined;
-    const hoveredPoint = hoveredEntityId ? points.get(hoveredEntityId) : undefined;
+    const inspectedEntityId = pinnedEntityId || hoveredEntityId;
+    const inspectedEntity = inspectedEntityId ? index.get(inspectedEntityId) : undefined;
+    const inspectedPoint = inspectedEntityId ? points.get(inspectedEntityId) : undefined;
 
     const dependencyFor = (nodeEntity: ComputeResourceGraphEntity, dependencyId: string): boolean => {
         const relation = graph.relations.find(item =>
@@ -281,7 +283,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     return <section className='ComputeKnowledgePanel' aria-label={zh ? '节点与传感器拓扑' : 'Node and sensor topology'}>
         <div className='ComputeKnowledgeHeading'>
             <div>
-                <span>{zh ? '地域拓扑 · 悬浮查看' : 'Regional topology · Hover to inspect'}</span>
+                <span>{zh ? '地域拓扑 · 悬浮查看 / 单击固定' : 'Regional topology · Hover / click to pin'}</span>
                 <h3>{zh ? '计算群地域 Graph' : 'Compute cluster regional graph'}</h3>
                 <p>{zh
                     ? '计算群按地域归组计算节点，节点再连接传感器；SSH、公网、Tailscale 和 agents 收进节点就近信息卡。'
@@ -349,17 +351,27 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                     const isNode = entity.kind === 'compute_node';
                     const classification = entity.kind === 'managed_device' ? deviceClass(entity) : '';
                     const isHovered = hoveredEntityId === entity.entity_id;
+                    const isPinned = pinnedEntityId === entity.entity_id;
                     return <button
                         type='button'
                         key={entity.entity_id}
                         className={`ComputeGraphNode ${entity.kind} ${classification} state-${entity.state} ${isNode
                             ? (entity.state === 'available' ? 'node-online' : 'node-offline')
-                            : 'sensor-node'} ${isHovered ? 'focused' : ''}`}
+                            : 'sensor-node'} ${isHovered || isPinned ? 'focused' : ''} ${isPinned ? 'pinned' : ''}`}
                         style={{left: `${point.x}%`, top: `${point.y}%`}}
                         onMouseEnter={() => setHoveredEntityId(entity.entity_id)}
                         onMouseLeave={() => setHoveredEntityId(current => current === entity.entity_id ? null : current)}
                         onFocus={() => setHoveredEntityId(entity.entity_id)}
                         onBlur={() => setHoveredEntityId(current => current === entity.entity_id ? null : current)}
+                        onClick={() => {
+                            if (isNode) setPinnedEntityId(entity.entity_id);
+                        }}
+                        onDoubleClick={() => {
+                            if (!isNode) return;
+                            setPinnedEntityId(current => current === entity.entity_id ? null : current);
+                            setHoveredEntityId(current => current === entity.entity_id ? null : current);
+                        }}
+                        aria-pressed={isNode ? isPinned : undefined}
                         aria-label={isNode
                             ? `${zh ? '查看' : 'Inspect'} ${entity.label} ${zh ? '节点信息' : 'node details'}`
                             : `${zh ? '查看' : 'Inspect'} ${entity.label} ${zh ? '传感器信息' : 'sensor details'}`}
@@ -378,28 +390,30 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                     },
                 )}
 
-                {hoveredEntity && <aside
-                    className='ComputeGraphHoverCard anchored'
+                {inspectedEntity && <aside
+                    className={`ComputeGraphHoverCard anchored ${pinnedEntityId === inspectedEntity.entity_id ? 'pinned' : ''}`}
                     style={{
-                        '--hover-anchor-x': `${hoveredPoint?.x || 50}%`,
-                        '--hover-anchor-y': `${hoveredPoint?.y || 50}%`,
-                        '--hover-shift-x': hoveredPoint && hoveredPoint.x > 50 ? 'calc(-100% - 58px)' : '58px',
-                        '--hover-shift-y': hoveredPoint && hoveredPoint.y < 28 ? '-10%' : hoveredPoint && hoveredPoint.y > 72 ? '-90%' : '-50%',
+                        '--hover-anchor-x': `${inspectedPoint?.x || 50}%`,
+                        '--hover-anchor-y': `${inspectedPoint?.y || 50}%`,
+                        '--hover-shift-x': inspectedPoint && inspectedPoint.x > 50 ? 'calc(-100% - 58px)' : '58px',
+                        '--hover-shift-y': inspectedPoint && inspectedPoint.y < 28 ? '-10%' : inspectedPoint && inspectedPoint.y > 72 ? '-90%' : '-50%',
                     } as React.CSSProperties}
                     role='status'
-                    aria-label={`${hoveredEntity.label} ${zh ? '运维信息' : 'operations details'}`}
+                    aria-label={`${inspectedEntity.label} ${zh ? '运维信息' : 'operations details'}`}
                 >
                     {/* The node card derives transport and agent state from authoritative graph relations. */}
                     {/* eslint-disable-next-line complexity */}
-                    {hoveredEntity.kind === 'compute_node' ? (() => {
-                        const node = hoveredEntity.node_id ? nodeIndex.get(hoveredEntity.node_id) : undefined;
-                        const agents = callableAgentsFor(hoveredEntity);
-                        const sshAvailable = dependencyFor(hoveredEntity, 'control_ssh');
-                        const publicAvailable = dependencyFor(hoveredEntity, 'public_http');
-                        const tailscaleAvailable = dependencyFor(hoveredEntity, 'tailscale');
+                    {inspectedEntity.kind === 'compute_node' ? (() => {
+                        const node = inspectedEntity.node_id ? nodeIndex.get(inspectedEntity.node_id) : undefined;
+                        const agents = callableAgentsFor(inspectedEntity);
+                        const sshAvailable = dependencyFor(inspectedEntity, 'control_ssh');
+                        const publicAvailable = dependencyFor(inspectedEntity, 'public_http');
+                        const tailscaleAvailable = dependencyFor(inspectedEntity, 'tailscale');
                         return <>
-                            <span>{zh ? `计算节点 ${codes.get(hoveredEntity.entity_id)} · 运维信息` : `Compute node ${codes.get(hoveredEntity.entity_id)} · Operations`}</span>
-                            <strong>{hoveredEntity.label}</strong>
+                            <span>{zh
+                                ? `计算节点 ${codes.get(inspectedEntity.entity_id)} · 运维信息${pinnedEntityId === inspectedEntity.entity_id ? ' · 已固定（双击节点取消）' : ''}`
+                                : `Compute node ${codes.get(inspectedEntity.entity_id)} · Operations${pinnedEntityId === inspectedEntity.entity_id ? ' · Pinned (double-click node to unpin)' : ''}`}</span>
+                            <strong>{inspectedEntity.label}</strong>
                             <small className={node?.online ? 'online' : 'offline'}>{node?.online
                                 ? `${zh ? '在线 · 心跳' : 'Online · heartbeat'} ${heartbeatLabel(node.heartbeat_age_seconds, zh)}`
                                 : `${zh ? '离线 · 最后心跳' : 'Offline · last heartbeat'} ${heartbeatLabel(node?.heartbeat_age_seconds, zh)}`}</small>
@@ -424,13 +438,13 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                             </div>
                         </>;
                     })() : <>
-                        <span>{sensorKindLabel(hoveredEntity, zh)} {codes.get(hoveredEntity.entity_id)} · {deviceStatusLabel(hoveredEntity.device_status, zh)}</span>
-                        <strong>{hoveredEntity.label}</strong>
-                        <small>{hoveredEntity.device_model || (zh ? '型号未知' : 'Unknown model')}</small>
+                        <span>{sensorKindLabel(inspectedEntity, zh)} {codes.get(inspectedEntity.entity_id)} · {deviceStatusLabel(inspectedEntity.device_status, zh)}</span>
+                        <strong>{inspectedEntity.label}</strong>
+                        <small>{inspectedEntity.device_model || (zh ? '型号未知' : 'Unknown model')}</small>
                         <div className='ComputeGraphSensorFacts'>
-                            <em>{hoveredEntity.channels || 0} {zh ? '个通道' : 'channels'}</em>
-                            <em>{zh ? '接入方式' : 'Provider'} · {hoveredEntity.provider || '—'}</em>
-                            <em>{zh ? '归属节点' : 'Owner'} · {ownerFor(hoveredEntity)?.label || (zh ? '未归属' : 'Unassigned')}</em>
+                            <em>{inspectedEntity.channels || 0} {zh ? '个通道' : 'channels'}</em>
+                            <em>{zh ? '接入方式' : 'Provider'} · {inspectedEntity.provider || '—'}</em>
+                            <em>{zh ? '归属节点' : 'Owner'} · {ownerFor(inspectedEntity)?.label || (zh ? '未归属' : 'Unassigned')}</em>
                         </div>
                     </>}
                 </aside>}

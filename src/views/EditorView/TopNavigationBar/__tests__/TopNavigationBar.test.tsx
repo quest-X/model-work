@@ -117,3 +117,32 @@ describe('TopNavigationBar compute-cluster entry', () => {
         global.fetch = previousFetch;
     });
 });
+
+describe('TopNavigationBar extension tool entries', () => {
+    it('opens visual retrieval and model inspection from the extension menu', () => {
+        const updatePopup = jest.fn();
+        const previousFetch = global.fetch;
+        global.fetch = jest.fn(() => new Promise<Response>(() => undefined));
+        render(<TopNavigationBar
+            updateActivePopupTypeAction={updatePopup}
+            updateProjectDataAction={jest.fn()}
+            updateLanguageAction={jest.fn()}
+            updateQueueItemAction={jest.fn()}
+            projectData={{type: ProjectType.OBJECT_DETECTION, name: 'extension-tools-test'}}
+            queueItems={[]}
+            activeQueueItemId={null}
+            language={Language.CHINESE}
+            hasCoreEngine
+            hasExtensionEngine
+        />);
+
+        fireEvent.click(screen.getByText('拓展引擎'));
+        fireEvent.click(screen.getByText('视觉检索'));
+        expect(updatePopup).toHaveBeenLastCalledWith(PopupWindowType.L2G_RETRIEVAL);
+
+        fireEvent.click(screen.getByText('拓展引擎'));
+        fireEvent.click(screen.getByText('透视'));
+        expect(updatePopup).toHaveBeenLastCalledWith(PopupWindowType.MODEL_INSPECTOR);
+        global.fetch = previousFetch;
+    });
+});

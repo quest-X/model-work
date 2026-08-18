@@ -1535,12 +1535,11 @@
   }
 
   .ActivityActions {
-    grid-column: 1;
+    grid-column: 3;
     display: flex;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: flex-end;
     gap: 8px;
-    padding-left: 17px;
   }
 }
 
@@ -1600,6 +1599,11 @@
       .ActivityProgress {
         grid-column: 1 / -1;
         grid-row: 2;
+      }
+
+      .ActivityActions {
+        grid-column: 1 / -1;
+        justify-content: flex-end;
       }
     }
 

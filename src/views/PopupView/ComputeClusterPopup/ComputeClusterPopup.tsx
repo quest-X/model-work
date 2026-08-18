@@ -849,22 +849,37 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                             <p>{zh ? '计划由 Mac Client 后台运行；关闭 OpenSight 后仍继续，最短间隔 15 分钟。' : 'Schedules run in the Mac Client background after OpenSight closes; minimum interval is 15 minutes.'}</p>
                         </div>
                         <div className='ComputeLanScheduleCreate'>
-                            <select aria-label={zh ? '计划节点' : 'Schedule node'} value={selectedNode === AUTO_PLACEMENT ? '' : selectedNode} onChange={event => {
-                                setSelectedNode(event.target.value);
-                                setScanCidr(lanTargets[event.target.value]?.[0]?.cidr || '');
-                            }}>
-                                <option value=''>{zh ? '选择节点' : 'Choose node'}</option>
-                                {nodes.filter(node => node.online && (lanTargets[node.node_id]?.length || 0) > 0).map(node => <option value={node.node_id} key={node.node_id}>{node.name}</option>)}
-                            </select>
-                            <select aria-label={zh ? '计划网段' : 'Schedule network'} value={scanCidr} onChange={event => setScanCidr(event.target.value)}>
-                                {(lanTargets[selectedNode] || []).map(target => <option value={target.cidr} key={target.cidr}>{target.cidr}</option>)}
-                            </select>
-                            <select aria-label={zh ? '扫描间隔' : 'Scan interval'} value={scheduleInterval} onChange={event => setScheduleInterval(Number(event.target.value))}>
-                                <option value={15}>{zh ? '每 15 分钟' : 'Every 15 minutes'}</option>
-                                <option value={60}>{zh ? '每小时' : 'Hourly'}</option>
-                                <option value={360}>{zh ? '每 6 小时' : 'Every 6 hours'}</option>
-                                <option value={1440}>{zh ? '每天' : 'Daily'}</option>
-                            </select>
+                            <label>
+                                <span>{zh ? '扫描节点' : 'Node'}</span>
+                                <select aria-label={zh ? '计划节点' : 'Schedule node'} value={selectedNode === AUTO_PLACEMENT ? '' : selectedNode} onChange={event => {
+                                    setSelectedNode(event.target.value);
+                                    setScanCidr(lanTargets[event.target.value]?.[0]?.cidr || '');
+                                }}>
+                                    <option value=''>{zh ? '选择节点' : 'Choose node'}</option>
+                                    {nodes.filter(node => node.online && (lanTargets[node.node_id]?.length || 0) > 0).map(node => <option value={node.node_id} key={node.node_id}>{node.name}</option>)}
+                                </select>
+                            </label>
+                            <label>
+                                <span>{zh ? '扫描网段' : 'Network'}</span>
+                                <select
+                                    aria-label={zh ? '计划网段' : 'Schedule network'}
+                                    value={scanCidr}
+                                    disabled={(lanTargets[selectedNode]?.length || 0) === 0}
+                                    onChange={event => setScanCidr(event.target.value)}
+                                >
+                                    <option value=''>{selectedNode && selectedNode !== AUTO_PLACEMENT ? (zh ? '暂无可用网段' : 'No network available') : (zh ? '请先选择节点' : 'Choose a node first')}</option>
+                                    {(lanTargets[selectedNode] || []).map(target => <option value={target.cidr} key={target.cidr}>{target.cidr}</option>)}
+                                </select>
+                            </label>
+                            <label>
+                                <span>{zh ? '执行频率' : 'Frequency'}</span>
+                                <select aria-label={zh ? '扫描间隔' : 'Scan interval'} value={scheduleInterval} onChange={event => setScheduleInterval(Number(event.target.value))}>
+                                    <option value={15}>{zh ? '每 15 分钟' : 'Every 15 minutes'}</option>
+                                    <option value={60}>{zh ? '每 1 小时' : 'Every hour'}</option>
+                                    <option value={360}>{zh ? '每 6 小时' : 'Every 6 hours'}</option>
+                                    <option value={1440}>{zh ? '每 1 天' : 'Every day'}</option>
+                                </select>
+                            </label>
                             <button type='button' disabled={!selectedNode || selectedNode === AUTO_PLACEMENT || !scanCidr || Boolean(scheduleBusy)} onClick={() => void createSchedule()}>{zh ? '创建计划' : 'Create schedule'}</button>
                         </div>
                     </div>

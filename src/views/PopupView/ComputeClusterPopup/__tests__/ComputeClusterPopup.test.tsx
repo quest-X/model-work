@@ -726,7 +726,14 @@ describe('ComputeClusterPopup', () => {
         await user.click(screen.getByRole('button', {name: '网络资产 0'}));
         expect(screen.getByText('自动发现')).toBeInTheDocument();
         expect(screen.getByText('已执行 2 次')).toBeInTheDocument();
+        expect(screen.getByText('扫描节点')).toBeInTheDocument();
+        expect(screen.getByText('扫描网段')).toBeInTheDocument();
+        expect(screen.getByText('执行频率')).toBeInTheDocument();
+        expect(screen.getByRole('combobox', {name: '计划网段'})).toBeDisabled();
+        expect(screen.getByRole('option', {name: '请先选择节点'})).toBeInTheDocument();
         await user.selectOptions(screen.getByRole('combobox', {name: '计划节点'}), 'node-12345678');
+        expect(screen.getByRole('combobox', {name: '计划网段'})).toBeEnabled();
+        expect(screen.getByRole('combobox', {name: '计划网段'})).toHaveValue('192.168.50.0/24');
         await user.click(screen.getByRole('button', {name: '创建计划'}));
         await waitFor(() => expect(service.createLanSchedule).toHaveBeenCalledWith({
             node_id: 'node-12345678', cidr: '192.168.50.0/24', interval_minutes: 60,

@@ -813,9 +813,12 @@
   0%, 100% { opacity: .45; transform: scale(.85); }
   50% { opacity: 1; transform: scale(1); }
 }
-.ComputeLanScheduleCreate { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 520px; }
+.ComputeLanScheduleCreate { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: flex-end; gap: 7px; max-width: 720px; }
+.ComputeLanScheduleCreate label { display: flex; min-width: 112px; flex-direction: column; gap: 5px; }
+.ComputeLanScheduleCreate label > span { color: rgba(255, 255, 255, .42); font-size: 8px; }
 .ComputeLanScheduleCreate select, .ComputeLanScheduleCreate button,
 .ComputeLanScheduleActions button { height: 29px; border: 1px solid rgba(255, 255, 255, .13); border-radius: 4px; background: #17181a; padding: 0 9px; color: rgba(255, 255, 255, .78); font-size: 9px; }
+.ComputeLanScheduleCreate select:disabled { color: rgba(255, 255, 255, .38); cursor: not-allowed; }
 .ComputeLanScheduleCreate button, .ComputeLanScheduleActions button { cursor: pointer; border-color: rgba(174, 129, 239, .5); }
 .ComputeLanScheduleCreate button:disabled, .ComputeLanScheduleActions button:disabled { opacity: .4; cursor: wait; }
 .ComputeLanScheduleList { display: grid; gap: 1px; background: rgba(255, 255, 255, .05); }

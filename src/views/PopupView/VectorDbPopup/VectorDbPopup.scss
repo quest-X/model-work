@@ -1533,6 +1533,13 @@
       transition: width 0.2s ease;
     }
   }
+
+  .ActivityActions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+  }
 }
 
 @media (max-width: 780px) {

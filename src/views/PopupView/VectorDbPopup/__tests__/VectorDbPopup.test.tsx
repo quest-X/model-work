@@ -552,4 +552,45 @@ describe('VectorDbPopup', () => {
             String(url).endsWith('/jobs/job-history-1') && init?.method === 'DELETE')).toBe(true));
         expect(screen.queryByText('missing-dataset')).not.toBeInTheDocument();
     });
+
+    it('deletes a failed resumable job from the visible activity strip without touching the database', async () => {
+        jobList = [{
+            job_id: 'failed-job-1234567890',
+            state: 'failed',
+            collection: 'frame_index',
+            granularity: 'image',
+            source: 'dataset',
+            dataset_id: 'dataset-1',
+            total_images: 24,
+            processed_images: 0,
+            inserted_objects: 0,
+            inserted_vectors: 0,
+            skipped_images: 0,
+            failed_images: 0,
+            invalid_vectors: 0,
+            throughput_images_per_sec: 0,
+            eta_seconds: null,
+            resumable: true,
+            error: '集合不存在',
+            started_at: '2026-07-22T15:00:00',
+            updated_at: '2026-07-22T15:00:02',
+            finished_at: '2026-07-22T15:00:02',
+        }];
+        render(<VectorDbPopup language={Language.CHINESE}/>);
+
+        expect(await screen.findByRole('button', {name: '继续任务'})).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', {name: '删除任务'}));
+
+        const dialog = screen.getByRole('dialog', {name: '删除任务 failed-job-1'});
+        expect(within(dialog).getByText(/只删除这条任务记录，不会删除数据库/)).toBeInTheDocument();
+        const confirmationInput = within(dialog).getByRole('textbox', {name: '输入任务标识以确认删除'});
+        fireEvent.change(confirmationInput, {target: {value: 'failed-job-1'}});
+        await act(async () => {
+            fireEvent.click(within(dialog).getByRole('button', {name: '删除'}));
+        });
+
+        await waitFor(() => expect((global.fetch as jest.Mock).mock.calls.some(([url, init]) =>
+            String(url).endsWith('/jobs/failed-job-1234567890') && init?.method === 'DELETE')).toBe(true));
+        expect(screen.queryByText('集合不存在')).not.toBeInTheDocument();
+    });
 });

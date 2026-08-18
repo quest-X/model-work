@@ -889,7 +889,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         } catch (cause) {
             setJobDeleteError(cause instanceof Error
                 ? cause.message
-                : t('版本记录删除失败', 'Failed to delete version record'));
+                : t('任务记录删除失败', 'Failed to delete job record'));
         } finally {
             setDeletingJobId(null);
         }
@@ -1311,7 +1311,9 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         deleteConfirmationToken: string,
         deleteDialogTitleId: string,
         deleteConfirmationMatches: boolean,
-    ) => createPortal(
+    ) => {
+        const isCompletedVersion = item.state === 'completed' && Boolean(item.data_version);
+        return createPortal(
         <div
             className='HistoryDeleteDialogBackdrop'
             role='presentation'
@@ -1329,7 +1331,9 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             >
                 <header>
                     <strong id={deleteDialogTitleId}>
-                        {t(`删除版本 ${deleteConfirmationToken}`, `Delete version ${deleteConfirmationToken}`)}
+                        {isCompletedVersion
+                            ? t(`删除版本 ${deleteConfirmationToken}`, `Delete version ${deleteConfirmationToken}`)
+                            : t(`删除任务 ${deleteConfirmationToken}`, `Delete job ${deleteConfirmationToken}`)}
                     </strong>
                     <button
                         type='button'
@@ -1344,10 +1348,15 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                         <strong>{deleteConfirmationToken}</strong>
                         <small>{item.job_id}</small>
                     </div>
-                    <p>{t(
-                        '删除后无法恢复。此操作只删除这条版本历史记录，不会回滚或修改当前向量数据。',
-                        'This cannot be undone. It removes only this version history record and does not roll back or modify current vector data.',
-                    )}</p>
+                    <p>{isCompletedVersion
+                        ? t(
+                            '删除后无法恢复。此操作只删除这条版本历史记录，不会回滚或修改当前向量数据。',
+                            'This cannot be undone. It removes only this version history record and does not roll back or modify current vector data.',
+                        )
+                        : t(
+                            '删除后无法恢复。此操作只删除这条任务记录，不会删除数据库或修改当前向量数据。',
+                            'This cannot be undone. It removes only this job record and does not delete the database or modify current vector data.',
+                        )}</p>
                     <label htmlFor='history-delete-confirmation'>
                         {t('如需确认，请在下方输入', 'To confirm, type')}{' '}
                         <code>{deleteConfirmationToken}</code>
@@ -1359,7 +1368,9 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                         autoFocus
                         autoComplete='off'
                         spellCheck={false}
-                        aria-label={t('输入版本标识以确认删除', 'Type the version identifier to confirm deletion')}
+                        aria-label={isCompletedVersion
+                            ? t('输入版本标识以确认删除', 'Type the version identifier to confirm deletion')
+                            : t('输入任务标识以确认删除', 'Type the job identifier to confirm deletion')}
                         onChange={event => setDeleteJobConfirmationText(event.target.value)}
                     />
                     {jobDeleteError && <span className='InlineError' role='alert'>{jobDeleteError}</span>}
@@ -1383,7 +1394,8 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             </section>
         </div>,
         document.body,
-    );
+        );
+    };
 
     const renderHistoryImagesPanel = (
         item: IngestJob,
@@ -1715,6 +1727,42 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         </section>;
     };
 
+    const renderActivityActions = (item: IngestJob) => {
+        const jobCollection = collections.find(collection => collection.name === item.collection);
+        const version = historyVersionName(item.data_version, item.job_id, t);
+        const deleteConfirmationToken = item.data_version && jobCollection
+            ? historyDeleteToken(jobCollection, version.identifier)
+            : item.job_id.slice(0, 12);
+        const deleteDialogTitleId = `delete-activity-title-${item.job_id}`;
+        const deleteConfirmationMatches = deleteJobConfirmationText === deleteConfirmationToken;
+        return <>
+            <div className='ActivityActions'>
+                {activeJob
+                    ? <button type='button' className='SecondaryButton' onClick={cancelIngest}>{t('取消任务', 'Cancel job')}</button>
+                    : <>
+                        {item.resumable && <button type='button' className='SecondaryButton' onClick={resumeIngest}>
+                            {t('继续任务', 'Resume job')}
+                        </button>}
+                        <button
+                            type='button'
+                            className='DangerButton'
+                            onClick={() => {
+                                setDeleteJobConfirmId(item.job_id);
+                                setDeleteJobConfirmationText('');
+                                setJobDeleteError(null);
+                            }}
+                        >{t('删除任务', 'Delete job')}</button>
+                    </>}
+            </div>
+            {deleteJobConfirmId === item.job_id && renderHistoryDeleteDialog(
+                item,
+                deleteConfirmationToken,
+                deleteDialogTitleId,
+                deleteConfirmationMatches,
+            )}
+        </>;
+    };
+
     const renderJob = () => {
         if (!job) return null;
         const percent = job.total_images > 0
@@ -1745,11 +1793,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                 aria-label={t('入库进度', 'Ingest progress')}
             ><span style={{width: `${percent}%`}}/></div>
             {job.error && <div className='InlineError'>{job.error}</div>}
-            {activeJob
-                ? <button type='button' className='SecondaryButton' onClick={cancelIngest}>{t('取消任务', 'Cancel job')}</button>
-                : job.resumable
-                    ? <button type='button' className='SecondaryButton' onClick={resumeIngest}>{t('继续任务', 'Resume job')}</button>
-                    : <button type='button' className='SecondaryButton' onClick={() => setJob(null)}>{t('隐藏', 'Dismiss')}</button>}
+            {renderActivityActions(job)}
         </div>;
     };
 

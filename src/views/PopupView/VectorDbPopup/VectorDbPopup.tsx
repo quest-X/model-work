@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useLayoutEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {useDropzone} from 'react-dropzone';
 import {connect} from 'react-redux';
@@ -169,6 +169,7 @@ interface IProps {
 type Translate = (zhText: string, enText: string) => string;
 
 const TERMINAL_JOB_STATES = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
+const DELETE_HOLD_DELAY_MS = 900;
 const HISTORY_IMAGE_PAGE_SIZE = 12;
 const NEW_SCENE_OPTION = '__new_scene__';
 const strategyGranularity = (strategy: IngestStrategy): Granularity => {
@@ -318,6 +319,8 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
     const [deleteJobConfirmationText, setDeleteJobConfirmationText] = useState('');
     const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
     const [jobDeleteError, setJobDeleteError] = useState<string | null>(null);
+    const [holdingDeleteJobId, setHoldingDeleteJobId] = useState<string | null>(null);
+    const deleteHoldTimerRef = useRef<number | null>(null);
     const [expandedJobIds, setExpandedJobIds] = useState<Set<string>>(() => new Set());
     const [jobImages, setJobImages] = useState<Record<string, JobImageState>>({});
     const [imagePreview, setImagePreview] = useState<ImagePreview | null>(null);
@@ -629,6 +632,12 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         window.addEventListener('keydown', closeOnEscape);
         return () => window.removeEventListener('keydown', closeOnEscape);
     }, [deleteJobConfirmId, deletingJobId]);
+
+    useEffect(() => () => {
+        if (deleteHoldTimerRef.current != null) {
+            window.clearTimeout(deleteHoldTimerRef.current);
+        }
+    }, []);
 
     const warmup = async () => {
         setWarmingUp(true);
@@ -1727,6 +1736,26 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         </section>;
     };
 
+    const cancelDeleteHold = () => {
+        if (deleteHoldTimerRef.current != null) {
+            window.clearTimeout(deleteHoldTimerRef.current);
+            deleteHoldTimerRef.current = null;
+        }
+        setHoldingDeleteJobId(null);
+    };
+
+    const startDeleteHold = (item: IngestJob) => {
+        cancelDeleteHold();
+        setHoldingDeleteJobId(item.job_id);
+        deleteHoldTimerRef.current = window.setTimeout(() => {
+            deleteHoldTimerRef.current = null;
+            setHoldingDeleteJobId(null);
+            setDeleteJobConfirmId(item.job_id);
+            setDeleteJobConfirmationText('');
+            setJobDeleteError(null);
+        }, DELETE_HOLD_DELAY_MS);
+    };
+
     const renderActivityActions = (item: IngestJob) => {
         const jobCollection = collections.find(collection => collection.name === item.collection);
         const version = historyVersionName(item.data_version, item.job_id, t);
@@ -1735,6 +1764,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             : item.job_id.slice(0, 12);
         const deleteDialogTitleId = `delete-activity-title-${item.job_id}`;
         const deleteConfirmationMatches = deleteJobConfirmationText === deleteConfirmationToken;
+        const holdingDelete = holdingDeleteJobId === item.job_id;
         return <>
             <div className='ActivityActions'>
                 {activeJob
@@ -1745,13 +1775,30 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                         </button>}
                         <button
                             type='button'
-                            className='DangerButton'
-                            onClick={() => {
-                                setDeleteJobConfirmId(item.job_id);
-                                setDeleteJobConfirmationText('');
-                                setJobDeleteError(null);
+                            className={`DangerButton HoldDeleteButton${holdingDelete ? ' holding' : ''}`}
+                            aria-label={t('按住删除任务', 'Press and hold to delete job')}
+                            title={t('按住 0.9 秒后打开删除确认', 'Hold for 0.9 seconds to open delete confirmation')}
+                            onPointerDown={event => {
+                                if (typeof event.button !== 'number' || event.button === 0) startDeleteHold(item);
                             }}
-                        >{t('删除任务', 'Delete job')}</button>
+                            onPointerUp={cancelDeleteHold}
+                            onPointerLeave={cancelDeleteHold}
+                            onPointerCancel={cancelDeleteHold}
+                            onBlur={cancelDeleteHold}
+                            onKeyDown={event => {
+                                if ((event.key === 'Enter' || event.key === ' ') && !event.repeat) {
+                                    event.preventDefault();
+                                    startDeleteHold(item);
+                                }
+                            }}
+                            onKeyUp={event => {
+                                if (event.key === 'Enter' || event.key === ' ') cancelDeleteHold();
+                            }}
+                            onClick={event => event.preventDefault()}
+                            onContextMenu={event => event.preventDefault()}
+                        ><span>{holdingDelete
+                                ? t('继续按住…', 'Keep holding…')
+                                : t('按住删除任务', 'Hold to delete job')}</span></button>
                     </>}
             </div>
             {deleteJobConfirmId === item.job_id && renderHistoryDeleteDialog(

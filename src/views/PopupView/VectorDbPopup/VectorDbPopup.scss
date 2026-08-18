@@ -1541,6 +1541,33 @@
     justify-content: flex-end;
     gap: 8px;
   }
+
+  .HoldDeleteButton {
+    position: relative;
+    min-width: 92px;
+    overflow: hidden;
+
+    &::before {
+      position: absolute;
+      z-index: 0;
+      inset: 0;
+      background: rgba(255, 105, 105, 0.18);
+      content: '';
+      pointer-events: none;
+      transform: scaleX(0);
+      transform-origin: left;
+    }
+
+    &.holding::before {
+      transform: scaleX(1);
+      transition: transform 0.9s linear;
+    }
+
+    > span {
+      position: relative;
+      z-index: 1;
+    }
+  }
 }
 
 @media (max-width: 780px) {

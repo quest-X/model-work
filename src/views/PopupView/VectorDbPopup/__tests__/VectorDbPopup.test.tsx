@@ -579,20 +579,7 @@ describe('VectorDbPopup', () => {
         render(<VectorDbPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByRole('button', {name: '继续任务'})).toBeInTheDocument();
-        const holdDeleteButton = screen.getByRole('button', {name: '按住删除任务'});
-        fireEvent.click(holdDeleteButton);
-        expect(screen.queryByRole('dialog', {name: /删除任务/})).not.toBeInTheDocument();
-
-        let completeHold: (() => void) | null = null;
-        const timeoutSpy = jest.spyOn(window, 'setTimeout').mockImplementation((handler, delay) => {
-            expect(delay).toBe(900);
-            if (typeof handler === 'function') completeHold = handler;
-            return 1;
-        });
-        fireEvent.pointerDown(holdDeleteButton, {button: 0});
-        expect(screen.queryByRole('dialog', {name: /删除任务/})).not.toBeInTheDocument();
-        act(() => completeHold?.());
-        timeoutSpy.mockRestore();
+        fireEvent.click(screen.getByRole('button', {name: '删除任务'}));
 
         const dialog = screen.getByRole('dialog', {name: '删除任务 failed-job-1'});
         expect(within(dialog).getByText(/只删除这条任务记录，不会删除数据库/)).toBeInTheDocument();

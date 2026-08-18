@@ -1,4 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {connect} from 'react-redux';
 import {GenericYesNoPopup} from '../GenericYesNoPopup/GenericYesNoPopup';
 import {PopupActions} from '../../../logic/actions/PopupActions';
@@ -78,6 +79,15 @@ interface DatasetStats {
     annotation_coverage: number;
 }
 
+interface DatasetPreviewItem {
+    index: number;
+    name: string;
+}
+
+interface DatasetImagePreview extends DatasetPreviewItem {
+    datasetId: string;
+}
+
 type ModelAssetType = 'custom' | 'detection' | 'segmentation';
 
 interface ModelAsset {
@@ -114,6 +124,7 @@ type StorageTier = 'temporary' | 'persistent';
 
 const RESOURCE_MODULES: ResourceModule[] = ['data', 'models'];
 const STORAGE_TIERS: StorageTier[] = ['persistent', 'temporary'];
+const DATASET_PREVIEW_LIMIT = 12;
 
 interface IProps {
     language: Language;
@@ -362,6 +373,12 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const [stats, setStats] = useState<DatasetStats | null>(null);
     const [statsLoading, setStatsLoading] = useState(false);
     const [statsError, setStatsError] = useState<string | null>(null);
+    const [datasetPreviewItems, setDatasetPreviewItems] = useState<DatasetPreviewItem[]>([]);
+    const [datasetPreviewTotal, setDatasetPreviewTotal] = useState(0);
+    const [datasetPreviewLoading, setDatasetPreviewLoading] = useState(false);
+    const [datasetPreviewError, setDatasetPreviewError] = useState<string | null>(null);
+    const [datasetPreviewFailures, setDatasetPreviewFailures] = useState<Set<number>>(new Set());
+    const [datasetImagePreview, setDatasetImagePreview] = useState<DatasetImagePreview | null>(null);
     const [datasetActionId, setDatasetActionId] = useState<string | null>(null);
     const [datasetActionError, setDatasetActionError] = useState<string | null>(null);
     const [datasetQuery, setDatasetQuery] = useState('');
@@ -662,6 +679,70 @@ export const DataCenterPopup: React.FC<IProps> = ({
             });
         return () => controller.abort();
     }, [selectedId, baseUrl, datasets, zh]);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        const selectedDataset = datasets.find(dataset => dataset.id === selectedId);
+        setDatasetPreviewItems([]);
+        setDatasetPreviewTotal(0);
+        setDatasetPreviewError(null);
+        setDatasetPreviewFailures(new Set());
+        setDatasetImagePreview(null);
+        if (!selectedId || selectedDataset?.media_type === 'camera' || !selectedDataset?.image_count) {
+            setDatasetPreviewLoading(false);
+            return undefined;
+        }
+        setDatasetPreviewLoading(true);
+        fetch(`${baseUrl}/datasets/${encodeURIComponent(selectedId)}/preview?offset=0&limit=${DATASET_PREVIEW_LIMIT}`, {
+            signal: controller.signal,
+        }).then(async response => {
+            if (!response.ok) throw new Error(`${response.status}`);
+            return response.json();
+        }).then(value => {
+            if (controller.signal.aborted) return;
+            const fallbackOffset = typeof value.offset === 'number' ? value.offset : 0;
+            const items: DatasetPreviewItem[] = Array.isArray(value.items)
+                ? value.items.filter((item: DatasetPreviewItem) => (
+                    Number.isInteger(item?.index) && typeof item?.name === 'string'
+                ))
+                : (Array.isArray(value.images) ? value.images : []).map((name: string, index: number) => ({
+                    index: fallbackOffset + index,
+                    name,
+                }));
+            setDatasetPreviewItems(items);
+            setDatasetPreviewTotal(typeof value.total === 'number'
+                ? value.total
+                : selectedDataset.image_count);
+        }).catch(cause => {
+            if (cause instanceof Error && cause.name === 'AbortError') return;
+            if (!controller.signal.aborted) {
+                setDatasetPreviewError(zh ? '图片缩略图加载失败' : 'Failed to load image thumbnails');
+            }
+        }).finally(() => {
+            if (!controller.signal.aborted) setDatasetPreviewLoading(false);
+        });
+        return () => controller.abort();
+    }, [baseUrl, datasets, selectedId, zh]);
+
+    const moveDatasetImagePreview = useCallback((step: -1 | 1) => {
+        setDatasetImagePreview(current => {
+            if (!current) return null;
+            const position = datasetPreviewItems.findIndex(item => item.index === current.index);
+            const next = datasetPreviewItems[position + step];
+            return next ? {...next, datasetId: current.datasetId} : current;
+        });
+    }, [datasetPreviewItems]);
+
+    useEffect(() => {
+        if (!datasetImagePreview) return undefined;
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setDatasetImagePreview(null);
+            if (event.key === 'ArrowLeft') moveDatasetImagePreview(-1);
+            if (event.key === 'ArrowRight') moveDatasetImagePreview(1);
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [datasetImagePreview, moveDatasetImagePreview]);
 
     const useModel = async (model: ModelAsset) => {
         const identifier = model.id || model.name;
@@ -1007,12 +1088,74 @@ export const DataCenterPopup: React.FC<IProps> = ({
         </div>;
     };
 
+    const datasetPreviewUrl = (
+        dataset: DatasetSummary,
+        item: DatasetPreviewItem,
+        variant: 'thumbnail' | 'original',
+    ) => `${baseUrl}/datasets/${encodeURIComponent(dataset.id)}/preview/${item.index}/${variant}`
+        + `?revision=${dataset.revision || 1}&name=${encodeURIComponent(item.name)}`;
+
+    const renderDatasetPreviewStrip = (dataset: DatasetSummary) => {
+        const visibleCount = datasetPreviewItems.length;
+        return <div className='DatasetPreviewSection'>
+            <div className='DatasetPreviewHeader'>
+                <span>{zh ? '图片预览' : 'Image preview'}</span>
+                {!datasetPreviewLoading && !datasetPreviewError && datasetPreviewTotal > 0 && <small>
+                    {zh
+                        ? `首批 ${visibleCount} / ${datasetPreviewTotal} · 点击查看大图`
+                        : `First ${visibleCount} of ${datasetPreviewTotal} · Click to enlarge`}
+                </small>}
+            </div>
+            {datasetPreviewLoading && <div className='DatasetPreviewLoading' aria-live='polite'>
+                {zh ? '正在加载缩略图…' : 'Loading thumbnails…'}
+            </div>}
+            {datasetPreviewError && <div className='DatasetPreviewState error' role='alert'>
+                {datasetPreviewError}
+            </div>}
+            {!datasetPreviewLoading && !datasetPreviewError && datasetPreviewTotal === 0
+                && <div className='DatasetPreviewState'>{zh ? '这个版本没有图片' : 'No images in this version'}</div>}
+            {visibleCount > 0 && <div
+                className='DatasetPreviewRail'
+                role='list'
+                aria-label={zh ? '数据集图片缩略图' : 'Dataset image thumbnails'}
+            >
+                {datasetPreviewItems.map(item => {
+                    const failed = datasetPreviewFailures.has(item.index);
+                    return <div className={`DatasetPreviewTile${failed ? ' failed' : ''}`} role='listitem' key={item.index}>
+                        <button
+                            type='button'
+                            aria-label={`${zh ? '查看图片' : 'View image'} ${item.name}`}
+                            title={item.name}
+                            onClick={() => setDatasetImagePreview({...item, datasetId: dataset.id})}
+                        >
+                            {!failed && <img
+                                src={datasetPreviewUrl(dataset, item, 'thumbnail')}
+                                alt=''
+                                loading='lazy'
+                                onError={() => setDatasetPreviewFailures(current => {
+                                    const next = new Set(current);
+                                    next.add(item.index);
+                                    return next;
+                                })}
+                            />}
+                            {failed && <span className='DatasetPreviewFailed'>
+                                {zh ? '加载失败' : 'Unavailable'}
+                            </span>}
+                            <span className='DatasetPreviewFilename'>{item.name}</span>
+                        </button>
+                    </div>;
+                })}
+            </div>}
+        </div>;
+    };
+
     // The expanded card intentionally composes the independent timeline, stats and task states.
     // eslint-disable-next-line complexity
     const renderDatasetDetails = (dataset: DatasetSummary, detailsId: string) => (
         <div className='DatasetDetails' id={detailsId}>
             {renderDatasetTimes(dataset)}
             {renderVersionTimeline(dataset)}
+            {renderDatasetPreviewStrip(dataset)}
             {statsLoading && <div className='StatsState'>{zh ? '正在加载数据统计…' : 'Loading dataset statistics…'}</div>}
             {statsError && <div className='StatsState error'>{statsError}</div>}
             {stats && <div className='StatsPanel'>
@@ -1053,6 +1196,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
         </div>
     );
 
+    // eslint-disable-next-line complexity
     const renderCameraDetails = (dataset: DatasetSummary, detailsId: string) => {
         const camera = dataset.camera;
         if (!camera) return null;
@@ -1106,6 +1250,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
         return `${projectLabel} · ${serverLabel} · v${dataset.revision || 1} · ${dataset.id.slice(0, 8)}${localCopyLabel}`;
     };
 
+    // eslint-disable-next-line complexity
     const renderDatasetItem = (dataset: DatasetSummary) => {
         const expanded = selectedId === dataset.id;
         const datasetName = datasetDisplayName(dataset);
@@ -1604,14 +1749,71 @@ export const DataCenterPopup: React.FC<IProps> = ({
         </div>
     );
 
+    const renderDatasetImagePreview = () => {
+        if (!datasetImagePreview) return null;
+        const dataset = datasets.find(item => item.id === datasetImagePreview.datasetId);
+        if (!dataset) return null;
+        const position = datasetPreviewItems.findIndex(item => item.index === datasetImagePreview.index);
+        const hasPrevious = position > 0;
+        const hasNext = position >= 0 && position < datasetPreviewItems.length - 1;
+        return createPortal(
+            <div
+                className='DatasetImagePreviewBackdrop'
+                role='presentation'
+                onMouseDown={() => setDatasetImagePreview(null)}
+            >
+                <div
+                    className='DatasetImagePreviewDialog'
+                    role='dialog'
+                    aria-modal='true'
+                    aria-label={zh ? '数据集图片预览' : 'Dataset image preview'}
+                    onMouseDown={event => event.stopPropagation()}
+                >
+                    <button
+                        type='button'
+                        className='DatasetImagePreviewClose'
+                        aria-label={zh ? '关闭图片预览' : 'Close image preview'}
+                        onClick={() => setDatasetImagePreview(null)}
+                    >×</button>
+                    <button
+                        type='button'
+                        className='DatasetImagePreviewNav previous'
+                        aria-label={zh ? '上一张' : 'Previous image'}
+                        disabled={!hasPrevious}
+                        onClick={() => moveDatasetImagePreview(-1)}
+                    ><span aria-hidden='true' /></button>
+                    <button
+                        type='button'
+                        className='DatasetImagePreviewNav next'
+                        aria-label={zh ? '下一张' : 'Next image'}
+                        disabled={!hasNext}
+                        onClick={() => moveDatasetImagePreview(1)}
+                    ><span aria-hidden='true' /></button>
+                    <img
+                        src={datasetPreviewUrl(dataset, datasetImagePreview, 'original')}
+                        alt={datasetImagePreview.name}
+                    />
+                    <div className='DatasetImagePreviewCaption'>
+                        <span title={datasetImagePreview.name}>{datasetImagePreview.name}</span>
+                        <small>{datasetImagePreview.index + 1} / {datasetPreviewTotal}</small>
+                    </div>
+                </div>
+            </div>,
+            document.body,
+        );
+    };
+
     return (
-        <GenericYesNoPopup
-            title={zh ? '资源中心' : 'Resource Center'}
-            renderContent={renderContent}
-            skipAcceptButton
-            rejectLabel={zh ? '关闭' : 'Close'}
-            onReject={() => PopupActions.close()}
-        />
+        <>
+            <GenericYesNoPopup
+                title={zh ? '资源中心' : 'Resource Center'}
+                renderContent={renderContent}
+                skipAcceptButton
+                rejectLabel={zh ? '关闭' : 'Close'}
+                onReject={() => PopupActions.close()}
+            />
+            {renderDatasetImagePreview()}
+        </>
     );
 };
 

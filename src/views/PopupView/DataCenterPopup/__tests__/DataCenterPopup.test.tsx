@@ -202,6 +202,17 @@ describe('DataCenterPopup', () => {
                     class_distribution: {gangye: 465},
                 }));
             }
+            if (url.includes('/datasets/dataset-1/preview?')) {
+                return Promise.resolve(jsonResponse({
+                    status: 'success',
+                    items: [
+                        {index: 0, name: 'frame-001.jpg'},
+                        {index: 1, name: 'frame-002.jpg'},
+                    ],
+                    total: 465,
+                    offset: 0,
+                }));
+            }
             return Promise.resolve(jsonResponse({status: 'success'}));
         }) as jest.Mock;
     });
@@ -590,6 +601,27 @@ describe('DataCenterPopup', () => {
         ));
         expect(DatasetEditSelection.set).not.toHaveBeenCalled();
         expect(PendingImportFiles.set).not.toHaveBeenCalled();
+    });
+
+    it('shows a thumbnail strip below data versions and opens the original image preview', async () => {
+        renderPopup();
+        await screen.findByRole('tab', {name: '持久化数据 1'});
+        fireEvent.click(screen.getByRole('button', {name: /default-project.*465/}));
+
+        const thumbnails = await screen.findByRole('list', {name: '数据集图片缩略图'});
+        expect(within(thumbnails).getAllByRole('listitem')).toHaveLength(2);
+        expect(screen.getByText('首批 2 / 465 · 点击查看大图')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', {name: '查看图片 frame-001.jpg'}));
+        const dialog = screen.getByRole('dialog', {name: '数据集图片预览'});
+        expect(within(dialog).getByRole('img', {name: 'frame-001.jpg'})).toHaveAttribute(
+            'src',
+            'https://core.test/core_service/datasets/dataset-1/preview/0/original?revision=2&name=frame-001.jpg',
+        );
+        fireEvent.click(within(dialog).getByRole('button', {name: '下一张'}));
+        expect(within(dialog).getByRole('img', {name: 'frame-002.jpg'})).toBeInTheDocument();
+        fireEvent.keyDown(window, {key: 'Escape'});
+        expect(screen.queryByRole('dialog', {name: '数据集图片预览'})).not.toBeInTheDocument();
     });
 
     it('keeps ordinary YOLO datasets on the existing annotation importer path', async () => {

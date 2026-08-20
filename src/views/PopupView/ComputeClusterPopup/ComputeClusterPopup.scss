@@ -755,8 +755,11 @@
   color: rgba(255, 255, 255, .45);
   font-size: 9px;
   i { width: 7px; height: 7px; border-radius: 50%; background: #6c7174; }
-  &.running { color: #82db9e; i { background: #55c77b; box-shadow: 0 0 8px rgba(85, 199, 123, .65); } }
-  &.connecting { color: #7bd0ff; i { background: #51baf4; animation: compute-pulse 1s infinite; } }
+  &.running.lan,
+  &.connecting.lan { color: #82db9e; i { background: #55c77b; box-shadow: 0 0 8px rgba(85, 199, 123, .65); } }
+  &.running.remote,
+  &.connecting.remote { color: #7bd0ff; i { background: #51baf4; box-shadow: 0 0 8px rgba(81, 186, 244, .65); } }
+  &.connecting i { animation: compute-pulse 1s infinite; }
   &.failed { color: #e89893; i { background: #d66363; } }
 }
 

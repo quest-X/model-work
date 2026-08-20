@@ -212,7 +212,7 @@ describe('ComputeClusterPopup', () => {
         });
         const terminalSession = {
             version: 1 as const, session_id: 'terminal-session-1', node_id: 'node-12345678',
-            node_name: 'edge-01', state: 'running' as const, created_at: 1,
+            node_name: 'edge-01', transport: 'lan' as const, state: 'running' as const, created_at: 1,
             last_activity_at: 1, cursor: 0, output: '', output_truncated: false,
             exit_code: null, error: null,
         };
@@ -764,12 +764,40 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText(/连接目标与认证材料由 Mac Client 保管/)).toBeInTheDocument();
         await user.click(screen.getByRole('button', {name: '连接终端'}));
         await waitFor(() => expect(service.startTerminal).toHaveBeenCalledWith('node-12345678'));
+        const connectionState = await screen.findByText('局域网 SSH · 已连接');
+        expect(connectionState.closest('.ComputeTerminalState')).toHaveClass('lan');
         const input = screen.getByRole('textbox', {name: '终端指令'});
         await user.type(input, 'uname -a');
         await user.click(screen.getByRole('button', {name: '发送'}));
         await waitFor(() => expect(service.terminalInput).toHaveBeenCalledWith(
             'terminal-session-1', 'uname -a\n',
         ));
+    });
+
+    it('shows a remote Tailscale terminal connection in blue', async () => {
+        const user = userEvent.setup();
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.5.0', protocol_version: 1,
+            admin_configured: true,
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['system.wait'],
+                terminal_sessions: true,
+                phase8_terminal: true,
+            },
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+        const remoteSession = await service.startTerminal('node-12345678');
+        service.startTerminal.mockResolvedValue({...remoteSession, transport: 'tailscale'});
+        service.terminal.mockResolvedValue({...remoteSession, transport: 'tailscale'});
+
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        await user.click(await screen.findByRole('button', {name: '终端连接 1'}));
+        await user.click(screen.getByRole('button', {name: '连接终端'}));
+        const connectionState = await screen.findByText('Tailscale · 已连接');
+        expect(connectionState.closest('.ComputeTerminalState')).toHaveClass('remote');
+        expect(connectionState.closest('.ComputeTerminalState')).not.toHaveClass('lan');
     });
 
     it('shows enrollment guidance when the cluster is empty', async () => {

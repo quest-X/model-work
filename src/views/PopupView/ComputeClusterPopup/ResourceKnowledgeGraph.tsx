@@ -1,4 +1,4 @@
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
     ComputeClusterNode,
     ComputeResourceGraph,
@@ -14,6 +14,7 @@ interface ResourceKnowledgeGraphProps {
         agent: ComputeResourceGraphEntity,
         candidateNodeIds: string[],
     ) => void;
+    onOpenTerminal: (nodeId: string) => void;
 }
 
 interface GraphPoint {
@@ -173,16 +174,6 @@ const operationsTopology = (
     return {points, regions};
 };
 
-const agentLabel = (
-    entity: Pick<ComputeResourceGraphEntity, 'label' | 'task_type'>,
-    zh: boolean,
-): string => {
-    if (entity.task_type === 'information.web_fetch') return zh ? '公开信息采集' : 'Public information';
-    if (entity.task_type === 'system.wait') return zh ? '等待诊断' : 'Wait diagnostic';
-    if (entity.task_type === 'network.lan_discovery') return zh ? '局域网发现' : 'LAN discovery';
-    return entity.label;
-};
-
 const availabilityLabel = (available: boolean, zh: boolean): string =>
     available ? (zh ? '可用' : 'Available') : (zh ? '不可用' : 'Unavailable');
 
@@ -210,9 +201,29 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     graph,
     nodes: clusterNodes,
     zh,
+    onOpenTerminal,
 }) => {
     const [hoveredEntityId, setHoveredEntityId] = useState<string | null>(null);
     const [pinnedEntityId, setPinnedEntityId] = useState<string | null>(null);
+    const hoverClearTimer = useRef<number | null>(null);
+
+    useEffect(() => () => {
+        if (hoverClearTimer.current != null) window.clearTimeout(hoverClearTimer.current);
+    }, []);
+
+    const holdHoverCard = (entityId: string) => {
+        if (hoverClearTimer.current != null) window.clearTimeout(hoverClearTimer.current);
+        hoverClearTimer.current = null;
+        setHoveredEntityId(entityId);
+    };
+
+    const releaseHoverCard = (entityId: string) => {
+        if (hoverClearTimer.current != null) window.clearTimeout(hoverClearTimer.current);
+        hoverClearTimer.current = window.setTimeout(() => {
+            setHoveredEntityId(current => current === entityId ? null : current);
+            hoverClearTimer.current = null;
+        }, 220);
+    };
     const index = useMemo(
         () => new Map(graph.entities.map(entity => [entity.entity_id, entity])),
         [graph.entities],
@@ -267,14 +278,6 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
         return node?.network_dependencies.some(item => item.dependency_id === dependencyId && item.state === 'healthy') ?? false;
     };
 
-    const callableAgentsFor = (nodeEntity: ComputeResourceGraphEntity): ComputeResourceGraphEntity[] =>
-        graph.relations
-            .filter(relation => relation.kind === 'can_execute'
-                && relation.source_id === nodeEntity.entity_id
-                && relation.active)
-            .map(relation => index.get(relation.target_id))
-            .filter((entity): entity is ComputeResourceGraphEntity => Boolean(entity && entity.kind === 'work_agent'));
-
     const ownerFor = (device: ComputeResourceGraphEntity): ComputeResourceGraphEntity | undefined => {
         const relation = graph.relations.find(item => item.kind === 'manages' && item.target_id === device.entity_id);
         return relation ? index.get(relation.source_id) : undefined;
@@ -283,11 +286,11 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     return <section className='ComputeKnowledgePanel' aria-label={zh ? '节点与传感器拓扑' : 'Node and sensor topology'}>
         <div className='ComputeKnowledgeHeading'>
             <div>
-                <span>{zh ? '地域拓扑 · 悬浮查看 / 双击固定' : 'Regional topology · Hover / double-click to pin'}</span>
+                <span>{zh ? '地域拓扑 · 悬浮查看 / 单击固定' : 'Regional topology · Hover / click to pin'}</span>
                 <h3>{zh ? '计算群地域 Graph' : 'Compute cluster regional graph'}</h3>
                 <p>{zh
-                    ? '计算群按地域归组计算节点，节点再连接传感器；SSH、公网、Tailscale 和 agents 收进节点就近信息卡。'
-                    : 'The cluster groups compute nodes by region, then connects their sensors. SSH, public egress, Tailscale, and agents appear beside each node.'}</p>
+                    ? '计算群按地域归组计算节点，节点再连接传感器；SSH、公网、Tailscale 和终端入口收进节点就近信息卡。'
+                    : 'The cluster groups compute nodes by region, then connects their sensors. SSH, public egress, Tailscale, and terminal access appear beside each node.'}</p>
             </div>
             <div className='ComputeKnowledgeStats'>
                 <div><strong>{topology.regions.length}</strong><span>{zh ? '地域' : 'regions'}</span></div>
@@ -332,16 +335,29 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                         const target = points.get(relation.target_id);
                         const targetEntity = index.get(relation.target_id);
                         if (!source || !target || !targetEntity) return null;
-                        return <line
-                            key={relation.relation_id}
-                            x1={source.x * 10}
-                            y1={source.y * 4.4}
-                            x2={target.x * 10}
-                            y2={target.y * 4.4}
-                            className={`ComputeGraphEdge manages ${deviceClass(targetEntity)} ${relation.active ? 'active' : 'inactive'}`}
-                            data-testid='resource-graph-edge'
-                            data-relation-kind='manages'
-                        />;
+                        const x1 = source.x * 10;
+                        const y1 = source.y * 4.4;
+                        const x2 = target.x * 10;
+                        const y2 = target.y * 4.4;
+                        return <React.Fragment key={relation.relation_id}>
+                            <line
+                                x1={x1}
+                                y1={y1}
+                                x2={x2}
+                                y2={y2}
+                                className={`ComputeGraphEdge manages ${deviceClass(targetEntity)} ${relation.active ? 'active' : 'inactive'}`}
+                                data-testid='resource-graph-edge'
+                                data-relation-kind='manages'
+                            />
+                            {!relation.active && <g
+                                className='ComputeGraphEdgeUnavailable'
+                                transform={`translate(${(x1 + x2) / 2} ${(y1 + y2) / 2})`}
+                                data-testid='resource-graph-unavailable-marker'
+                            >
+                                <line x1='-5' y1='-5' x2='5' y2='5'/>
+                                <line x1='5' y1='-5' x2='-5' y2='5'/>
+                            </g>}
+                        </React.Fragment>;
                     })}
                 </svg>
 
@@ -363,11 +379,11 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                             ? (entity.state === 'available' ? 'node-online' : 'node-offline')
                             : 'sensor-node'} ${isHovered || isPinned ? 'focused' : ''} ${isPinned ? 'pinned' : ''}`}
                         style={{left: `${point.x}%`, top: `${point.y}%`}}
-                        onMouseEnter={() => setHoveredEntityId(entity.entity_id)}
-                        onMouseLeave={() => setHoveredEntityId(current => current === entity.entity_id ? null : current)}
-                        onFocus={() => setHoveredEntityId(entity.entity_id)}
-                        onBlur={() => setHoveredEntityId(current => current === entity.entity_id ? null : current)}
-                        onDoubleClick={() => {
+                        onMouseEnter={() => holdHoverCard(entity.entity_id)}
+                        onMouseLeave={() => releaseHoverCard(entity.entity_id)}
+                        onFocus={() => holdHoverCard(entity.entity_id)}
+                        onBlur={() => releaseHoverCard(entity.entity_id)}
+                        onClick={() => {
                             if (!isNode) return;
                             setPinnedEntityId(current => current === entity.entity_id ? null : entity.entity_id);
                             setHoveredEntityId(current => current === entity.entity_id ? null : current);
@@ -401,19 +417,21 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                     } as React.CSSProperties}
                     role='status'
                     aria-label={`${inspectedEntity.label} ${zh ? '运维信息' : 'operations details'}`}
+                    onMouseEnter={() => holdHoverCard(inspectedEntity.entity_id)}
+                    onMouseLeave={() => releaseHoverCard(inspectedEntity.entity_id)}
                 >
                     {/* The node card derives transport and agent state from authoritative graph relations. */}
                     {/* eslint-disable-next-line complexity */}
                     {inspectedEntity.kind === 'compute_node' ? (() => {
                         const node = inspectedEntity.node_id ? nodeIndex.get(inspectedEntity.node_id) : undefined;
-                        const agents = callableAgentsFor(inspectedEntity);
                         const sshAvailable = dependencyFor(inspectedEntity, 'control_ssh');
                         const publicAvailable = dependencyFor(inspectedEntity, 'public_http');
                         const tailscaleAvailable = dependencyFor(inspectedEntity, 'tailscale');
+                        const terminalAvailable = Boolean(node?.online && sshAvailable && inspectedEntity.node_id);
                         return <>
                             <span>{zh
-                                ? `计算节点 ${codes.get(inspectedEntity.entity_id)} · 运维信息${pinnedEntityId === inspectedEntity.entity_id ? ' · 已固定（双击节点或点击空白取消）' : ''}`
-                                : `Compute node ${codes.get(inspectedEntity.entity_id)} · Operations${pinnedEntityId === inspectedEntity.entity_id ? ' · Pinned (double-click node or click blank space to unpin)' : ''}`}</span>
+                                ? `计算节点 ${codes.get(inspectedEntity.entity_id)} · 运维信息${pinnedEntityId === inspectedEntity.entity_id ? ' · 已固定（单击节点或点击空白取消）' : ''}`
+                                : `Compute node ${codes.get(inspectedEntity.entity_id)} · Operations${pinnedEntityId === inspectedEntity.entity_id ? ' · Pinned (click node or blank space to unpin)' : ''}`}</span>
                             <strong>{inspectedEntity.label}</strong>
                             <small className={node?.online ? 'online' : 'offline'}>{node?.online
                                 ? `${zh ? '在线 · 心跳' : 'Online · heartbeat'} ${heartbeatLabel(node.heartbeat_age_seconds, zh)}`
@@ -432,10 +450,22 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                                     <small>{node?.network.tailnet || (zh ? '私有链路' : 'Private route')}</small>
                                 </div>
                             </div>
-                            <div className='ComputeGraphHoverAgents'>
-                                <span>{zh ? '可调用 agents' : 'Callable agents'}</span>
-                                {agents.length ? <div>{agents.map(agent => <em key={agent.entity_id}>{codes.get(agent.entity_id)} · {agentLabel(agent, zh)}</em>)}</div>
-                                    : <small>{zh ? '暂无可调用 agent' : 'No callable agent'}</small>}
+                            <div className='ComputeGraphHoverTerminal'>
+                                <button
+                                    type='button'
+                                    disabled={!terminalAvailable}
+                                    aria-label={zh ? `打开 ${inspectedEntity.label} 终端` : `Open ${inspectedEntity.label} terminal`}
+                                    onClick={event => {
+                                        event.stopPropagation();
+                                        if (terminalAvailable && inspectedEntity.node_id) onOpenTerminal(inspectedEntity.node_id);
+                                    }}
+                                >
+                                    <strong>{zh ? '终端' : 'Terminal'}</strong>
+                                    <small>{terminalAvailable
+                                        ? (zh ? '进入当前节点命令行' : 'Open this node command line')
+                                        : (zh ? '节点离线或 SSH 未就绪' : 'Node offline or SSH unavailable')}</small>
+                                    <span aria-hidden='true'>›</span>
+                                </button>
                             </div>
                         </>;
                     })() : <>

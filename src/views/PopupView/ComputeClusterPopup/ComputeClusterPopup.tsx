@@ -280,6 +280,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     const [loading, setLoading] = useState(true);
     const [maximized, setMaximized] = useState(false);
     const [activeWorkspace, setActiveWorkspace] = useState<ComputeWorkspace>('graph');
+    const [terminalNodeId, setTerminalNodeId] = useState('');
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState('');
     const [taskError, setTaskError] = useState('');
@@ -500,6 +501,12 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         });
     }, [lanTargets]);
 
+    const openNodeTerminal = useCallback((nodeId: string) => {
+        setTerminalNodeId(nodeId);
+        setActiveWorkspace('terminal');
+        setTaskError('');
+    }, []);
+
     const controlTask = useCallback(async (
         task: ComputeTask,
         action: 'pause' | 'resume' | 'cancel',
@@ -676,7 +683,10 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     key={workspace}
                     className={activeWorkspace === workspace ? 'active' : ''}
                     aria-current={activeWorkspace === workspace ? 'page' : undefined}
-                    onClick={() => setActiveWorkspace(workspace)}
+                    onClick={() => {
+                        if (workspace === 'terminal') setTerminalNodeId('');
+                        setActiveWorkspace(workspace);
+                    }}
                 ><span>{label}</span><strong>{count}</strong></button>)}
             </nav>
 
@@ -719,6 +729,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         zh={zh}
                         selectedTaskType={graphSelection?.taskType}
                         onSelectWorkAgent={selectWorkAgent}
+                        onOpenTerminal={openNodeTerminal}
                     />}
                 </>}
                 {!loading && activeWorkspace === 'tasks' && taskControlEnabled && <section className='ComputeTaskControl' ref={taskFormRef}>
@@ -930,7 +941,11 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                         </article>)}
                     </div>}
                 </section>}
-                {!loading && activeWorkspace === 'terminal' && status?.task_control?.terminal_sessions && <ComputeTerminalPanel zh={zh}/>}
+                {!loading && activeWorkspace === 'terminal' && status?.task_control?.terminal_sessions && <ComputeTerminalPanel
+                    zh={zh}
+                    initialNodeId={terminalNodeId}
+                    autoConnect={Boolean(terminalNodeId)}
+                />}
                 {!loading && activeWorkspace === 'terminal' && !status?.task_control?.terminal_sessions && <div className='ComputeTaskDisabled'>
                     {zh ? 'Mac Client 尚未启用终端控制。' : 'Terminal control is not enabled on the Mac Client.'}
                 </div>}

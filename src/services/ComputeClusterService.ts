@@ -226,6 +226,7 @@ export type ComputeTerminalSession = {
     session_id: string;
     node_id: string;
     node_name: string;
+    transport?: 'lan' | 'tailscale' | null;
     state: 'connecting' | 'running' | 'closed' | 'failed';
     created_at: number;
     last_activity_at: number;

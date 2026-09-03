@@ -212,7 +212,7 @@ describe('ComputeClusterPopup', () => {
         });
         const terminalSession = {
             version: 1 as const, session_id: 'terminal-session-1', node_id: 'node-12345678',
-            node_name: 'edge-01', state: 'running' as const, created_at: 1,
+            node_name: 'edge-01', transport: 'lan' as const, state: 'running' as const, created_at: 1,
             last_activity_at: 1, cursor: 0, output: '', output_truncated: false,
             exit_code: null, error: null,
         };
@@ -407,7 +407,7 @@ describe('ComputeClusterPopup', () => {
         const schedulerPanel = resourceWorkspace?.querySelector('.ComputeSchedulerPanel');
         const graphPanel = resourceWorkspace?.querySelector('.ComputeKnowledgePanel');
         expect(schedulerPanel?.nextElementSibling).toBe(graphPanel);
-        expect(screen.getByText('地域拓扑 · 悬浮查看 / 双击固定')).toBeInTheDocument();
+        expect(screen.getByText('地域拓扑 · 悬浮查看 / 单击固定')).toBeInTheDocument();
         expect(screen.getByTestId('resource-node-link-graph')).toBeInTheDocument();
         expect(screen.getAllByTestId('resource-graph-node')).toHaveLength(3);
         expect(screen.getAllByTestId('resource-graph-edge')).toHaveLength(1);
@@ -448,29 +448,30 @@ describe('ComputeClusterPopup', () => {
         expect(within(operationsCard).getByText('SSH 通路')).toBeInTheDocument();
         expect(within(operationsCard).getByText('公网出口')).toBeInTheDocument();
         expect(within(operationsCard).getByText('Tailscale 私有组网')).toBeInTheDocument();
-        expect(within(operationsCard).getByText('可调用 agents')).toBeInTheDocument();
-        expect(within(operationsCard).getByText(/A-\d{3} · 公开信息采集/)).toBeInTheDocument();
-        expect(within(operationsCard).getByText(/A-\d{3} · 等待诊断/)).toBeInTheDocument();
+        expect(within(operationsCard).getByRole('button', {name: '打开 edge-01 终端'})).toBeEnabled();
+        expect(within(operationsCard).getByText('进入当前节点命令行')).toBeInTheDocument();
+        expect(within(operationsCard).queryByText('可调用 agents')).not.toBeInTheDocument();
+        expect(within(operationsCard).queryByText(/A-\d{3}/)).not.toBeInTheDocument();
 
         await user.unhover(onlineNode);
-        expect(screen.queryByRole('status', {name: 'edge-01 运维信息'})).not.toBeInTheDocument();
+        await waitFor(() => expect(screen.queryByRole('status', {name: 'edge-01 运维信息'})).not.toBeInTheDocument());
 
-        await user.dblClick(onlineNode);
+        await user.click(onlineNode);
         expect(onlineNode).toHaveAttribute('aria-pressed', 'true');
         expect(onlineNode).toHaveClass('pinned');
         const pinnedOperationsCard = screen.getByRole('status', {name: 'edge-01 运维信息'});
         expect(pinnedOperationsCard).toHaveClass('pinned');
-        expect(within(pinnedOperationsCard).getByText(/已固定（双击节点或点击空白取消）/)).toBeInTheDocument();
+        expect(within(pinnedOperationsCard).getByText(/已固定（单击节点或点击空白取消）/)).toBeInTheDocument();
         await user.unhover(onlineNode);
         expect(screen.getByRole('status', {name: 'edge-01 运维信息'})).toBeInTheDocument();
 
         await user.click(screen.getByRole('figure', {name: '计算群节点与传感器关系图'}));
         expect(onlineNode).toHaveAttribute('aria-pressed', 'false');
-        expect(screen.queryByRole('status', {name: 'edge-01 运维信息'})).not.toBeInTheDocument();
+        await waitFor(() => expect(screen.queryByRole('status', {name: 'edge-01 运维信息'})).not.toBeInTheDocument());
 
-        await user.dblClick(onlineNode);
+        await user.click(onlineNode);
         expect(onlineNode).toHaveAttribute('aria-pressed', 'true');
-        await user.dblClick(onlineNode);
+        await user.click(onlineNode);
         expect(onlineNode).toHaveAttribute('aria-pressed', 'false');
         expect(onlineNode).not.toHaveClass('pinned');
         expect(screen.queryByRole('status', {name: 'edge-01 运维信息'})).not.toBeInTheDocument();
@@ -764,12 +765,70 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText(/连接目标与认证材料由 Mac Client 保管/)).toBeInTheDocument();
         await user.click(screen.getByRole('button', {name: '连接终端'}));
         await waitFor(() => expect(service.startTerminal).toHaveBeenCalledWith('node-12345678'));
+        const connectionState = await screen.findByText('局域网 SSH · 已连接');
+        expect(connectionState.closest('.ComputeTerminalState')).toHaveClass('lan');
         const input = screen.getByRole('textbox', {name: '终端指令'});
         await user.type(input, 'uname -a');
         await user.click(screen.getByRole('button', {name: '发送'}));
         await waitFor(() => expect(service.terminalInput).toHaveBeenCalledWith(
             'terminal-session-1', 'uname -a\n',
         ));
+    });
+
+    it('shows a remote Tailscale terminal connection in blue', async () => {
+        const user = userEvent.setup();
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.5.0', protocol_version: 1,
+            admin_configured: true,
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['system.wait'],
+                terminal_sessions: true,
+                phase8_terminal: true,
+            },
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+        const remoteSession = await service.startTerminal('node-12345678');
+        service.startTerminal.mockResolvedValue({...remoteSession, transport: 'tailscale'});
+        service.terminal.mockResolvedValue({...remoteSession, transport: 'tailscale'});
+
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        await user.click(await screen.findByRole('button', {name: '终端连接 1'}));
+        await user.click(screen.getByRole('button', {name: '连接终端'}));
+        const connectionState = await screen.findByText('Tailscale · 已连接');
+        expect(connectionState.closest('.ComputeTerminalState')).toHaveClass('remote');
+        expect(connectionState.closest('.ComputeTerminalState')).not.toHaveClass('lan');
+    });
+
+    it('opens and connects the hovered node terminal directly', async () => {
+        const user = userEvent.setup();
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.7.0', protocol_version: 1,
+            admin_configured: true,
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['system.wait'],
+                resource_knowledge_graph: true,
+                graph_interaction: true,
+                terminal_sessions: true,
+                phase8_terminal: true,
+            },
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+
+        const node = await screen.findByRole('button', {name: '查看 edge-01 节点信息'});
+        await user.click(node);
+        await user.click(screen.getByRole('button', {name: '打开 edge-01 终端'}));
+
+        expect(await screen.findByText('节点终端连接')).toBeInTheDocument();
+        expect(screen.getByRole('combobox', {name: '目标节点'})).toHaveValue('node-12345678');
+        await waitFor(() => expect(service.startTerminal).toHaveBeenCalledWith('node-12345678'));
+        await waitFor(() => expect(screen.getByRole('textbox', {name: '终端指令'})).toBeEnabled());
+        await user.click(screen.getByRole('button', {name: '断开'}));
+        await waitFor(() => expect(service.terminalControl).toHaveBeenCalledWith('terminal-session-1', 'close'));
     });
 
     it('shows enrollment guidance when the cluster is empty', async () => {

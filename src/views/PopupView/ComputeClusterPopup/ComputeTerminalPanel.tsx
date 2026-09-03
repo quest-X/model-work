@@ -8,6 +8,8 @@ import {
 
 interface ComputeTerminalPanelProps {
     zh: boolean;
+    initialNodeId?: string;
+    autoConnect?: boolean;
 }
 
 const targetReason = (target: ComputeTerminalTarget, zh: boolean): string => {
@@ -16,11 +18,33 @@ const targetReason = (target: ComputeTerminalTarget, zh: boolean): string => {
     return zh ? '可连接' : 'Ready';
 };
 
+const terminalStateLabel = (session: ComputeTerminalSession | null, zh: boolean): string => {
+    if (!session) return zh ? '未连接' : 'Disconnected';
+    if (session.state === 'failed') return zh ? '连接失败' : 'Failed';
+    if (session.state === 'closed') return zh ? '已断开' : 'Closed';
+    const state = session.state === 'running'
+        ? (zh ? '已连接' : 'Connected')
+        : (zh ? '连接中' : 'Connecting');
+    if (session.transport === 'lan') return `${zh ? '局域网 SSH' : 'LAN SSH'} · ${state}`;
+    if (session.transport === 'tailscale') return `Tailscale · ${state}`;
+    return state;
+};
+
+const terminalTransportClass = (session: ComputeTerminalSession | null): string => {
+    if (session?.transport === 'lan') return 'lan';
+    if (session?.transport) return 'remote';
+    return 'unknown';
+};
+
 // The terminal surface intentionally owns one bounded connection lifecycle.
 // eslint-disable-next-line complexity
-export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh}) => {
+export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({
+    zh,
+    initialNodeId = '',
+    autoConnect = false,
+}) => {
     const [targets, setTargets] = useState<ComputeTerminalTarget[]>([]);
-    const [selectedNode, setSelectedNode] = useState('');
+    const [selectedNode, setSelectedNode] = useState(initialNodeId);
     const [session, setSession] = useState<ComputeTerminalSession | null>(null);
     const [output, setOutput] = useState('');
     const [command, setCommand] = useState('');
@@ -29,13 +53,19 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh}) 
     const cursorRef = useRef(0);
     const sessionIdRef = useRef('');
     const outputRef = useRef<HTMLPreElement | null>(null);
+    const autoConnectAttemptRef = useRef('');
 
     const refreshTargets = useCallback(async (signal?: AbortSignal) => {
         try {
             const response = await ComputeClusterService.terminalTargets(signal);
             setTargets(response.targets);
-            setSelectedNode(current => current || response.targets.find(target => target.available)?.node_id || '');
-            const activeTarget = response.targets.find(target => target.active_session_id);
+            setSelectedNode(current => initialNodeId
+                || current
+                || response.targets.find(target => target.available)?.node_id
+                || '');
+            const activeTarget = initialNodeId
+                ? response.targets.find(target => target.node_id === initialNodeId && target.active_session_id)
+                : response.targets.find(target => target.active_session_id);
             if (activeTarget?.active_session_id && activeTarget.active_session_id !== sessionIdRef.current) {
                 const restored = await ComputeClusterService.terminal(activeTarget.active_session_id, 0, signal);
                 sessionIdRef.current = restored.session_id;
@@ -49,7 +79,7 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh}) 
                 setError(reason instanceof Error ? reason.message : String(reason));
             }
         }
-    }, []);
+    }, [initialNodeId]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -95,11 +125,11 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh}) 
         if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }, [output]);
 
-    const connect = useCallback(async () => {
-        if (!selectedNode || busy) return;
+    const connect = useCallback(async (nodeId: string) => {
+        if (!nodeId || busy) return;
         setBusy(true);
         try {
-            const next = await ComputeClusterService.startTerminal(selectedNode);
+            const next = await ComputeClusterService.startTerminal(nodeId);
             cursorRef.current = next.cursor;
             sessionIdRef.current = next.session_id;
             setOutput(next.output || '');
@@ -110,7 +140,28 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh}) 
         } finally {
             setBusy(false);
         }
-    }, [busy, selectedNode]);
+    }, [busy]);
+
+    useEffect(() => {
+        setSelectedNode(initialNodeId);
+        autoConnectAttemptRef.current = '';
+    }, [initialNodeId]);
+
+    useEffect(() => {
+        if (!autoConnect || !initialNodeId || busy || sessionIdRef.current
+            || autoConnectAttemptRef.current === initialNodeId) return;
+        const target = targets.find(item => item.node_id === initialNodeId);
+        if (!target) return;
+        setSelectedNode(initialNodeId);
+        if (!target.available) {
+            autoConnectAttemptRef.current = initialNodeId;
+            setError(zh ? `该节点终端暂不可用：${targetReason(target, zh)}` : `Terminal unavailable: ${targetReason(target, zh)}`);
+            return;
+        }
+        if (target.active_session_id) return;
+        autoConnectAttemptRef.current = initialNodeId;
+        void connect(initialNodeId);
+    }, [autoConnect, busy, connect, initialNodeId, targets, zh]);
 
     const send = useCallback(async (event: FormEvent) => {
         event.preventDefault();
@@ -153,13 +204,8 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh}) 
                     ? '连接目标与认证材料由 Mac Client 保管，不通过网页配置或接口返回；终端输出按原样展示。'
                     : 'The Mac Client owns destinations and credentials; they are never configured or returned by the web API, while terminal output is shown verbatim.'}</p>
             </div>
-            <div className={`ComputeTerminalState ${session?.state || 'idle'}`}>
-                <i/><strong>{session
-                    ? session.state === 'running' ? (zh ? '已连接' : 'Connected')
-                        : session.state === 'connecting' ? (zh ? '连接中' : 'Connecting')
-                            : session.state === 'failed' ? (zh ? '连接失败' : 'Failed')
-                                : (zh ? '已断开' : 'Closed')
-                    : (zh ? '未连接' : 'Disconnected')}</strong>
+            <div className={`ComputeTerminalState ${session?.state || 'idle'} ${terminalTransportClass(session)}`}>
+                <i/><strong>{terminalStateLabel(session, zh)}</strong>
             </div>
         </div>
 
@@ -173,7 +219,7 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh}) 
                     </option>)}
                 </select>
             </label>
-            {!active && <button type='button' disabled={!selectedNode || busy} onClick={() => void connect()}>{zh ? '连接终端' : 'Connect'}</button>}
+            {!active && <button type='button' disabled={!selectedNode || busy} onClick={() => void connect(selectedNode)}>{zh ? '连接终端' : 'Connect'}</button>}
             {active && <>
                 <button type='button' disabled={busy || session?.state !== 'running'} onClick={() => void control('interrupt')}>Ctrl+C</button>
                 <button type='button' className='danger' disabled={busy} onClick={() => void control('close')}>{zh ? '断开' : 'Disconnect'}</button>

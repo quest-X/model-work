@@ -125,6 +125,7 @@ export type ComputeRuntimeInventory = {
     processes: {
         pid: number;
         name: string;
+        cpu_percent: number | null;
         memory_bytes: number;
         state: 'running' | 'sleeping' | 'stopped' | 'zombie' | 'unknown';
     }[];

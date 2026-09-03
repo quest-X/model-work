@@ -50,7 +50,7 @@ type NodeOrdering = 'status' | 'activity' | 'name';
 type NodeVisibility = 'all' | 'online' | 'offline';
 type OverviewView = 'map' | 'graph';
 type MonitorView = 'performance' | 'processes' | 'startup' | 'services' | 'tasks' | 'conversations';
-type ProcessSortKey = 'name' | 'pid' | 'memory' | 'state';
+type ProcessSortKey = 'name' | 'pid' | 'cpu' | 'memory' | 'state';
 type StartupSortKey = 'name' | 'identifier' | 'state' | 'startType';
 type TaskSortKey = 'task' | 'device' | 'state' | 'updated';
 type SortDirection = 'asc' | 'desc';
@@ -371,6 +371,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
     const [runtimeEventsError, setRuntimeEventsError] = useState('');
     const [inspectedServiceId, setInspectedServiceId] = useState('');
     const [monitorView, setMonitorView] = useState<MonitorView>('performance');
+    const [processQuery, setProcessQuery] = useState('');
     const [processSort, setProcessSort] = useState<{key: ProcessSortKey; direction: SortDirection}>({
         key: 'memory',
         direction: 'desc',
@@ -720,16 +721,27 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
         };
     }, [inspectedServiceId, monitorView]);
 
-    const sortedProcesses = useMemo(() => [...(runtimeInventory?.processes || [])].sort((left, right) => {
+    const normalizedProcessQuery = processQuery.trim().toLocaleLowerCase();
+    const sortedProcesses = useMemo(() => (runtimeInventory?.processes || []).filter(process => {
+        if (!normalizedProcessQuery) return true;
+        return [process.name, String(process.pid), processStateLabel(process.state, zh)]
+            .some(value => value.toLocaleLowerCase().includes(normalizedProcessQuery));
+    }).sort((left, right) => {
+        if (processSort.key === 'cpu' && (left.cpu_percent === null || right.cpu_percent === null)) {
+            if (left.cpu_percent === right.cpu_percent) return left.pid - right.pid;
+            return left.cpu_percent === null ? 1 : -1;
+        }
         const comparison = processSort.key === 'name'
             ? left.name.localeCompare(right.name)
             : processSort.key === 'pid'
                 ? left.pid - right.pid
-                : processSort.key === 'memory'
-                    ? left.memory_bytes - right.memory_bytes
-                    : left.state.localeCompare(right.state);
+                : processSort.key === 'cpu'
+                    ? (left.cpu_percent || 0) - (right.cpu_percent || 0)
+                    : processSort.key === 'memory'
+                        ? left.memory_bytes - right.memory_bytes
+                        : left.state.localeCompare(right.state);
         return (processSort.direction === 'asc' ? comparison : -comparison) || left.pid - right.pid;
-    }), [processSort, runtimeInventory]);
+    }), [normalizedProcessQuery, processSort, runtimeInventory, zh]);
 
     const sortProcesses = (key: ProcessSortKey) => {
         setProcessSort(current => current.key === key
@@ -1612,16 +1624,31 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                             className='ControlMonitorProcesses ControlMonitorInventory'
                             aria-label={zh ? '进程清单' : 'Process list'}
                         >
-                            <h3>{zh ? `进程（${runtimeInventory.processes.length}）` : `Processes (${runtimeInventory.processes.length})`}</h3>
+                            <header className='ControlInventoryHeader'>
+                                <h3>{zh ? '进程' : 'Processes'}</h3>
+                                <div>
+                                    <input
+                                        type='search'
+                                        value={processQuery}
+                                        aria-label={zh ? '搜索进程' : 'Search processes'}
+                                        placeholder={zh ? '搜索名称、PID 或状态' : 'Search name, PID, or status'}
+                                        onChange={event => setProcessQuery(event.target.value)}
+                                    />
+                                    <span>{processQuery.trim() ? `${sortedProcesses.length}/${runtimeInventory.processes.length}` : runtimeInventory.processes.length}</span>
+                                </div>
+                            </header>
                             <table>
                                 <thead><tr>{([
                                     ['name', zh ? '名称' : 'Name'],
                                     ['pid', 'PID'],
+                                    ['cpu', 'CPU'],
                                     ['memory', zh ? '内存' : 'Memory'],
                                     ['state', zh ? '状态' : 'Status'],
                                 ] as [ProcessSortKey, string][]).map(([key, label]) => {
                                     const active = processSort.key === key;
-                                    const nextDirection = active && processSort.direction === 'asc' ? 'desc' : 'asc';
+                                    const nextDirection = active
+                                        ? (processSort.direction === 'asc' ? 'desc' : 'asc')
+                                        : (key === 'name' ? 'asc' : 'desc');
                                     return <th key={key} aria-sort={active ? (processSort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
                                         <button
                                             type='button'
@@ -1635,6 +1662,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                                 <tbody>{sortedProcesses.map(process => <tr key={process.pid}>
                                     <td>{process.name}</td>
                                     <td>{process.pid}</td>
+                                    <td>{process.cpu_percent === null ? '—' : `${process.cpu_percent.toFixed(1)}%`}</td>
                                     <td>{bytes(process.memory_bytes, zh)}</td>
                                     <td>{processStateLabel(process.state, zh)}</td>
                                 </tr>)}</tbody>

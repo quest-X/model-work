@@ -327,11 +327,13 @@ describe('ControlCenterView', () => {
             processes: [{
                 pid: 9876,
                 name: 'python.exe',
+                cpu_percent: 35,
                 memory_bytes: 64 * 1024 ** 2,
                 state: 'running',
             }, {
                 pid: 1234,
                 name: 'zeta.exe',
+                cpu_percent: 10,
                 memory_bytes: 128 * 1024 ** 2,
                 state: 'sleeping',
             }],
@@ -446,6 +448,14 @@ describe('ControlCenterView', () => {
         const processSection = within(monitor).getByLabelText('进程清单');
         const processRows = () => within(processSection).getAllByRole('row').slice(1);
         expect(processRows()[0]).toHaveTextContent('zeta.exe');
+        expect(processRows()[0]).toHaveTextContent('10.0%');
+        fireEvent.click(within(processSection).getByRole('button', {name: '按CPU降序排列'}));
+        expect(processRows()[0]).toHaveTextContent('python.exe');
+        const processSearch = within(processSection).getByRole('searchbox', {name: '搜索进程'});
+        fireEvent.change(processSearch, {target: {value: 'zeta'}});
+        expect(processRows()).toHaveLength(1);
+        expect(processRows()[0]).toHaveTextContent('zeta.exe');
+        fireEvent.change(processSearch, {target: {value: ''}});
         fireEvent.click(within(processSection).getByRole('button', {name: '按名称升序排列'}));
         expect(processRows()[0]).toHaveTextContent('python.exe');
         fireEvent.click(within(processSection).getByRole('button', {name: '按名称降序排列'}));

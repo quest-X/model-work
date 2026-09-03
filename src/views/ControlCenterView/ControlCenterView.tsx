@@ -1557,10 +1557,10 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                             : (zh ? '资源随节点心跳刷新' : 'Resources refresh with the node heartbeat')}
                         {' · '}{runtimeTime(runtimeSnapshot?.captured_at || selectedNode.resources.captured_at, zh)}</p>
                     </div>
-                    <div className='ControlMonitorHeaderActions'>
+                    <div className='ComputeClusterHeaderActions'>
                         <button
                             type='button'
-                            className={`ControlMonitorWindowToggle ${monitorMaximized ? 'restore' : 'maximize'}`}
+                            className={`window-toggle ${monitorMaximized ? 'restore' : 'maximize'}`}
                             aria-label={monitorMaximized
                                 ? (zh ? '还原资源监视器窗口' : 'Restore resource monitor window')
                                 : (zh ? '放大资源监视器窗口' : 'Maximize resource monitor window')}
@@ -1569,6 +1569,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                         ><i aria-hidden='true'/></button>
                         <button
                             type='button'
+                            className='close'
                             autoFocus
                             aria-label={zh ? '关闭资源监视器' : 'Close resource monitor'}
                             onClick={() => setInspectedServiceId('')}

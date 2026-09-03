@@ -1209,6 +1209,13 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
         : null;
     const cpuUsage = selectedNode ? cpuUsedPercent(selectedNode) : null;
     const gpuUsage = selectedNode ? gpuUsedPercent(selectedNode) : null;
+    const gpuMemoryUsedMb = selectedNode?.resources.gpus.reduce((sum, gpu) => sum + gpu.memory_used_mb, 0) || 0;
+    const gpuMemoryTotalMb = selectedNode?.resources.gpus.reduce((sum, gpu) => sum + gpu.memory_total_mb, 0) || 0;
+    const gpuTemperature = Math.max(
+        ...((selectedNode?.resources.gpus || []).map(gpu => gpu.temperature_celsius)
+            .filter((value): value is number => Number.isFinite(value))),
+        Number.NEGATIVE_INFINITY,
+    );
     const controlNetworkState = selectedNode?.online ? dependency(selectedNode, 'control_ssh') : 'unknown';
     const remoteNetworkState = selectedNode?.online ? dependency(selectedNode, 'tailscale') : 'unknown';
     const networkValue = controlNetworkState === 'healthy' && remoteNetworkState === 'healthy'
@@ -1258,7 +1265,11 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
         id: 'gpu',
         label: zh ? '图形处理器' : 'GPU',
         value: gpuUsage === null ? '—' : `${gpuUsage}%`,
-        detail: `${selectedNode?.resources.gpus.length || 0} GPU`,
+        detail: selectedNode?.resources.gpus.length
+            ? (zh
+                ? `${selectedNode.resources.gpus.length} GPU · 显存 ${bytes(gpuMemoryUsedMb * 1024 ** 2, true)} / ${bytes(gpuMemoryTotalMb * 1024 ** 2, true)} · 最高温度 ${Number.isFinite(gpuTemperature) ? `${gpuTemperature}°C` : '未上报'}`
+                : `${selectedNode.resources.gpus.length} GPU · Memory ${bytes(gpuMemoryUsedMb * 1024 ** 2, false)} / ${bytes(gpuMemoryTotalMb * 1024 ** 2, false)} · Hottest ${Number.isFinite(gpuTemperature) ? `${gpuTemperature}°C` : 'not reported'}`)
+            : (zh ? '未检测到 GPU' : 'No GPU detected'),
         values: selectedResourceHistory.map(sample => sample.gpu),
         color: '#ad83ff',
         emptyLabel: zh ? '等待 GPU 数据' : 'Waiting for GPU data',

@@ -7,6 +7,7 @@ export type ComputeGpuResource = {
     memory_total_mb: number;
     memory_used_mb: number;
     utilization_percent: number;
+    temperature_celsius?: number | null;
 };
 
 export type ComputeNodeResources = {

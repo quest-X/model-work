@@ -262,8 +262,18 @@ describe('ControlCenterView', () => {
     });
 
     it('opens the resource monitor without overview service cards', async () => {
+        const monitoredNode = runtimeNode('节点甲');
+        monitoredNode.resources.gpus = [{
+            index: 0,
+            uuid: 'GPU-1',
+            name: 'NVIDIA RTX 4090',
+            memory_total_mb: 24_564,
+            memory_used_mb: 1_024,
+            utilization_percent: 33,
+            temperature_celsius: 67,
+        }];
         jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([
-            runtimeNode('节点甲'),
+            monitoredNode,
             runtimeNode('节点乙'),
         ]);
         const runtime = jest.mocked(ComputeClusterService.runtime).mockImplementation(async () => ({
@@ -441,6 +451,9 @@ describe('ControlCenterView', () => {
         fireEvent.click(within(monitor).getByRole('button', {name: '磁盘 50%'}));
         expect(within(monitor).getByLabelText('磁盘 性能详情')).toHaveTextContent('读取 8.0 MB/s');
         expect(within(monitor).getByLabelText('磁盘 性能详情')).toHaveTextContent('蓝色读取 · 橙色写入');
+        fireEvent.click(within(monitor).getByRole('button', {name: '图形处理器 33%'}));
+        expect(within(monitor).getByLabelText('图形处理器 性能详情')).toHaveTextContent('显存 1.0 GB / 24.0 GB');
+        expect(within(monitor).getByLabelText('图形处理器 性能详情')).toHaveTextContent('最高温度 67°C');
 
         const monitorNavigation = within(monitor).getByRole('navigation', {name: '资源监视器导航'});
         expect(runtimeInventory).toHaveBeenCalledWith('节点甲-id', expect.anything());

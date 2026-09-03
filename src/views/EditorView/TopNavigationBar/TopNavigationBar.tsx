@@ -13,6 +13,7 @@ import {Language, LanguageConfig} from '../../../data/LanguageConfig';
 import {QueueDataSyncStatus, QueueItem} from '../../../store/queue/types';
 import {updateQueueItem} from '../../../store/queue/actionCreators';
 import {getEngineBaseUrl, getExtensionEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
+import {AUTH_PREVIEW_SIGN_OUT_EVENT} from '../../AuthPreview/AuthPreview';
 
 interface IProps {
     updateActivePopupTypeAction: (activePopupType: PopupWindowType) => any;
@@ -25,17 +26,34 @@ interface IProps {
     language: Language;
     hasCoreEngine: boolean;
     hasExtensionEngine: boolean;
+    platformMode?: 'annotation' | 'control';
+    onPlatformSwitch?: () => void;
 }
 
 type ServicesDropdown = 'core' | 'extension' | null;
+const ACCOUNT_AVATAR_KEY = 'opensight.account.avatar';
+const ACCOUNT_AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const ACCOUNT_AVATAR_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
+// Top navigation intentionally owns its mutually exclusive menus and platform mode.
+// eslint-disable-next-line complexity
 export const TopNavigationBar: React.FC<IProps> = (props) => {
     const currentTexts = LanguageConfig[props.language];
+    const controlMode = props.platformMode === 'control';
     const [showActionsDropdown, setShowActionsDropdown] = useState(false);
+    const [showAccountDropdown, setShowAccountDropdown] = useState(false);
     const [activeServicesDropdown, setActiveServicesDropdown] = useState<ServicesDropdown>(null);
     const [cameraConnectAvailable, setCameraConnectAvailable] = useState(false);
     const [computeClusterAvailable, setComputeClusterAvailable] = useState(false);
+    const [accountAvatar, setAccountAvatar] = useState(() => {
+        try {
+            return window.localStorage.getItem(ACCOUNT_AVATAR_KEY) || '';
+        } catch {
+            return '';
+        }
+    });
     const renameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const avatarInputRef = useRef<HTMLInputElement | null>(null);
     const activeQueueItem = props.queueItems.find(item => item.id === props.activeQueueItemId);
     const localChangeCount = props.queueItems.filter(
         item => item.dataSyncStatus === QueueDataSyncStatus.DIRTY,
@@ -105,6 +123,7 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
 
     const toggleServicesDropdown = (dropdown: Exclude<ServicesDropdown, null>) => {
         setShowActionsDropdown(false);
+        setShowAccountDropdown(false);
         setActiveServicesDropdown((activeDropdown) => activeDropdown === dropdown ? null : dropdown);
     };
 
@@ -185,7 +204,36 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
 
     const toggleActionsDropdown = () => {
         setActiveServicesDropdown(null);
+        setShowAccountDropdown(false);
         setShowActionsDropdown(!showActionsDropdown);
+    };
+
+    const toggleAccountDropdown = () => {
+        setShowActionsDropdown(false);
+        setActiveServicesDropdown(null);
+        setShowAccountDropdown(open => !open);
+    };
+
+    const uploadAccountAvatar = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+        if (!ACCOUNT_AVATAR_TYPES.has(file.type) || file.size > ACCOUNT_AVATAR_MAX_BYTES) {
+            window.alert(currentTexts.account.avatarUploadError);
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+            if (typeof reader.result !== 'string') return;
+            try {
+                window.localStorage.setItem(ACCOUNT_AVATAR_KEY, reader.result);
+                setAccountAvatar(reader.result);
+            } catch {
+                window.alert(currentTexts.account.avatarUploadError);
+            }
+        };
+        reader.onerror = () => window.alert(currentTexts.account.avatarUploadError);
+        reader.readAsDataURL(file);
     };
 
     // 点击外部关闭下拉菜单
@@ -222,6 +270,28 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
     }, [activeServicesDropdown]);
+
+    useEffect(() => {
+        const closeAccountDropdown = (event: MouseEvent | KeyboardEvent) => {
+            if (
+                event instanceof KeyboardEvent
+                    ? event.key === 'Escape'
+                    : !(event.target as Element).closest('.AccountDropdownContainer')
+            ) {
+                setShowAccountDropdown(false);
+            }
+        };
+
+        if (showAccountDropdown) {
+            document.addEventListener('mousedown', closeAccountDropdown);
+            document.addEventListener('keydown', closeAccountDropdown);
+        }
+
+        return () => {
+            document.removeEventListener('mousedown', closeAccountDropdown);
+            document.removeEventListener('keydown', closeAccountDropdown);
+        };
+    }, [showAccountDropdown]);
 
     return (
         <div className='TopNavigationBar'>
@@ -373,6 +443,83 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                         onClick={toggleLanguage}
                         externalClassName={'language-toggle-button'}
                     />
+                    <div className='AccountDropdownContainer'>
+                        <button
+                            type='button'
+                            className='AccountAvatarButton'
+                            aria-label={currentTexts.account.openMenu}
+                            aria-haspopup='menu'
+                            aria-expanded={showAccountDropdown}
+                            onClick={toggleAccountDropdown}
+                        >
+                            {accountAvatar ? <img src={accountAvatar} alt=''/> : 'L'}
+                        </button>
+                        <input
+                            ref={avatarInputRef}
+                            className='AccountAvatarInput'
+                            type='file'
+                            accept='image/jpeg,image/png,image/webp'
+                            aria-label={currentTexts.account.uploadAvatar}
+                            onChange={uploadAccountAvatar}
+                        />
+                        {showAccountDropdown && <div
+                            className='AccountDropdown'
+                            role='menu'
+                            aria-label={currentTexts.account.menuLabel}
+                        >
+                            <div className='AccountSummary'>
+                                <button
+                                    type='button'
+                                    className='AccountSummaryAvatar'
+                                    aria-label={currentTexts.account.uploadAvatar}
+                                    title={currentTexts.account.uploadAvatar}
+                                    onClick={() => avatarInputRef.current?.click()}
+                                >
+                                    {accountAvatar ? <img src={accountAvatar} alt=''/> : 'L'}
+                                </button>
+                                <span className='AccountSummaryText'>
+                                    <strong>{currentTexts.account.displayName}</strong>
+                                    <small>{currentTexts.account.role}</small>
+                                </span>
+                            </div>
+                            <div className='AccountMenuDivider'/>
+                            <button
+                                type='button'
+                                role='menuitem'
+                                className='AccountMenuItem'
+                                onClick={() => {
+                                    setShowAccountDropdown(false);
+                                    props.onPlatformSwitch?.();
+                                }}
+                            >
+                                <img src='/ico/api.png' alt=''/>
+                                {controlMode
+                                    ? currentTexts.account.switchToAnnotationPlatform
+                                    : currentTexts.account.switchToControlPlatform}
+                            </button>
+                            <button
+                                type='button'
+                                role='menuitem'
+                                className='AccountMenuItem'
+                                onClick={() => setShowAccountDropdown(false)}
+                            >
+                                <img src='/ico/secure.png' alt=''/>
+                                {currentTexts.account.changePassword}
+                            </button>
+                            <button
+                                type='button'
+                                role='menuitem'
+                                className='AccountMenuItem AccountMenuItemDanger'
+                                onClick={() => {
+                                    setShowAccountDropdown(false);
+                                    window.dispatchEvent(new Event(AUTH_PREVIEW_SIGN_OUT_EVENT));
+                                }}
+                            >
+                                <img src='/ico/right.png' alt=''/>
+                                {currentTexts.account.signOut}
+                            </button>
+                        </div>}
+                    </div>
                 </div>
             </div>
         </div>

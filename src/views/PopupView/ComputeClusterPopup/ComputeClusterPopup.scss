@@ -12,6 +12,28 @@
   transition: padding 180ms ease;
 
   &.maximized { padding: 8px; }
+
+  &.embedded {
+    display: block;
+    height: auto;
+    padding: 0;
+    background: transparent;
+
+    > .ComputeClusterPopup {
+      width: 100%;
+      height: auto;
+      overflow: visible;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+
+      > .ComputeClusterContent {
+        overflow: visible;
+        padding: 0;
+      }
+    }
+  }
 }
 
 .ComputeClusterPopup {
@@ -379,6 +401,12 @@
   &.inactive { opacity: .34; stroke-dasharray: 5 5; }
   &.muted { opacity: .08; }
   &.focused { opacity: 1; stroke-width: 2.2; filter: drop-shadow(0 0 3px currentColor); }
+}
+
+.ComputeGraphEdgeUnavailable line {
+  stroke: #ff6868;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
 }
 
 .ComputeGraphNode {

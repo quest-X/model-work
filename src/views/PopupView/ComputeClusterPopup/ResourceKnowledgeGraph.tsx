@@ -332,16 +332,29 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                         const target = points.get(relation.target_id);
                         const targetEntity = index.get(relation.target_id);
                         if (!source || !target || !targetEntity) return null;
-                        return <line
-                            key={relation.relation_id}
-                            x1={source.x * 10}
-                            y1={source.y * 4.4}
-                            x2={target.x * 10}
-                            y2={target.y * 4.4}
-                            className={`ComputeGraphEdge manages ${deviceClass(targetEntity)} ${relation.active ? 'active' : 'inactive'}`}
-                            data-testid='resource-graph-edge'
-                            data-relation-kind='manages'
-                        />;
+                        const x1 = source.x * 10;
+                        const y1 = source.y * 4.4;
+                        const x2 = target.x * 10;
+                        const y2 = target.y * 4.4;
+                        return <React.Fragment key={relation.relation_id}>
+                            <line
+                                x1={x1}
+                                y1={y1}
+                                x2={x2}
+                                y2={y2}
+                                className={`ComputeGraphEdge manages ${deviceClass(targetEntity)} ${relation.active ? 'active' : 'inactive'}`}
+                                data-testid='resource-graph-edge'
+                                data-relation-kind='manages'
+                            />
+                            {!relation.active && <g
+                                className='ComputeGraphEdgeUnavailable'
+                                transform={`translate(${(x1 + x2) / 2} ${(y1 + y2) / 2})`}
+                                data-testid='resource-graph-unavailable-marker'
+                            >
+                                <line x1='-5' y1='-5' x2='5' y2='5'/>
+                                <line x1='5' y1='-5' x2='-5' y2='5'/>
+                            </g>}
+                        </React.Fragment>;
                     })}
                 </svg>
 

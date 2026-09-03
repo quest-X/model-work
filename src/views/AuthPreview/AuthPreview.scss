@@ -1,0 +1,269 @@
+@import '../../settings/Settings';
+
+.AuthPreview {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    #111315;
+  background-size: 42px 42px;
+  color: #f4f6f7;
+
+  .AuthPreviewGlow {
+    position: absolute;
+    width: 620px;
+    height: 620px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(0, 158, 253, 0.13), transparent 68%);
+    pointer-events: none;
+    transform: translate(180px, -160px);
+  }
+
+  .AuthPreviewCard {
+    position: relative;
+    z-index: 1;
+    box-sizing: border-box;
+    width: min(400px, 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 18px;
+    background: rgba(27, 30, 33, 0.96);
+    box-shadow: 0 28px 90px rgba(0, 0, 0, 0.52);
+    padding: 24px;
+  }
+
+  .AuthPreviewHeader,
+  .AuthPreviewBrand,
+  .AuthPreviewDevice {
+    display: flex;
+    align-items: center;
+  }
+
+  .AuthPreviewHeader {
+    justify-content: space-between;
+  }
+
+  .AuthPreviewBrand {
+    gap: 9px;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+
+  .AuthPreviewLogo {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background: #202428;
+
+    img {
+      width: 17px;
+      height: 17px;
+    }
+  }
+
+  .AuthPreviewEdition {
+    border: 1px solid rgba(0, 158, 253, 0.28);
+    border-radius: 999px;
+    background: rgba(0, 158, 253, 0.08);
+    padding: 4px 8px;
+    color: #8cd3ff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .AuthPreviewIntro {
+    margin: 40px 0 28px;
+
+    h1 {
+      margin: 12px 0 7px;
+      font-size: 25px;
+      font-weight: 600;
+      letter-spacing: -0.015em;
+    }
+
+    p {
+      margin: 0;
+      color: rgba(255, 255, 255, 0.48);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+  }
+
+  .AuthPreviewDevice {
+    gap: 7px;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 11px;
+    font-weight: 600;
+
+    span {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #5cc980;
+      box-shadow: 0 0 0 4px rgba(92, 201, 128, 0.09);
+    }
+  }
+
+  .AuthPreviewForm {
+    display: flex;
+    flex-direction: column;
+
+    label {
+      margin: 0 0 7px;
+      color: rgba(255, 255, 255, 0.66);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    input[type='text'],
+    input[type='password'] {
+      box-sizing: border-box;
+      width: 100%;
+      height: 43px;
+      margin-bottom: 17px;
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-radius: 9px;
+      outline: none;
+      background: #141719;
+      padding: 0 13px;
+      color: #f7f7f7;
+      font: inherit;
+      font-size: 13px;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+      &::placeholder {
+        color: rgba(255, 255, 255, 0.24);
+      }
+
+      &:focus {
+        border-color: rgba(0, 158, 253, 0.68);
+        box-shadow: 0 0 0 3px rgba(0, 158, 253, 0.1);
+      }
+    }
+
+    .AuthPreviewError {
+      margin: -7px 0 12px;
+      color: #ff7d83;
+      font-size: 11px;
+    }
+
+    .AuthPreviewPreferences {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin: -2px 0 8px;
+
+      label {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        box-sizing: border-box;
+        height: 34px;
+        margin: 0;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        padding: 0 10px;
+        color: rgba(255, 255, 255, 0.58);
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: border-color 0.15s ease, background 0.15s ease;
+
+        &:hover {
+          border-color: rgba(255, 255, 255, 0.16);
+          background: rgba(255, 255, 255, 0.04);
+        }
+      }
+
+      input {
+        display: grid;
+        place-items: center;
+        appearance: none;
+        flex: 0 0 auto;
+        width: 13px;
+        height: 13px;
+        margin: 0;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 4px;
+        background: #121517;
+        cursor: pointer;
+
+        &::after {
+          width: 5px;
+          height: 3px;
+          border-bottom: 1.5px solid #fff;
+          border-left: 1.5px solid #fff;
+          content: '';
+          transform: translateY(-1px) rotate(-45deg) scale(0);
+          transition: transform 0.12s ease;
+        }
+
+        &:checked {
+          border-color: #009efd;
+          background: #009efd;
+        }
+
+        &:checked::after {
+          transform: translateY(-1px) rotate(-45deg) scale(1);
+        }
+
+        &:focus-visible {
+          outline: 2px solid rgba(94, 194, 255, 0.75);
+          outline-offset: 2px;
+        }
+      }
+    }
+
+    button {
+      height: 43px;
+      margin-top: 5px;
+      border: 0;
+      border-radius: 9px;
+      background: #f4f6f7;
+      color: #111315;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.15s ease;
+
+      &:hover {
+        background: #ffffff;
+      }
+
+      &:active {
+        transform: translateY(1px);
+      }
+
+      &:focus-visible {
+        outline: 2px solid #5ec2ff;
+        outline-offset: 3px;
+      }
+    }
+  }
+
+}
+
+@media (max-width: 520px) {
+  .AuthPreview {
+    padding: 18px;
+
+    .AuthPreviewCard {
+      padding: 21px;
+    }
+  }
+}

@@ -8,6 +8,7 @@ import {
 
 interface ComputeTerminalPanelProps {
     zh: boolean;
+    preferredNodeId?: string;
 }
 
 const targetReason = (target: ComputeTerminalTarget, zh: boolean): string => {
@@ -36,7 +37,7 @@ const terminalTransportClass = (session: ComputeTerminalSession | null): string 
 
 // The terminal surface intentionally owns one bounded connection lifecycle.
 // eslint-disable-next-line complexity
-export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh}) => {
+export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh, preferredNodeId}) => {
     const [targets, setTargets] = useState<ComputeTerminalTarget[]>([]);
     const [selectedNode, setSelectedNode] = useState('');
     const [session, setSession] = useState<ComputeTerminalSession | null>(null);
@@ -52,7 +53,10 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh}) 
         try {
             const response = await ComputeClusterService.terminalTargets(signal);
             setTargets(response.targets);
-            setSelectedNode(current => current || response.targets.find(target => target.available)?.node_id || '');
+            setSelectedNode(current => current
+                || response.targets.find(target => target.node_id === preferredNodeId && target.available)?.node_id
+                || response.targets.find(target => target.available)?.node_id
+                || '');
             const activeTarget = response.targets.find(target => target.active_session_id);
             if (activeTarget?.active_session_id && activeTarget.active_session_id !== sessionIdRef.current) {
                 const restored = await ComputeClusterService.terminal(activeTarget.active_session_id, 0, signal);
@@ -67,7 +71,7 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh}) 
                 setError(reason instanceof Error ? reason.message : String(reason));
             }
         }
-    }, []);
+    }, [preferredNodeId]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -136,7 +140,7 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh}) 
         if (!session || !value || busy || session.state !== 'running') return;
         setBusy(true);
         try {
-            await ComputeClusterService.terminalInput(session.session_id, `${value}\n`);
+            await ComputeClusterService.terminalInput(session.session_id, `${value}\r`);
             setCommand('');
             setError('');
         } catch (reason) {

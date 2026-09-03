@@ -13,12 +13,18 @@ export type ComputeNodeResources = {
     captured_at: number;
     platform: string;
     architecture: string;
+    hardware_model?: string | null;
     cpu_logical: number;
+    cpu_percent?: number | null;
     load_average_1m: number | null;
     memory_total_bytes: number | null;
     memory_available_bytes: number | null;
     disk_total_bytes: number;
     disk_free_bytes: number;
+    disk_read_bytes_per_second?: number | null;
+    disk_write_bytes_per_second?: number | null;
+    network_receive_bytes_per_second?: number | null;
+    network_send_bytes_per_second?: number | null;
     gpus: ComputeGpuResource[];
 };
 
@@ -53,6 +59,7 @@ export type ComputeClusterNode = {
     name: string;
     agent_version: string;
     capabilities: string[];
+    control_transport?: 'lan' | 'tailscale' | null;
     network: {
         provider: 'tailscale';
         installed: boolean;
@@ -73,6 +80,79 @@ export type ComputeClusterNode = {
     online: boolean;
     heartbeat_age_seconds: number;
     lan_scan_targets?: ComputeLanScanTarget[];
+};
+
+export type ComputeRuntimeState = 'healthy' | 'degraded' | 'unavailable' | 'unknown';
+
+export type ComputeRuntimeService = {
+    service_id: string;
+    name: string;
+    kind: 'service' | 'worker';
+    state: ComputeRuntimeState;
+    version: string | null;
+    uptime_seconds: number | null;
+    restart_count: number | null;
+    health: {
+        state: ComputeRuntimeState;
+        checked_at: number;
+        status_code: number | null;
+        latency_ms: number | null;
+    };
+    process: {
+        pid: number | null;
+        state: 'running' | 'stopped' | 'unknown';
+    } | null;
+    task_counts?: Record<string, number>;
+};
+
+export type ComputeRuntimeSnapshot = {
+    schema_version: 'runtime.snapshot.v1';
+    captured_at: number;
+    summary: {
+        total: number;
+        healthy: number;
+        degraded: number;
+        unavailable: number;
+        task_counts: Record<string, number>;
+    };
+    services: ComputeRuntimeService[];
+};
+
+export type ComputeRuntimeInventory = {
+    schema_version: 'runtime.inventory.v1';
+    captured_at: number;
+    processes_available: boolean;
+    processes: {
+        pid: number;
+        name: string;
+        memory_bytes: number;
+        state: 'running' | 'sleeping' | 'stopped' | 'zombie' | 'unknown';
+    }[];
+    startup_services_available: boolean;
+    startup_services: {
+        name: string;
+        display_name: string;
+        state: 'running' | 'stopped' | 'paused' | 'pending' | 'unknown';
+        start_type: 'automatic';
+    }[];
+};
+
+export type ComputeRuntimeEvent = {
+    cursor: number;
+    created_at: number;
+    service_id: string;
+    level: 'info' | 'warning' | 'error';
+    event_type: string;
+    message: string;
+    task_id: string | null;
+};
+
+export type ComputeRuntimeEvents = {
+    schema_version: 'runtime.events.v1';
+    captured_at: number;
+    cursor: number;
+    events: ComputeRuntimeEvent[];
+    has_more: boolean;
 };
 
 export type ComputeClusterStatus = {
@@ -106,7 +186,7 @@ export type ComputeClusterStatus = {
 
 export type ComputeTaskMode = 'online' | 'background';
 export type ComputeTaskState = 'queued' | 'running' | 'paused' | 'succeeded' | 'failed' | 'cancelled';
-export type ComputeTaskType = 'system.wait' | 'information.web_fetch' | 'network.lan_discovery';
+export type ComputeTaskType = 'system.wait' | 'information.web_fetch' | 'network.lan_discovery' | 'network.peer_probe';
 
 export type ComputeLanScanTarget = {
     interface: string;
@@ -130,6 +210,16 @@ export type ComputeLanDiscoveryResult = {
     ports_scanned: number[];
     hosts: {address: string; hostname: string; mac: string; ports: {port: number; service: string}[]}[];
     truncated: boolean;
+};
+
+export type ComputePeerProbeResult = {
+    schema_version: 'peer-probe.console-result.v1';
+    peer_id: string;
+    transport: 'tailscale';
+    path: 'direct' | 'relay' | 'unavailable';
+    reachable: boolean;
+    ssh_reachable: boolean;
+    latency_ms: number | null;
 };
 
 export type ComputeLanScanTargetsResponse = {
@@ -283,10 +373,10 @@ export type ComputeTask = {
     control_request?: 'pause' | 'cancel' | null;
     checkpoint?: Record<string, unknown> | null;
     progress?: {completed?: number; total?: number; unit?: string; percent?: number} | null;
-    result?: {elapsed_seconds: number} | ComputeWebFetchResult | ComputeLanDiscoveryResult | null;
+    result?: {elapsed_seconds: number} | ComputeWebFetchResult | ComputeLanDiscoveryResult | ComputePeerProbeResult | null;
     error?: string | null;
     attempt: number;
-    parameters: {seconds?: number; url?: string; cidr?: string};
+    parameters: {seconds?: number; url?: string; cidr?: string; peer_id?: string};
     resources?: Partial<ComputeResourceRequest>;
     placement?: {
         mode: 'automatic' | 'manual';
@@ -421,6 +511,26 @@ export class ComputeClusterService {
         return response.nodes;
     }
 
+    public static runtime(nodeId: string, signal?: AbortSignal): Promise<ComputeRuntimeSnapshot> {
+        return request(`/nodes/${encodeURIComponent(nodeId)}/runtime`, signal);
+    }
+
+    public static runtimeInventory(nodeId: string, signal?: AbortSignal): Promise<ComputeRuntimeInventory> {
+        return request(`/nodes/${encodeURIComponent(nodeId)}/runtime/inventory`, signal);
+    }
+
+    public static runtimeEvents(
+        nodeId: string,
+        cursor = 0,
+        limit = 50,
+        signal?: AbortSignal,
+    ): Promise<ComputeRuntimeEvents> {
+        return request(
+            `/nodes/${encodeURIComponent(nodeId)}/runtime/events?cursor=${cursor}&limit=${limit}`,
+            signal,
+        );
+    }
+
     public static tasks(signal?: AbortSignal): Promise<ComputeTasksResponse> {
         return request('/tasks', signal);
     }
@@ -510,6 +620,7 @@ export class ComputeClusterService {
             seconds?: number;
             url?: string;
             cidr?: string;
+            peer_id?: string;
             lease_seconds?: number;
             resources?: ComputeResourceCapacity;
         },

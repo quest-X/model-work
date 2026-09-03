@@ -25,6 +25,9 @@ import {ComputeTerminalPanel} from './ComputeTerminalPanel';
 
 interface IProps {
     language: Language;
+    embedded?: boolean;
+    initialWorkspace?: ComputeWorkspace;
+    preferredNodeId?: string;
 }
 
 const AUTO_PLACEMENT = '__automatic__';
@@ -270,7 +273,12 @@ const NodeCard: React.FC<NodeCardProps> = ({node, zh}) => <article className={`C
 
 // This container intentionally owns the polling lifecycle and the complete modal state.
 // eslint-disable-next-line complexity
-export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
+export const ComputeClusterPopup: React.FC<IProps> = ({
+    language,
+    embedded = false,
+    initialWorkspace = 'graph',
+    preferredNodeId,
+}) => {
     const zh = language === Language.CHINESE;
     const [nodes, setNodes] = useState<ComputeClusterNode[]>([]);
     const [status, setStatus] = useState<ComputeClusterStatus | null>(null);
@@ -279,11 +287,11 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
     const [resourceGraph, setResourceGraph] = useState<ComputeResourceGraph | null>(null);
     const [loading, setLoading] = useState(true);
     const [maximized, setMaximized] = useState(false);
-    const [activeWorkspace, setActiveWorkspace] = useState<ComputeWorkspace>('graph');
+    const [activeWorkspace, setActiveWorkspace] = useState<ComputeWorkspace>(initialWorkspace);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState('');
     const [taskError, setTaskError] = useState('');
-    const [selectedNode, setSelectedNode] = useState(AUTO_PLACEMENT);
+    const [selectedNode, setSelectedNode] = useState(preferredNodeId || AUTO_PLACEMENT);
     const [taskType, setTaskType] = useState<ComputeTaskType>('information.web_fetch');
     const [taskMode, setTaskMode] = useState<ComputeTaskMode>('background');
     const [taskSeconds, setTaskSeconds] = useState(20);
@@ -618,8 +626,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
         entity.kind === 'compute_node' || entity.kind === 'managed_device',
     ).length ?? 0;
 
-    return <div className={`ComputeClusterBackdrop${maximized ? ' maximized' : ''}`}>
-        <section className={`ComputeClusterPopup${maximized ? ' maximized' : ''}`} aria-label={zh ? '计算群' : 'Compute Cluster'}>
+    return <div className={`ComputeClusterBackdrop${maximized ? ' maximized' : ''}${embedded ? ' embedded' : ''}`}>
+        <section className={`ComputeClusterPopup${maximized ? ' maximized' : ''}${embedded ? ' embedded' : ''}`} aria-label={zh ? '计算群' : 'Compute Cluster'}>
+            {!embedded && <>
             <header>
                 <div>
                     <span className='ComputeClusterEyebrow'>OpenSight · model-work-node</span>
@@ -660,11 +669,12 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                 <div><span>{zh ? '设备' : 'Devices'}</span><strong>{totals.devices}</strong></div>
                 <div><span>{zh ? '运行任务' : 'Active tasks'}</span><strong>{totals.activeTasks}</strong></div>
             </div>
+            </>}
 
             {error && <div className='ComputeClusterError' role='alert'>{error}</div>}
             {taskError && <div className='ComputeClusterError' role='alert'>{taskError}</div>}
 
-            <nav className='ComputeWorkspaceNav' aria-label={zh ? '计算群工作区' : 'Compute cluster workspaces'}>
+            {!embedded && <nav className='ComputeWorkspaceNav' aria-label={zh ? '计算群工作区' : 'Compute cluster workspaces'}>
                 {([
                     ['graph', zh ? '节点与传感器' : 'Nodes & sensors', operationsGraphEntityCount],
                     ['tasks', zh ? '工作调度' : 'Work scheduling', tasks.length],
@@ -678,7 +688,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({language}) => {
                     aria-current={activeWorkspace === workspace ? 'page' : undefined}
                     onClick={() => setActiveWorkspace(workspace)}
                 ><span>{label}</span><strong>{count}</strong></button>)}
-            </nav>
+            </nav>}
 
             <div className='ComputeClusterContent'>
                 {loading && <div className='ComputeClusterLoading'><span/>{zh ? '正在读取节点…' : 'Loading nodes…'}</div>}

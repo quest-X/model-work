@@ -33,7 +33,11 @@ const queueItem = (id: string, dataSyncStatus: QueueDataSyncStatus): QueueItem =
     dataSyncStatus,
 });
 
-const renderNavigation = (queueItems: QueueItem[], language = Language.CHINESE) => render(
+const renderNavigation = (
+    queueItems: QueueItem[],
+    language = Language.CHINESE,
+    overrides: Partial<React.ComponentProps<typeof TopNavigationBar>> = {},
+) => render(
     <TopNavigationBar
         updateActivePopupTypeAction={jest.fn()}
         updateProjectDataAction={jest.fn()}
@@ -45,6 +49,7 @@ const renderNavigation = (queueItems: QueueItem[], language = Language.CHINESE) 
         language={language}
         hasCoreEngine
         hasExtensionEngine={false}
+        {...overrides}
     />,
 );
 
@@ -144,5 +149,54 @@ describe('TopNavigationBar extension tool entries', () => {
         fireEvent.click(screen.getByText('透视'));
         expect(updatePopup).toHaveBeenLastCalledWith(PopupWindowType.MODEL_INSPECTOR);
         global.fetch = previousFetch;
+    });
+});
+
+describe('TopNavigationBar account preview', () => {
+    beforeEach(() => window.localStorage.clear());
+
+    it('places an accessible account menu after the language control', () => {
+        const switchPlatform = jest.fn();
+        renderNavigation([], Language.CHINESE, {onPlatformSwitch: switchPlatform});
+
+        const avatar = screen.getByRole('button', {name: '打开账户菜单'});
+        expect(avatar).toHaveAttribute('aria-expanded', 'false');
+
+        fireEvent.click(avatar);
+        expect(avatar).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByRole('menu', {name: '账户菜单'})).toBeInTheDocument();
+        expect(screen.getByText('本地管理员')).toBeInTheDocument();
+        const platformSwitch = screen.getByRole('menuitem', {name: '切换到控制后台'});
+        expect(platformSwitch).not.toHaveAttribute('href');
+        expect(screen.getByRole('menuitem', {name: '修改密码'})).toBeInTheDocument();
+        expect(screen.getByRole('menuitem', {name: '退出登录'})).toBeInTheDocument();
+
+        fireEvent.click(platformSwitch);
+        expect(switchPlatform).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole('menu', {name: '账户菜单'})).not.toBeInTheDocument();
+    });
+
+    it('offers a return to the annotation platform from control mode', () => {
+        renderNavigation([], Language.CHINESE, {platformMode: 'control'});
+
+        expect(screen.getByText('项目名称:')).toBeInTheDocument();
+        expect(screen.getByText('核心引擎')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', {name: '打开账户菜单'}));
+        expect(screen.getByRole('menuitem', {name: '切换到标注平台'})).toBeInTheDocument();
+    });
+
+    it('uploads and persists an account avatar from the account summary', async () => {
+        const {container} = renderNavigation([], Language.CHINESE);
+        fireEvent.click(screen.getByRole('button', {name: '打开账户菜单'}));
+
+        expect(screen.getByRole('button', {name: '上传头像'})).toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText('上传头像', {selector: 'input'}), {
+            target: {files: [new File(['avatar'], 'avatar.png', {type: 'image/png'})]},
+        });
+
+        await waitFor(() => expect(container.querySelector('.AccountAvatarButton img'))
+            .toHaveAttribute('src', expect.stringContaining('data:image/png;base64,')));
+        expect(window.localStorage.getItem('opensight.account.avatar'))
+            .toContain('data:image/png;base64,');
     });
 });

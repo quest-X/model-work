@@ -1,6 +1,9 @@
 import {PopupWindowType} from '../data/enums/PopupWindowType';
 
 export class Settings {
+    public static readonly AUTH_PREVIEW_USERNAME: string = 'admin';
+    public static readonly AUTH_PREVIEW_PASSWORD: string = 'admin';
+
     public static readonly GITHUB_URL: string = 'https://github.com/SkalskiP';
     public static readonly MEDIUM_URL: string = 'https://medium.com/@piotr.skalski92';
     public static readonly TWITCH_URL: string = 'https://www.twitch.tv/skalskip';

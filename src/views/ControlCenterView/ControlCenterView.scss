@@ -1,0 +1,1453 @@
+@import '../../settings/Settings';
+
+.ControlCenterView {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.88);
+
+  > .SideNavigationBar {
+    min-height: 0;
+
+    .NavigationBarContentWrapper {
+      min-height: 0;
+      justify-content: flex-start;
+      align-items: stretch;
+    }
+  }
+}
+
+.ControlMachinePanel {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  background: $darkThemeSecondColor;
+}
+
+.ControlMachineOrganizer {
+  display: flex;
+  box-sizing: border-box;
+  flex: 0 0 31px;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.28);
+  padding: 3px 6px;
+  background: rgba(0, 0, 0, 0.08);
+
+  select {
+    min-width: 0;
+    height: 23px;
+    flex: 1;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    outline: none;
+    background: rgba(0, 0, 0, 0.16);
+    padding: 0 3px;
+    color: rgba(255, 255, 255, 0.62);
+    color-scheme: dark;
+    font: inherit;
+    font-size: 9px;
+
+    &:hover,
+    &:focus-visible {
+      border-color: rgba(0, 154, 255, 0.55);
+      color: rgba(255, 255, 255, 0.9);
+    }
+  }
+}
+
+.ControlMachineList {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.ControlMachineGroupHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 25px;
+  padding: 0 10px 0 13px;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 9px;
+
+  strong { font-weight: 600; }
+}
+
+.ControlMachineItem {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 64px;
+  border: 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.22);
+  border-left: 3px solid transparent;
+  outline: none;
+  background: transparent;
+  padding: 9px 9px 8px 10px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &.overview { padding-left: 42px; }
+
+  &:hover,
+  &:focus-visible {
+    background: rgba(255, 255, 255, 0.035);
+  }
+
+  &.selected {
+    border-left-color: $primaryColor;
+    background: rgba(0, 154, 255, 0.12);
+
+    .ControlMachineIdentity strong {
+      color: #009aff;
+    }
+  }
+}
+
+.ControlStatusDot {
+  display: inline-block;
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #80868b;
+
+  &.healthy { background: #47c77a; }
+  &.warning { background: #e7a640; }
+  &.offline { background: #df6262; }
+  &.unknown { background: #80868b; }
+}
+
+.ControlMachineIcon {
+  box-sizing: border-box;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 3px;
+  object-fit: cover;
+}
+
+span.ControlMachineIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+
+  svg {
+    width: 21px;
+    height: 21px;
+    fill: currentColor;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+  }
+
+  &.computer { color: rgba(255, 255, 255, 0.5); }
+  &.terminal {
+    color: #79d89e;
+    font: 700 11px SFMono-Regular, Consolas, monospace;
+  }
+  &.network {
+    color: #79c9f8;
+    font: 700 9px SFMono-Regular, Consolas, monospace;
+  }
+  &.computer rect,
+  &.computer path { fill: none; }
+}
+
+.ControlMachineIdentity {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  margin: 0 8px;
+
+  strong,
+  small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  small {
+    margin-top: 4px;
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 9px;
+  }
+}
+
+.ControlMachineState {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 9px;
+
+  &.healthy { color: #79d89e; }
+  &.offline { color: #ef8b8b; }
+}
+
+.ControlMachineEmpty {
+  margin: 0;
+  padding: 24px 14px;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 11px;
+  text-align: center;
+}
+
+.ControlCenterView .ControlCenterWorkspace {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  background: #1a1a1a;
+}
+
+.EditorTopNavigationBar.ControlTopNavigationBar {
+  display: flex;
+  flex: 0 0 $editorTopNavigationBarHeight;
+  width: 100%;
+  padding-left: 24px;
+  justify-content: space-between;
+}
+
+.ControlToolbarGroup {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 10px;
+
+  strong {
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    color: rgba(255, 255, 255, 0.34);
+    font-size: 8px;
+  }
+
+  &.right {
+    flex: 0 0 auto;
+
+    button {
+      display: grid;
+      place-items: center;
+      box-sizing: border-box;
+      width: 30px;
+      height: 30px;
+      border: 0;
+      border-radius: 3px;
+      outline: none;
+      background: transparent;
+      cursor: pointer;
+
+      img {
+        width: 15px;
+        height: 15px;
+        filter: brightness(0) invert(1);
+        opacity: 0.7;
+      }
+
+      &:hover:not(:disabled),
+      &:focus-visible {
+        background: rgba(0, 0, 0, 0.2);
+      }
+
+      &:disabled {
+        cursor: default;
+        opacity: 0.35;
+      }
+    }
+  }
+}
+
+.ControlOverviewViewSwitch {
+  display: flex;
+  overflow: hidden;
+  height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+
+  button {
+    width: auto !important;
+    height: 24px !important;
+    border-radius: 0 !important;
+    padding: 0 9px;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 9px;
+
+    & + button { border-left: 1px solid rgba(255, 255, 255, 0.08) !important; }
+    &.active { background: rgba(45, 159, 220, 0.24) !important; color: #78ceff; }
+  }
+}
+
+.ControlGeoMapPanel {
+  background: linear-gradient(145deg, rgba(35, 58, 76, 0.58), rgba(25, 27, 31, 0.97));
+  border-color: rgba(92, 187, 242, 0.3);
+
+  .ComputeKnowledgeHeading > div:first-child > span { color: #75caf9; }
+  .ComputeKnowledgeStats strong { color: #9edcff; }
+}
+
+.ControlGeoMapToolbar {
+  .ControlGeoMapLevels {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+
+    button {
+      border: 0;
+      outline: 0;
+      background: transparent;
+      padding: 2px 1px;
+      color: rgba(255, 255, 255, 0.42);
+      cursor: pointer;
+      font: inherit;
+
+      &.active { color: #79ccfb; font-weight: 700; }
+      &:focus-visible { outline: 1px solid rgba(121, 204, 251, 0.75); outline-offset: 2px; }
+    }
+
+    > span { color: rgba(255, 255, 255, 0.18); }
+  }
+
+  i.ControlGeoMapDot {
+    width: 7px;
+    height: 7px;
+    background: #5fda9a;
+    box-shadow: 0 0 7px rgba(95, 218, 154, 0.52);
+
+    &.offline { background: #e45c62; box-shadow: 0 0 7px rgba(228, 92, 98, 0.42); }
+  }
+}
+
+.ControlGeoMapViewport {
+  position: relative;
+  overflow: hidden;
+  margin: 0 12px 12px;
+  min-height: 500px;
+  border: 1px solid rgba(91, 195, 255, 0.16);
+  border-radius: 7px;
+  background: #0b1218;
+
+  > svg {
+    display: block;
+    width: 100%;
+    min-width: 720px;
+    height: min(58vh, 650px);
+    min-height: 500px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+
+    &.dragging { cursor: grabbing; }
+
+    path {
+      fill: rgba(66, 102, 124, 0.58);
+      stroke: rgba(127, 185, 217, 0.5);
+      stroke-width: 0.8;
+      vector-effect: non-scaling-stroke;
+      transition: fill 120ms ease, stroke 120ms ease;
+      cursor: pointer;
+
+      &:hover,
+      &.hovered {
+        fill: rgba(62, 160, 208, 0.7);
+        stroke: #9be0ff;
+        stroke-width: 1.7;
+      }
+    }
+  }
+}
+
+.ControlGeoMapOcean { fill: #091117; }
+
+.ControlGeoMapInspector {
+  position: absolute;
+  top: 13px;
+  left: 14px;
+  z-index: 2;
+  display: flex;
+  min-width: 140px;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid rgba(95, 190, 241, 0.18);
+  border-radius: 5px;
+  background: rgba(8, 16, 22, 0.85);
+  padding: 8px 10px;
+  pointer-events: none;
+
+  strong { color: rgba(225, 245, 255, 0.9); font-size: 10px; }
+  span { color: rgba(255, 255, 255, 0.4); font-size: 8px; }
+}
+
+.ControlGeoMapZoom {
+  position: absolute;
+  top: 13px;
+  right: 14px;
+  z-index: 2;
+  display: grid;
+  overflow: hidden;
+  border: 1px solid rgba(95, 190, 241, 0.2);
+  border-radius: 5px;
+
+  button {
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    outline: 0;
+    background: rgba(8, 16, 22, 0.88);
+    color: rgba(220, 243, 255, 0.78);
+    cursor: pointer;
+    font-size: 14px;
+
+    &:last-child { border-bottom: 0; }
+    &:hover,
+    &:focus-visible { background: rgba(48, 135, 181, 0.42); color: white; }
+  }
+}
+
+.ControlGeoMapMarker {
+  pointer-events: none;
+
+  circle {
+    fill: rgba(31, 128, 82, 0.92);
+    stroke: #72e4aa;
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+    filter: drop-shadow(0 0 6px rgba(82, 222, 148, 0.8));
+  }
+
+  text {
+    fill: white;
+    font-size: 8px;
+    font-weight: 700;
+    text-anchor: middle;
+  }
+
+  &.offline circle { fill: rgba(141, 62, 65, 0.94); stroke: #ff8f94; }
+}
+
+.ControlCenterBody {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ControlFeatureWorkspace {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 680px;
+  padding: 20px 24px 36px;
+}
+
+.ControlNodeContent {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 680px;
+  padding: 20px 24px 36px;
+}
+
+.ControlRefreshWarning {
+  margin-bottom: 14px;
+  border-left: 3px solid #e7a640;
+  background: rgba(231, 166, 64, 0.08);
+  padding: 9px 11px;
+  color: #e8bd79;
+  font-size: 10px;
+}
+
+.ControlRuntimeWarning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  border-left: 3px solid #e7a640;
+  border-bottom: 1px solid rgba(231, 166, 64, 0.18);
+  background: rgba(231, 166, 64, 0.08);
+  padding: 7px 12px 7px 16px;
+  color: #e8bd79;
+  font-size: 10px;
+
+  span { min-width: 0; overflow-wrap: anywhere; }
+
+  button {
+    display: grid;
+    flex: 0 0 22px;
+    width: 22px;
+    height: 22px;
+    place-items: center;
+    border: 0;
+    border-radius: 3px;
+    outline: 0;
+    background: transparent;
+    color: rgba(255, 230, 190, 0.62);
+    cursor: pointer;
+    font-size: 16px;
+
+    &:hover,
+    &:focus-visible { background: rgba(231, 166, 64, 0.15); color: #ffe3b4; }
+  }
+}
+
+.ControlNodeHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+
+  h1 {
+    margin: 7px 0 4px;
+    color: white;
+    font-size: 24px;
+    line-height: 1.2;
+  }
+
+  p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 10px;
+  }
+}
+
+.ControlNodeTags {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ControlNodeTag,
+.ControlNodeTagForm {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 22px;
+  border: 1px solid rgba(0, 154, 255, 0.35);
+  border-radius: 2px;
+  background: rgba(0, 154, 255, 0.1);
+  color: #73caff;
+  font-size: 10px;
+}
+
+.ControlNodeTag {
+  padding-left: 8px;
+
+  button {
+    width: 22px;
+    height: 20px;
+    border: 0;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.46);
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible { color: white; }
+  }
+}
+
+.ControlNodeTagForm {
+  border-style: dashed;
+  background: transparent;
+
+  &:focus-within { border-color: $primaryColor; }
+
+  input {
+    width: 50px;
+    height: 20px;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    padding: 0 7px;
+    color: rgba(255, 255, 255, 0.85);
+    font: inherit;
+
+    &::placeholder { color: rgba(255, 255, 255, 0.28); }
+  }
+
+  button {
+    width: 22px;
+    height: 20px;
+    border: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    background: transparent;
+    color: #73caff;
+    font: inherit;
+    cursor: pointer;
+
+    &:disabled {
+      color: rgba(255, 255, 255, 0.2);
+      cursor: default;
+    }
+  }
+}
+
+.ControlResourceStrip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: $darkThemeSecondColor;
+
+  > div {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    padding: 13px 15px;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+
+    &:last-child { border-right: 0; }
+  }
+
+  span,
+  small {
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    margin: 5px 0 3px;
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 17px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.ControlDeviceStrip {
+  strong {
+    font-size: 13px;
+  }
+}
+
+.ControlSection {
+  margin-top: 24px;
+  padding-top: 20px;
+}
+
+.ControlSectionFirst {
+  margin-top: 22px;
+  padding-top: 0;
+}
+
+.ControlSectionHeading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 10px;
+
+  h2 {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 14px;
+  }
+
+  > span {
+    display: grid;
+    place-items: center;
+    width: 23px;
+    height: 18px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 9px;
+  }
+}
+
+.ControlServiceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.ControlServiceCard {
+  display: flex;
+  box-sizing: border-box;
+  min-height: 92px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
+  background: $darkThemeSecondColor;
+  padding: 13px;
+
+  .ControlStatusDot { margin-right: 10px; }
+
+  > div,
+  > .ControlRuntimeIdentity {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  span,
+  small {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 9px;
+  }
+
+  strong {
+    margin: 6px 0 5px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+  }
+
+  small { line-height: 1.45; }
+}
+
+button.ControlServiceCard {
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover:not(:disabled),
+  &:focus-visible {
+    border-color: rgba(0, 154, 255, 0.65);
+    background: rgba(0, 154, 255, 0.08);
+    outline: none;
+  }
+
+  &:disabled { cursor: default; }
+}
+
+.ControlRuntimeServiceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  align-items: start;
+  gap: 8px;
+}
+
+.ControlRuntimeService { width: 100%; }
+
+.ControlRuntimeIdentity {
+  span,
+  strong,
+  small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.ControlServiceOpen {
+  align-self: center;
+  margin-left: 10px;
+  color: rgba(255, 255, 255, 0.38) !important;
+  font-size: 16px !important;
+}
+
+.ControlRuntimeEvents {
+  margin-top: 10px;
+
+  > strong { color: rgba(255, 255, 255, 0.55); font-size: 9px; }
+  ul { margin: 7px 0 0; padding: 0; list-style: none; }
+  li {
+    display: flex;
+    flex-direction: column;
+    margin-top: 5px;
+    border-left: 2px solid #6a7175;
+    padding-left: 7px;
+
+    &.warning { border-left-color: #e7a640; }
+    &.error { border-left-color: #df6262; }
+  }
+  span { color: rgba(255, 255, 255, 0.34); font-size: 8px; }
+  small { margin-top: 2px; color: rgba(255, 255, 255, 0.68); font-size: 9px; }
+  p { margin: 7px 0 0; color: rgba(255, 255, 255, 0.34); font-size: 9px; }
+}
+
+.ControlResourceMonitorBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.72);
+  padding: 24px;
+}
+
+.ControlResourceMonitor {
+  display: flex;
+  width: min(1180px, calc(100vw - 48px));
+  height: min(700px, calc(100vh - 48px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: #191a1c;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+
+  > header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 18px 20px 16px;
+
+    > div > span { color: #69c6ff; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+    h2 { margin: 4px 0; color: white; font-size: 20px; }
+    p { margin: 0; color: rgba(255, 255, 255, 0.4); font-size: 9px; }
+    button {
+      width: 30px;
+      height: 30px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 3px;
+      outline: 0;
+      background: rgba(255, 255, 255, 0.04);
+      color: rgba(255, 255, 255, 0.72);
+      font-size: 20px;
+      cursor: pointer;
+
+      &:hover,
+      &:focus-visible { border-color: $primaryColor; color: white; }
+    }
+  }
+}
+
+.ControlMonitorWorkspace {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.ControlMonitorNav {
+  display: flex;
+  flex: 0 0 150px;
+  flex-direction: column;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.12);
+  padding: 10px 8px;
+
+  button {
+    display: flex;
+    align-items: center;
+    min-height: 46px;
+    border: 0;
+    border-radius: 3px;
+    outline: 0;
+    background: transparent;
+    padding: 0 14px;
+    color: rgba(255, 255, 255, 0.62);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible { background: rgba(255, 255, 255, 0.05); color: white; }
+    &[aria-current='page'] { background: rgba(0, 154, 255, 0.12); color: white; }
+  }
+}
+
+.ControlMonitorContent {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.ControlMonitorPerformance {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 250px minmax(0, 1fr);
+}
+
+.ControlMonitorResourceList {
+  overflow: auto;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.12);
+  padding: 10px;
+
+  > button {
+    display: grid;
+    width: 100%;
+    min-height: 72px;
+    grid-template-columns: 86px minmax(0, 1fr);
+    align-items: center;
+    gap: 11px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    padding: 8px;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible { border-color: rgba(0, 154, 255, 0.5); outline: 0; }
+    &[aria-pressed='true'] { border-color: rgba(0, 154, 255, 0.72); background: rgba(0, 154, 255, 0.1); }
+  }
+
+  .ControlMonitorChart { height: 46px; margin-top: 0; }
+  .ControlMonitorChartEmpty { visibility: hidden; }
+}
+
+.ControlMonitorMetricIdentity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+
+  strong { overflow: hidden; color: rgba(255, 255, 255, 0.9); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  small { overflow: hidden; margin-top: 3px; color: rgba(255, 255, 255, 0.42); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+.ControlMonitorMetricDetail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  background: #202124;
+  padding: 18px 22px 14px;
+
+  > header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+
+    span { color: rgba(255, 255, 255, 0.4); font-size: 9px; }
+    h3 { margin: 3px 0 0; color: white; font-size: 24px; font-weight: 500; }
+    > strong { color: white; font-size: 24px; font-weight: 500; }
+  }
+  > p { margin: 5px 0 0; color: rgba(255, 255, 255, 0.42); font-size: 9px; }
+  > .ControlMonitorChart { min-height: 190px; flex: 1; margin-top: 12px; }
+  > footer {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    color: rgba(255, 255, 255, 0.34);
+    font-size: 8px;
+  }
+}
+
+.ControlMonitorChart {
+  position: relative;
+  height: 46px;
+  overflow: hidden;
+  margin-top: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 100% 11px, 32px 100%;
+
+  svg { display: block; width: 100%; height: 100%; }
+  polygon { opacity: 0.13; }
+  polyline { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+}
+
+.ControlMonitorChartEmpty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.28) !important;
+}
+
+.ControlMonitorActivity {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(430px, 1.1fr) minmax(360px, 0.9fr);
+}
+
+.ControlMonitorTaskHistory,
+.ControlMonitorConversationHistory {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 20px;
+
+  > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+
+    h3 { margin: 0; color: white; font-size: 18px; font-weight: 500; }
+    p { margin: 4px 0 0; color: rgba(255, 255, 255, 0.36); font-size: 8px; }
+    > span { color: rgba(255, 255, 255, 0.36); font-size: 9px; }
+  }
+}
+
+.ControlMonitorTaskHistory {
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+
+  table { width: 100%; border-collapse: collapse; font-size: 9px; }
+  th,
+  td { border-bottom: 1px solid rgba(255, 255, 255, 0.07); padding: 10px 8px; color: rgba(255, 255, 255, 0.58); text-align: left; }
+  th { position: sticky; top: 0; background: #191a1c; color: rgba(255, 255, 255, 0.34); font-size: 8px; font-weight: 500; }
+  th button {
+    display: flex;
+    align-items: center;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+
+    span { margin-left: 5px; color: rgba(255, 255, 255, 0.24); }
+    &:hover,
+    &:focus-visible { color: #73caff; }
+  }
+  td:first-child { max-width: 220px; }
+  td strong,
+  td small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td strong { color: rgba(255, 255, 255, 0.86); font-size: 10px; }
+  td small { max-width: 190px; margin-top: 3px; color: rgba(255, 255, 255, 0.28); font-size: 8px; }
+}
+
+.ControlTaskHistoryState {
+  color: rgba(255, 255, 255, 0.58);
+
+  &.queued,
+  &.paused { color: #e8bd79; }
+  &.running { color: #69c6ff; }
+  &.succeeded { color: #79d89e; }
+  &.failed,
+  &.cancelled { color: #ef8b8b; }
+}
+
+.ControlMonitorStandaloneHistory {
+  flex: 1;
+  border-right: 0;
+}
+
+.ControlMonitorConversationHistory {
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.ControlConversationWorkspace {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 170px minmax(0, 1fr);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.ControlConversationList {
+  overflow: auto;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.12);
+
+  button {
+    display: block;
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    outline: 0;
+    background: transparent;
+    padding: 10px;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible { background: rgba(255, 255, 255, 0.05); }
+    &[aria-current='page'] { background: rgba(0, 154, 255, 0.12); }
+  }
+
+  strong,
+  small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  strong { color: rgba(255, 255, 255, 0.82); font-size: 10px; }
+  small { margin-top: 4px; color: rgba(255, 255, 255, 0.3); font-size: 8px; }
+}
+
+.ControlConversationMessages {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  padding: 12px;
+
+  > p { color: rgba(255, 255, 255, 0.34); font-size: 9px; text-align: center; }
+  article { display: flex; max-width: 72%; flex-direction: column; align-items: flex-start; align-self: flex-start; margin-bottom: 12px; }
+  article.user { align-items: flex-end; align-self: flex-end; }
+  article > span { color: rgba(255, 255, 255, 0.34); font-size: 8px; }
+  article > p { max-width: 100%; margin: 4px 0 0; border-radius: 8px 8px 8px 2px; background: rgba(255, 255, 255, 0.08); padding: 8px 10px; color: rgba(255, 255, 255, 0.76); font-size: 9px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+  article.user > p { border-radius: 8px 8px 2px; background: rgba(0, 154, 255, 0.18); text-align: left; }
+}
+
+.ControlMonitorHistoryError {
+  margin: 0 0 10px;
+  color: #ef8b8b;
+  font-size: 9px;
+}
+
+.ControlMonitorBody {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(420px, 1.4fr) minmax(280px, 0.8fr);
+}
+
+.ControlMonitorProcesses,
+.ControlMonitorInspector {
+  min-width: 0;
+  overflow: auto;
+  padding: 18px 20px;
+
+  > h3 { margin: 0 0 12px; color: rgba(255, 255, 255, 0.88); font-size: 12px; }
+}
+
+.ControlMonitorProcesses {
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+
+  table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  th,
+  td { border-bottom: 1px solid rgba(255, 255, 255, 0.07); padding: 10px 8px; color: rgba(255, 255, 255, 0.58); text-align: left; }
+  th { color: rgba(255, 255, 255, 0.34); font-size: 8px; font-weight: 500; }
+  th button {
+    display: flex;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+
+    span { margin-left: 5px; }
+    &:focus-visible { outline: 1px solid rgba(255, 255, 255, 0.5); outline-offset: 3px; }
+  }
+  tr.selected { background: rgba(0, 154, 255, 0.1); }
+  td:first-child { width: 44%; color: rgba(255, 255, 255, 0.84); }
+  td button {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    .ControlStatusDot { margin: 0 8px 0 0; }
+    &:focus-visible { color: #73caff; }
+  }
+}
+
+.ControlMonitorInventory {
+  flex: 1;
+  border-right: 0;
+}
+
+.ControlMonitorInspector {
+  background: rgba(0, 0, 0, 0.12);
+
+  > span { color: #79d89e; font-size: 9px; }
+  > h3 { margin: 4px 0 16px; color: white; font-size: 16px; }
+  dl { margin: 0; }
+  dl > div { margin-bottom: 12px; }
+  dt { color: rgba(255, 255, 255, 0.34); font-size: 8px; }
+  dd { margin: 4px 0 0; color: rgba(255, 255, 255, 0.72); font-size: 9px; line-height: 1.5; }
+}
+
+.ControlMonitorUnavailable {
+  display: flex;
+  min-height: 180px;
+  flex: 1 0 180px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  text-align: center;
+
+  strong { color: rgba(255, 255, 255, 0.8); font-size: 13px; }
+  span { max-width: 540px; margin-top: 8px; color: rgba(255, 255, 255, 0.4); font-size: 9px; line-height: 1.6; }
+}
+
+.ControlRuntimeAlerts {
+  margin-top: 8px;
+  border-left: 3px solid #e7a640;
+  background: rgba(231, 166, 64, 0.06);
+  padding: 9px 11px;
+
+  > strong { color: #e8bd79; font-size: 10px; }
+  ul { margin: 6px 0 0; padding: 0; list-style: none; }
+  li { display: flex; gap: 8px; margin-top: 4px; font-size: 9px; }
+  span { flex: 0 0 auto; color: rgba(255, 255, 255, 0.34); }
+  small { color: rgba(255, 255, 255, 0.68); font-size: inherit; }
+}
+
+.ControlRuntimeAlertsTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  border-bottom: 1px solid rgba(231, 166, 64, 0.18);
+  padding-left: 16px;
+
+  > div { min-width: 0; }
+  > div > strong { color: #e8bd79; font-size: 10px; }
+  button {
+    display: grid;
+    flex: 0 0 22px;
+    width: 22px;
+    height: 22px;
+    place-items: center;
+    border: 0;
+    border-radius: 3px;
+    outline: 0;
+    background: transparent;
+    color: rgba(255, 230, 190, 0.62);
+    cursor: pointer;
+    font-size: 16px;
+
+    &:hover,
+    &:focus-visible { background: rgba(231, 166, 64, 0.15); color: #ffe3b4; }
+  }
+}
+
+.ControlCameraGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 8px;
+}
+
+.ControlSubsectionHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px 0 8px;
+  color: rgba(255, 255, 255, 0.52);
+
+  strong {
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  span {
+    display: grid;
+    place-items: center;
+    min-width: 23px;
+    height: 18px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.07);
+    font-size: 9px;
+  }
+}
+
+.ControlSubsectionHeadingFirst {
+  margin-top: 0;
+}
+
+.ControlCameraCard {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 84px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
+  background: $darkThemeSecondColor;
+  padding: 12px 14px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover:not(:disabled),
+  &:focus-visible {
+    border-color: rgba(0, 154, 255, 0.65);
+    background: rgba(0, 154, 255, 0.08);
+    outline: none;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.55;
+  }
+}
+
+.ControlCameraError {
+  margin-top: 8px;
+  color: #ef8b8b;
+  font-size: 10px;
+}
+
+.ControlCameraIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  margin-right: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(0, 0, 0, 0.13);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 18px;
+}
+
+.ControlCameraIdentity {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+
+  strong,
+  small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong { color: rgba(255, 255, 255, 0.9); font-size: 12px; }
+  small { margin-top: 3px; color: rgba(255, 255, 255, 0.38); font-size: 9px; }
+
+  span {
+    display: flex;
+    align-items: center;
+    margin-top: 7px;
+    color: #92989c;
+    font-size: 9px;
+
+    i {
+      width: 6px;
+      height: 6px;
+      margin-right: 5px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    &.healthy { color: #79d89e; }
+    &.warning { color: #e8bd79; }
+    &.offline { color: #ef8b8b; }
+  }
+}
+
+.ControlCameraChannels {
+  display: flex;
+  flex: 0 0 48px;
+  flex-direction: column;
+  align-items: center;
+  margin-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.07);
+  padding-left: 10px;
+
+  strong { color: rgba(255, 255, 255, 0.88); font-size: 17px; }
+  small { margin-top: 3px; color: rgba(255, 255, 255, 0.36); font-size: 8px; }
+}
+
+.ControlEmptyBlock,
+.ControlCenterMessage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 110px;
+  border: 1px dashed rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 10px;
+}
+
+.ControlCenterMessage {
+  position: absolute;
+  inset: 0;
+  min-height: 260px;
+  flex-direction: column;
+  border: 0;
+
+  strong {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 15px;
+  }
+
+  span {
+    max-width: 540px;
+    margin-top: 8px;
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 10px;
+    text-align: center;
+  }
+
+  button {
+    margin-top: 16px;
+    border: 1px solid $primaryColor;
+    border-radius: 3px;
+    background: transparent;
+    padding: 6px 16px;
+    color: #73caff;
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+      background: rgba(0, 158, 253, 0.1);
+      color: white;
+    }
+  }
+}
+
+@media (max-width: 1100px) {
+  .ControlServiceGrid { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+  .ControlRuntimeServiceGrid { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+  .ControlCameraGrid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .ControlResourceMonitorBackdrop { padding: 0; }
+  .ControlResourceMonitor { width: 100%; height: 100%; border: 0; border-radius: 0; }
+  .ControlMonitorWorkspace { flex-direction: column; }
+  .ControlMonitorNav { flex: 0 0 auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+  .ControlMonitorNav button { flex: 0 0 auto; }
+  .ControlMonitorPerformance { display: block; min-height: 0; flex-basis: auto; }
+  .ControlMonitorResourceList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; border-right: 0; }
+  .ControlMonitorMetricDetail { min-height: 300px; }
+  .ControlMonitorBody { display: block; overflow: auto; }
+  .ControlMonitorActivity { display: block; overflow: auto; }
+  .ControlMonitorTaskHistory { border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+  .ControlMonitorConversationHistory { min-height: 420px; overflow: visible; }
+  .ControlMonitorProcesses,
+  .ControlMonitorInspector { overflow: visible; }
+  .ControlMonitorProcesses { border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+}

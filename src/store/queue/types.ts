@@ -41,6 +41,7 @@ export type QueueItem = {
     uploadedAt: number; // timestamp
     thumbnail?: string; // Base64 thumbnail for images/videos
     cameraResourceId?: string;
+    cameraNodeId?: string;
     cameraChannelId?: string;
     cameraHost?: string;
     cameraModel?: string;

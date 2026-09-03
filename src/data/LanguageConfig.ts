@@ -8,6 +8,18 @@ export interface LanguageTexts {
     projectName: string;
     uploadImages: string;
     languageToggle: string;
+    account: {
+        openMenu: string;
+        menuLabel: string;
+        displayName: string;
+        role: string;
+        uploadAvatar: string;
+        avatarUploadError: string;
+        switchToControlPlatform: string;
+        switchToAnnotationPlatform: string;
+        changePassword: string;
+        signOut: string;
+    };
     
     // EmptyProjectView
     welcomeTitle: string;
@@ -505,6 +517,18 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
         projectName: '项目名称:',
         uploadImages: '上传图像',
         languageToggle: '中文',
+        account: {
+            openMenu: '打开账户菜单',
+            menuLabel: '账户菜单',
+            displayName: '本地管理员',
+            role: '管理员账户',
+            uploadAvatar: '上传头像',
+            avatarUploadError: '请选择不超过 2 MB 的 JPG、PNG 或 WebP 图片',
+            switchToControlPlatform: '切换到控制后台',
+            switchToAnnotationPlatform: '切换到标注平台',
+            changePassword: '修改密码',
+            signOut: '退出登录',
+        },
         
         // EmptyProjectView
         welcomeTitle: '欢迎使用 Opensight Platform',
@@ -998,6 +1022,18 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
         projectName: 'Project Name:',
         uploadImages: 'Upload Images',
         languageToggle: 'English',
+        account: {
+            openMenu: 'Open account menu',
+            menuLabel: 'Account menu',
+            displayName: 'Local administrator',
+            role: 'Administrator account',
+            uploadAvatar: 'Upload avatar',
+            avatarUploadError: 'Choose a JPG, PNG, or WebP image up to 2 MB',
+            switchToControlPlatform: 'Switch to Control Center',
+            switchToAnnotationPlatform: 'Switch to Annotation Platform',
+            changePassword: 'Change password',
+            signOut: 'Sign out',
+        },
         
         // EmptyProjectView
         welcomeTitle: 'Welcome to Opensight Platform',

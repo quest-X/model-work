@@ -20,7 +20,8 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     const originalImageRef = useRef<HTMLImageElement>(null);
     const frozenFrameRef = useRef<HTMLCanvasElement>(null);
     const originalFrozenFrameRef = useRef<HTMLCanvasElement>(null);
-    const sourceIdentity = `${item.cameraResourceId || ''}:${item.cameraChannelId || ''}`;
+    const remoteCamera = Boolean(item.cameraNodeId);
+    const sourceIdentity = `${item.cameraNodeId || ''}:${item.cameraResourceId || ''}:${item.cameraChannelId || ''}`;
     const previousSourceIdentityRef = useRef(sourceIdentity);
     const activePlaybackStartedAtRef = useRef<number | null>(null);
     const accumulatedPlaybackSecondsRef = useRef(0);
@@ -32,19 +33,21 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
     const [controlsOpen, setControlsOpen] = useState(false);
     const [parametersOpen, setParametersOpen] = useState(false);
     const [canvasLayout, setCanvasLayout] = useState(CanvasMultiViewStore.get().layout);
-    const comparisonMode = canvasLayout === '1x2';
+    const comparisonMode = !remoteCamera && canvasLayout === '1x2';
     const adjustedStreamUrl = useMemo(() => CameraResourceService.streamUrl(
         item.cameraResourceId || '',
         item.cameraChannelId,
         nonce,
         'adjusted',
-    ), [item.cameraResourceId, item.cameraChannelId, nonce]);
+        item.cameraNodeId,
+    ), [item.cameraNodeId, item.cameraResourceId, item.cameraChannelId, nonce]);
     const originalStreamUrl = useMemo(() => CameraResourceService.streamUrl(
         item.cameraResourceId || '',
         item.cameraChannelId,
         nonce,
         'original',
-    ), [item.cameraResourceId, item.cameraChannelId, nonce]);
+        item.cameraNodeId,
+    ), [item.cameraNodeId, item.cameraResourceId, item.cameraChannelId, nonce]);
 
     useEffect(() => CanvasMultiViewStore.subscribe(value => setCanvasLayout(value.layout)), []);
 
@@ -153,7 +156,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
             <div className='CameraPlayerMeta'>
                 {item.cameraModel && <span>{item.cameraModel}</span>}
                 {item.cameraChannelId && <span>{chinese ? '通道' : 'Channel'} {item.cameraChannelId}</span>}
-                <button
+                {!remoteCamera && <button
                     type='button'
                     className={controlsOpen ? 'active' : ''}
                     aria-controls='camera-smart-controls'
@@ -164,8 +167,8 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                     }}
                 >
                     {chinese ? '智能调参' : 'Smart controls'}
-                </button>
-                <button
+                </button>}
+                {!remoteCamera && <button
                     type='button'
                     className={parametersOpen ? 'active' : ''}
                     aria-controls='camera-parameters-panel'
@@ -176,7 +179,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                     }}
                 >
                     {chinese ? '相机参数' : 'Camera parameters'}
-                </button>
+                </button>}
                 <button type='button' onClick={reconnect}>{chinese ? '重新连接' : 'Reconnect'}</button>
             </div>
         </div>
@@ -200,7 +203,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                     className={isPaused ? 'CameraBaselineFrame visible' : 'CameraBaselineFrame'}
                     aria-label={chinese ? `${item.name} 原始暂停画面` : `${item.name} paused original frame`}
                 />
-                {!isPaused && <img
+                {comparisonMode && !isPaused && <img
                     ref={originalImageRef}
                     key={`original-${nonce}`}
                     src={originalStreamUrl}
@@ -249,13 +252,13 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
                     onError={() => setState('error')}
                     draggable={false}
                 />}
-                {controlsOpen && item.cameraResourceId && <CameraControlPanel
+                {!remoteCamera && controlsOpen && item.cameraResourceId && <CameraControlPanel
                     resourceId={item.cameraResourceId}
                     language={language}
                     onStreamChanged={reconnect}
                     onClose={() => setControlsOpen(false)}
                 />}
-                {parametersOpen && item.cameraResourceId && <CameraParametersPanel
+                {!remoteCamera && parametersOpen && item.cameraResourceId && <CameraParametersPanel
                     resourceId={item.cameraResourceId}
                     language={language}
                     onStreamChanged={reconnect}
@@ -266,7 +269,7 @@ const CameraPlayer: React.FC<IProps> = ({item, language}) => {
         <CameraTimeline
             language={language}
             elapsedSeconds={elapsedSeconds}
-            fps={10}
+            fps={remoteCamera ? 2 : 10}
             isPlaying={state === 'playing' && !isPaused}
             canPlayPause={isPaused || state === 'playing'}
             onPlayPause={togglePlayback}

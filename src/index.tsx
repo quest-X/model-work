@@ -6,6 +6,7 @@ import configureStore from './configureStore';
 import { Provider } from 'react-redux';
 import { AppInitializer } from './logic/initializer/AppInitializer';
 import { registerEngineStore } from './utils/DefaultBackendUrl';
+import {AuthPreview} from './views/AuthPreview/AuthPreview';
 
 export const store = configureStore();
 registerEngineStore(store);
@@ -15,8 +16,9 @@ const root = ReactDOM.createRoot(document.getElementById('root') || document.cre
 root.render(
     <React.StrictMode>
         <Provider store={store}>
-            <App />
+            <AuthPreview>
+                <App />
+            </AuthPreview>
         </Provider>
     </React.StrictMode>
 );
-

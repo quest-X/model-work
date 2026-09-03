@@ -6,6 +6,7 @@ import {
 } from '../store/queue/types';
 import {ImageData} from '../store/labels/types';
 import {getExtensionEngineBaseUrl} from '../utils/DefaultBackendUrl';
+import type {ComputeManagedDevice} from './ComputeClusterService';
 
 export type CameraDevice = {
     name: string;
@@ -252,12 +253,16 @@ export class CameraResourceService {
         channelId?: string,
         nonce?: number,
         branch: 'original' | 'adjusted' = 'adjusted',
+        nodeId?: string,
     ): string {
-        const params = new URLSearchParams({fps: '10'});
+        const params = new URLSearchParams({fps: nodeId ? '2' : '10'});
         if (channelId) params.set('channel_id', channelId);
         params.set('branch', branch);
         if (nonce) params.set('_', String(nonce));
-        return `${cameraBaseUrl()}/resources/${encodeURIComponent(resourceId)}/mjpeg?${params}`;
+        const base = nodeId
+            ? `${getExtensionEngineBaseUrl()}/extensions/compute-cluster/nodes/${encodeURIComponent(nodeId)}/cameras`
+            : `${cameraBaseUrl()}/resources`;
+        return `${base}/${encodeURIComponent(resourceId)}/mjpeg?${params}`;
     }
 
     public static toQueueItem(resource: CameraResource): QueueItem {
@@ -277,6 +282,30 @@ export class CameraResourceService {
     }
 
     public static async open(resource: CameraResource, imagesData: ImageData[]): Promise<void> {
+        await CameraResourceService.openItem(CameraResourceService.toQueueItem(resource), imagesData);
+    }
+
+    public static async openCluster(
+        nodeId: string,
+        nodeName: string,
+        camera: ComputeManagedDevice,
+        imagesData: ImageData[],
+    ): Promise<void> {
+        await CameraResourceService.openItem({
+            id: `camera-${nodeId}-${camera.device_id}`,
+            name: camera.name,
+            type: QueueItemType.CAMERA,
+            status: QueueItemStatus.COMPLETED,
+            uploadedAt: Date.now(),
+            dataSyncStatus: QueueDataSyncStatus.SYNCED,
+            cameraNodeId: nodeId,
+            cameraResourceId: camera.device_id,
+            cameraHost: nodeName,
+            cameraModel: camera.model || undefined,
+        }, imagesData);
+    }
+
+    private static async openItem(item: QueueItem, imagesData: ImageData[]): Promise<void> {
         const [
             {store},
             {QueueActions},
@@ -288,7 +317,6 @@ export class CameraResourceService {
             import('../store/queue/actionCreators'),
             import('./AutoSaveService'),
         ]);
-        const item = CameraResourceService.toQueueItem(resource);
         const existing = store.getState().queue.items.find(candidate => candidate.id === item.id);
         if (existing) {
             store.dispatch(updateQueueItem(existing.id, item));

@@ -15,7 +15,7 @@
   align-content: flex-start;
 
   .TopNavigationBarWrapper {
-    padding: 0 $sideNavigationBarCompanionWidth;
+    padding: 0 6px 0 $sideNavigationBarCompanionWidth;
     color: white;
     align-self: stretch;
     flex: 1;
@@ -139,7 +139,8 @@
     }
 
     .ActionsDropdownContainer,
-    .ServicesDropdownContainer {
+    .ServicesDropdownContainer,
+    .AccountDropdownContainer {
       position: relative;
     }
 
@@ -280,6 +281,185 @@
 
     .language-toggle-button {
       min-width: 60px;
+    }
+
+    .AccountDropdownContainer {
+      display: flex;
+      align-items: center;
+      align-self: stretch;
+      margin-left: 2px;
+    }
+
+    .AccountAvatarButton {
+      display: grid;
+      place-items: center;
+      box-sizing: border-box;
+      width: 26px;
+      height: 26px;
+      margin: 0;
+      border: 1px solid rgba(255, 255, 255, 0.42);
+      border-radius: 50%;
+      overflow: hidden;
+      outline: none;
+      background: radial-gradient(circle at 35% 28%, #5c6670, #24292e 66%);
+      padding: 0;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.42);
+      color: white;
+      font: inherit;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: border-color 0.15s ease, filter 0.15s ease, transform 0.15s ease;
+
+      &:hover,
+      &[aria-expanded='true'] {
+        border-color: rgba(255, 255, 255, 0.9);
+        filter: brightness(1.12);
+      }
+
+      &:active {
+        transform: scale(0.96);
+      }
+
+      &:focus-visible {
+        outline: 2px solid #6dc8ff;
+        outline-offset: 2px;
+      }
+
+      img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+    }
+
+    .AccountAvatarInput { display: none; }
+
+    .AccountDropdown {
+      position: absolute;
+      z-index: 10001;
+      top: calc(100% + 6px);
+      right: 0;
+      box-sizing: border-box;
+      width: 205px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      background: #222528;
+      box-shadow: 0 14px 38px rgba(0, 0, 0, 0.58);
+      padding: 8px;
+    }
+
+    .AccountSummary {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px;
+    }
+
+    .AccountSummaryAvatar {
+      display: grid;
+      place-items: center;
+      flex: 0 0 32px;
+      width: 32px;
+      height: 32px;
+      border: 1px solid rgba(255, 255, 255, 0.38);
+      border-radius: 50%;
+      overflow: hidden;
+      background: radial-gradient(circle at 35% 28%, #5c6670, #24292e 66%);
+      padding: 0;
+      color: white;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+
+      img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      &:hover,
+      &:focus-visible {
+        border-color: #ff4d55;
+        outline: none;
+      }
+    }
+
+    .AccountSummaryText {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+
+      strong,
+      small {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      strong {
+        color: rgba(255, 255, 255, 0.94);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      small {
+        margin-top: 2px;
+        color: rgba(255, 255, 255, 0.38);
+        font-size: 9px;
+      }
+    }
+
+    .AccountMenuDivider {
+      height: 1px;
+      margin: 5px 3px;
+      background: rgba(255, 255, 255, 0.07);
+    }
+
+    .AccountMenuItem {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-sizing: border-box;
+      width: 100%;
+      height: 34px;
+      border: 0;
+      border-radius: 6px;
+      outline: none;
+      background: transparent;
+      padding: 0 9px;
+      color: rgba(255, 255, 255, 0.74);
+      font: inherit;
+      font-size: 11px;
+      text-align: left;
+      text-decoration: none;
+      cursor: pointer;
+
+      img {
+        width: 13px;
+        height: 13px;
+        object-fit: contain;
+        filter: brightness(0) invert(1);
+        opacity: 0.58;
+      }
+
+      &:hover,
+      &:focus-visible {
+        background: rgba(255, 255, 255, 0.07);
+        color: white;
+      }
+
+      &:focus-visible {
+        box-shadow: inset 0 0 0 1px rgba(109, 200, 255, 0.55);
+      }
+
+      &.AccountMenuItemDanger:hover,
+      &.AccountMenuItemDanger:focus-visible {
+        background: rgba(229, 87, 87, 0.1);
+        color: #ffaaaa;
+      }
     }
   }
 }

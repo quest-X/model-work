@@ -246,6 +246,36 @@ describe('ComputeClusterPopup', () => {
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
     });
 
+    it('embeds the network workspace without modal chrome', async () => {
+        service.status.mockResolvedValue({
+            state: 'ready', version: '0.1.0', protocol_version: 1,
+            admin_configured: true,
+            task_control: {
+                enabled: true,
+                allowed_task_types: ['network.lan_discovery'],
+                lan_discovery: true,
+                lan_asset_inventory: true,
+                lan_discovery_schedules: true,
+            },
+            nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
+        });
+
+        const {container} = render(
+            <ComputeClusterPopup
+                language={Language.CHINESE}
+                embedded
+                initialWorkspace='network'
+                preferredNodeId='node-12345678'
+            />
+        );
+
+        expect(await screen.findByRole('heading', {name: '节点局域网资产'})).toBeInTheDocument();
+        expect(screen.getByRole('heading', {name: '局域网扫描计划'})).toBeInTheDocument();
+        expect(screen.queryByRole('navigation', {name: '计算群工作区'})).not.toBeInTheDocument();
+        expect(container.querySelector('.ComputeClusterBackdrop.embedded')).toBeInTheDocument();
+        expect(screen.getByRole('combobox', {name: '计划节点'})).toHaveValue('node-12345678');
+    });
+
     it('sorts node resources by region, availability, and node name', async () => {
         const user = userEvent.setup();
         const [baseNode] = await service.nodes();
@@ -411,6 +441,8 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByTestId('resource-node-link-graph')).toBeInTheDocument();
         expect(screen.getAllByTestId('resource-graph-node')).toHaveLength(3);
         expect(screen.getAllByTestId('resource-graph-edge')).toHaveLength(1);
+        expect(screen.getByTestId('resource-graph-edge')).toHaveClass('inactive');
+        expect(screen.getByTestId('resource-graph-unavailable-marker')).toBeInTheDocument();
         const graphLegend = graphPanel?.querySelector('.ComputeKnowledgeLegend');
         expect(graphLegend).toHaveTextContent('地域');
         expect(graphLegend).toHaveTextContent('计算节点');
@@ -770,7 +802,7 @@ describe('ComputeClusterPopup', () => {
         await user.type(input, 'uname -a');
         await user.click(screen.getByRole('button', {name: '发送'}));
         await waitFor(() => expect(service.terminalInput).toHaveBeenCalledWith(
-            'terminal-session-1', 'uname -a\n',
+            'terminal-session-1', 'uname -a\r',
         ));
     });
 

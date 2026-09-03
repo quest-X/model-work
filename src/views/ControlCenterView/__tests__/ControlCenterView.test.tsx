@@ -442,6 +442,15 @@ describe('ControlCenterView', () => {
 
         fireEvent.click(screen.getByRole('button', {name: '打开资源监视器'}));
         const monitor = await screen.findByRole('dialog', {name: '节点甲 资源监视器'});
+        const maximizeMonitor = within(monitor).getByRole('button', {name: '放大资源监视器窗口'});
+        expect(maximizeMonitor).toHaveAttribute('aria-pressed', 'false');
+        fireEvent.click(maximizeMonitor);
+        expect(monitor).toHaveClass('maximized');
+        expect(monitor.parentElement).toHaveClass('maximized');
+        const restoreMonitor = within(monitor).getByRole('button', {name: '还原资源监视器窗口'});
+        expect(restoreMonitor).toHaveAttribute('aria-pressed', 'true');
+        fireEvent.click(restoreMonitor);
+        expect(monitor).not.toHaveClass('maximized');
         expect(within(monitor).getByRole('navigation', {name: '资源监视器导航'})).toBeInTheDocument();
         expect(within(monitor).getAllByText('50%')).toHaveLength(3);
         expect(within(monitor).getByRole('complementary', {name: '资源列表'})).toBeInTheDocument();

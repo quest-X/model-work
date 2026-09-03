@@ -370,6 +370,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
     const [dismissedRuntimeAlertKey, setDismissedRuntimeAlertKey] = useState('');
     const [runtimeEventsError, setRuntimeEventsError] = useState('');
     const [inspectedServiceId, setInspectedServiceId] = useState('');
+    const [monitorMaximized, setMonitorMaximized] = useState(false);
     const [monitorView, setMonitorView] = useState<MonitorView>('performance');
     const [processQuery, setProcessQuery] = useState('');
     const [processSort, setProcessSort] = useState<{key: ProcessSortKey; direction: SortDirection}>({
@@ -642,6 +643,10 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
             return latest?.nodeId === sample.nodeId ? [...current, sample].slice(-60) : [sample];
         });
     }, [selectedNode]);
+
+    useEffect(() => {
+        if (!inspectedServiceId) setMonitorMaximized(false);
+    }, [inspectedServiceId]);
 
     useEffect(() => {
         if (!inspectedServiceId || !selectedNodeId) return undefined;
@@ -1532,13 +1537,13 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
             </div>
         </main>
         {selectedNode && inspectedServiceId && <div
-            className='ControlResourceMonitorBackdrop'
+            className={`ControlResourceMonitorBackdrop${monitorMaximized ? ' maximized' : ''}`}
             onMouseDown={event => {
                 if (event.target === event.currentTarget) setInspectedServiceId('');
             }}
         >
             <section
-                className='ControlResourceMonitor'
+                className={`ControlResourceMonitor${monitorMaximized ? ' maximized' : ''}`}
                 role='dialog'
                 aria-modal='true'
                 aria-label={zh ? `${selectedNode.name} 资源监视器` : `${selectedNode.name} resource monitor`}
@@ -1552,12 +1557,23 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                             : (zh ? '资源随节点心跳刷新' : 'Resources refresh with the node heartbeat')}
                         {' · '}{runtimeTime(runtimeSnapshot?.captured_at || selectedNode.resources.captured_at, zh)}</p>
                     </div>
-                    <button
-                        type='button'
-                        autoFocus
-                        aria-label={zh ? '关闭资源监视器' : 'Close resource monitor'}
-                        onClick={() => setInspectedServiceId('')}
-                    >×</button>
+                    <div className='ControlMonitorHeaderActions'>
+                        <button
+                            type='button'
+                            className={`ControlMonitorWindowToggle ${monitorMaximized ? 'restore' : 'maximize'}`}
+                            aria-label={monitorMaximized
+                                ? (zh ? '还原资源监视器窗口' : 'Restore resource monitor window')
+                                : (zh ? '放大资源监视器窗口' : 'Maximize resource monitor window')}
+                            aria-pressed={monitorMaximized}
+                            onClick={() => setMonitorMaximized(current => !current)}
+                        ><i aria-hidden='true'/></button>
+                        <button
+                            type='button'
+                            autoFocus
+                            aria-label={zh ? '关闭资源监视器' : 'Close resource monitor'}
+                            onClick={() => setInspectedServiceId('')}
+                        >×</button>
+                    </div>
                 </header>
 
                 <div className='ControlMonitorWorkspace'>

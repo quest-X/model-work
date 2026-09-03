@@ -783,29 +783,54 @@
   }
 
   .DatasetToggle {
+    position: relative;
     display: flex;
     min-width: 0;
     flex: 1;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    border: 0;
     background: transparent;
     padding: 9px 8px 9px 12px;
     color: white;
     text-align: left;
-    cursor: pointer;
 
     &:hover {
       background: rgba(255, 255, 255, 0.035);
     }
+
+    &.renaming {
+      background: rgba(91, 201, 126, 0.035);
+    }
+  }
+
+  .DatasetToggleHitArea {
+    position: absolute;
+    z-index: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    inset: 0;
+
+    &:focus-visible {
+      border-radius: 5px;
+      outline: 2px solid rgba(91, 201, 126, 0.78);
+      outline-offset: -2px;
+    }
+
+    &:disabled {
+      cursor: default;
+    }
   }
 
   .DatasetRowMain {
+    position: relative;
+    z-index: 1;
     display: flex;
     min-width: 0;
     flex-direction: column;
     gap: 2px;
+    pointer-events: none;
   }
 
   .DatasetTitleRow {
@@ -822,6 +847,131 @@
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .DatasetNameButton {
+    display: inline-flex;
+    min-width: 0;
+    max-width: min(420px, 72%);
+    align-items: center;
+    gap: 5px;
+    border: 0;
+    background: transparent;
+    padding: 1px 0;
+    color: inherit;
+    cursor: text;
+    pointer-events: auto;
+
+    &:not(:disabled):hover .DatasetName {
+      color: #8be6aa;
+    }
+
+    &:focus-visible {
+      border-radius: 3px;
+      outline: 2px solid rgba(91, 201, 126, 0.72);
+      outline-offset: 2px;
+    }
+
+    &:disabled {
+      cursor: default;
+    }
+  }
+
+  .DatasetRenameIcon {
+    position: relative;
+    width: 9px;
+    height: 9px;
+    flex: 0 0 9px;
+    color: rgba(255, 255, 255, 0.42);
+    transform: rotate(-45deg);
+
+    &::before {
+      position: absolute;
+      width: 7px;
+      height: 2px;
+      border-radius: 1px;
+      background: currentColor;
+      content: '';
+      left: 1px;
+      top: 3px;
+    }
+
+    &::after {
+      position: absolute;
+      width: 0;
+      height: 0;
+      border-top: 2px solid transparent;
+      border-bottom: 2px solid transparent;
+      border-left: 3px solid currentColor;
+      content: '';
+      right: -1px;
+      top: 2px;
+    }
+  }
+
+  .DatasetNameButton:hover .DatasetRenameIcon,
+  .DatasetNameButton:focus-visible .DatasetRenameIcon {
+    color: #72d993;
+  }
+
+  .DatasetRenameEditor {
+    display: inline-flex;
+    min-width: 220px;
+    max-width: min(460px, 76%);
+    align-items: center;
+    gap: 4px;
+    pointer-events: auto;
+
+    input {
+      min-width: 0;
+      height: 26px;
+      flex: 1;
+      border: 1px solid rgba(91, 201, 126, 0.55);
+      border-radius: 4px;
+      outline: 0;
+      background: rgba(0, 0, 0, 0.2);
+      padding: 4px 7px;
+      color: white;
+      font-size: 12px;
+
+      &:focus {
+        border-color: #72d993;
+        box-shadow: 0 0 0 2px rgba(91, 201, 126, 0.12);
+      }
+    }
+
+    button {
+      display: inline-flex;
+      width: 25px;
+      height: 25px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.035);
+      color: rgba(255, 255, 255, 0.65);
+      cursor: pointer;
+
+      &:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.08);
+        color: white;
+      }
+
+      &:disabled {
+        cursor: wait;
+        opacity: 0.5;
+      }
+    }
+
+    .DatasetRenameSave {
+      border-color: rgba(91, 201, 126, 0.4);
+      color: #72d993;
+    }
+  }
+
+  .DatasetRenameError {
+    color: #ff9b9b;
+    font-size: 9px;
   }
 
   .DatasetState {
@@ -859,6 +1009,8 @@
   }
 
   .DatasetChevron {
+    position: relative;
+    z-index: 1;
     display: inline-flex;
     width: 32px;
     height: 32px;
@@ -866,6 +1018,7 @@
     justify-content: center;
     flex: 0 0 32px;
     color: rgba(255, 255, 255, 0.5);
+    pointer-events: none;
 
     &::before {
       width: 6px;

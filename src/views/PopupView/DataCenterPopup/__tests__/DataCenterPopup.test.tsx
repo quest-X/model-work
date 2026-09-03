@@ -165,6 +165,10 @@ describe('DataCenterPopup', () => {
         jest.clearAllMocks();
         global.fetch = jest.fn((input: RequestInfo, init?: RequestInit) => {
             const url = String(input);
+            if (url.endsWith('/datasets/dataset-1') && init?.method === 'PATCH') {
+                const body = JSON.parse(String(init.body));
+                return Promise.resolve(jsonResponse({...dataset, ...body}));
+            }
             if (url.endsWith('/datasets')) return Promise.resolve(jsonResponse({datasets: [dataset]}));
             if (url.endsWith('/available-models')) {
                 return Promise.resolve(jsonResponse({
@@ -274,6 +278,43 @@ describe('DataCenterPopup', () => {
 
         expect(screen.getByRole('status', {name: '数据中有 1 个本地变动待处理'})).toHaveTextContent('1');
         expect(screen.getByRole('status', {name: '临时数据中有 1 个本地变动待处理'})).toHaveTextContent('1');
+    });
+
+    it('renames a persistent dataset inline without creating a new revision', async () => {
+        renderPopup();
+        fireEvent.click(await screen.findByRole('tab', {name: '持久化数据 1'}));
+        await screen.findByText('default-project', {selector: '.DatasetName'});
+
+        fireEvent.click(screen.getByRole('button', {name: '修改名称 default-project'}));
+        const input = screen.getByRole('textbox', {name: '修改 default-project 的名称'});
+        fireEvent.change(input, {target: {value: 'gangye-project'}});
+        fireEvent.keyDown(input, {key: 'Enter'});
+
+        await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+            'https://core.test/core_service/datasets/dataset-1',
+            expect.objectContaining({
+                method: 'PATCH',
+                body: JSON.stringify({name: 'gangye-project', project_name: 'gangye-project'}),
+            }),
+        ));
+        expect(await screen.findByText('gangye-project', {selector: '.DatasetName'})).toBeInTheDocument();
+        expect(screen.getByText(/项目 gangye-project/)).toBeInTheDocument();
+        expect(screen.queryByRole('textbox', {name: /修改.*的名称/})).not.toBeInTheDocument();
+    });
+
+    it('keeps inline rename open when the new name is empty', async () => {
+        renderPopup();
+        fireEvent.click(await screen.findByRole('tab', {name: '持久化数据 1'}));
+        await screen.findByText('default-project', {selector: '.DatasetName'});
+
+        fireEvent.click(screen.getByRole('button', {name: '修改名称 default-project'}));
+        const input = screen.getByRole('textbox', {name: '修改 default-project 的名称'});
+        fireEvent.change(input, {target: {value: '   '}});
+        fireEvent.keyDown(input, {key: 'Enter'});
+
+        expect(await screen.findByRole('alert')).toHaveTextContent('名称不能为空');
+        expect((global.fetch as jest.Mock).mock.calls.some(([, options]) => options?.method === 'PATCH')).toBe(false);
+        expect(input).toBeInTheDocument();
     });
 
     it('filters persistent datasets by media, annotation state and search query', async () => {

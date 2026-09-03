@@ -6,16 +6,21 @@ import { updateActivePopupType } from '../../../store/general/actionCreators';
 import { addAIModel, setActiveAIModel, deleteAIModel } from '../../../store/aimodels/actionCreators';
 import { AppState } from '../../../store';
 import { connect } from 'react-redux';
-import Scrollbars from 'react-custom-scrollbars-2';
 import { ImageButton } from '../../Common/ImageButton/ImageButton';
 import { AIModel } from '../../../store/aimodels/types';
 import { Language, LanguageConfig } from '../../../data/LanguageConfig';
-import { v4 as uuidv4 } from 'uuid';
 import { StyledTextField } from '../../Common/StyledTextField/StyledTextField';
-import { YOLO_MODEL_FAMILIES, SEG_MODEL_FAMILIES, YOLOModelFamily, getServerUrl } from '../CallModelPopup/CallModelPopup';
 
-interface IProps {
-    updateActivePopupTypeAction: (activePopupType: PopupWindowType) => any;
+interface EngineServiceDescriptor {
+    id: string;
+    name: string;
+    servicePath: string;
+    popupType?: PopupWindowType;
+    eventName?: string;
+}
+
+export interface IProps {
+    updateActivePopupTypeAction: (activePopupType: PopupWindowType | null) => any;
     addAIModelAction: (model: AIModel) => any;
     setActiveAIModelAction: (modelId: string | null) => any;
     deleteAIModelAction: (modelId: string) => any;
@@ -24,7 +29,7 @@ interface IProps {
     language: Language;
 }
 
-const ManageAIModelsPopup: React.FC<IProps> = ({
+export const ManageAIModelsPopup: React.FC<IProps> = ({
     updateActivePopupTypeAction,
     addAIModelAction,
     setActiveAIModelAction,
@@ -91,84 +96,107 @@ const ManageAIModelsPopup: React.FC<IProps> = ({
         setEditingModel(null);
     };
 
-    // 调用模型 — 可供选中 / 加载的本地模型清单
-    const [availableLocalModels, setAvailableLocalModels] = useState<string[]>([]);
+    const coreServices: EngineServiceDescriptor[] = [
+        {
+            id: 'resource-center',
+            name: currentTexts.modelManagement.dataCenter,
+            servicePath: 'core/resource-center',
+            popupType: PopupWindowType.DATA_CENTER
+        },
+        {
+            id: 'inference-settings',
+            name: currentTexts.modelManagement.callModels,
+            servicePath: 'core/inference-settings',
+            popupType: PopupWindowType.CALL_MODEL
+        },
+        {
+            id: 'training-settings',
+            name: currentTexts.modelManagement.trainingTask,
+            servicePath: 'core/training-settings',
+            popupType: PopupWindowType.TRAINING_TASK
+        },
+        {
+            id: 'task-center',
+            name: currentTexts.modelManagement.taskCenter,
+            servicePath: 'core/task-center',
+            eventName: 'opensight:open-task-center'
+        }
+    ];
 
-    useEffect(() => {
-        const serverUrl = getServerUrl();
-        fetch(`${serverUrl}/available-models`)
-            .then(r => r.json())
-            .then(data => {
-                if (!data.models) return;
-                // Backend v2.1.1+ returns [{name, type}]; earlier returned string[]. 两兼容。
-                const names: string[] = data.models.map((m: unknown) =>
-                    typeof m === 'string' ? m : (m as { name: string }).name
-                );
-                setAvailableLocalModels(names);
-            })
-            .catch(() => {});
-    }, []);
+    const extensionServices: EngineServiceDescriptor[] = [
+        {
+            id: 'vector-database',
+            name: currentTexts.modelManagement.vectorDb,
+            servicePath: 'extension/vector-database',
+            popupType: PopupWindowType.VECTOR_DB
+        },
+        {
+            id: 'visual-retrieval',
+            name: currentTexts.modelManagement.l2gRetrieval,
+            servicePath: 'extension/visual-retrieval',
+            popupType: PopupWindowType.L2G_RETRIEVAL
+        },
+        {
+            id: 'model-inspector',
+            name: currentTexts.modelManagement.modelInspector,
+            servicePath: 'extension/model-inspector',
+            popupType: PopupWindowType.MODEL_INSPECTOR
+        },
+        {
+            id: 'camera-connect',
+            name: currentTexts.modelManagement.cameraConnect,
+            servicePath: 'extension/camera-connect',
+            popupType: PopupWindowType.CAMERA_CONNECT
+        },
+        {
+            id: 'compute-cluster',
+            name: currentTexts.modelManagement.computeCluster,
+            servicePath: 'extension/compute-cluster',
+            popupType: PopupWindowType.COMPUTE_CLUSTER
+        }
+    ];
 
-    const openLocalModelManager = () => {
-        updateActivePopupTypeAction(PopupWindowType.CALL_MODEL);
+    const openProvidedService = (service: EngineServiceDescriptor) => {
+        if (service.popupType) {
+            updateActivePopupTypeAction(service.popupType);
+            return;
+        }
+
+        if (service.eventName) {
+            updateActivePopupTypeAction(null);
+            window.setTimeout(() => {
+                window.dispatchEvent(new Event(service.eventName));
+            }, 0);
+        }
     };
 
-    const getLocalDownloadedCount = (familyId: string): number => {
-        const family = YOLO_MODEL_FAMILIES.find(f => f.id === familyId)
-            || SEG_MODEL_FAMILIES.find(f => f.id === familyId);
-        if (!family) return 0;
-        return family.variants.filter(v => availableLocalModels.includes(v)).length;
-    };
-
-    const renderModelFamilyList = (families: YOLOModelFamily[]) => {
-        return families.map(family => {
-            const downloaded = getLocalDownloadedCount(family.id);
-            return (
-                <div key={family.id} className={`LocalModelEntry${downloaded > 0 ? ' has-models' : ''}`}>
-                    <div className='LocalModelName'>{family.name}</div>
-                    <div className='LocalModelStatus'>
-                        {downloaded > 0 ? (
-                            <span className='downloaded'>{downloaded}/{family.variants.length}</span>
-                        ) : (
-                            <span className='none'>—</span>
-                        )}
-                    </div>
-                </div>
-            );
-        });
-    };
-
-    const openExtensionService = (popupType: PopupWindowType) => {
-        updateActivePopupTypeAction(popupType);
-    };
-
-    const renderExtensionServices = () => {
-        return (
-            <>
-                <div className='LocalModelEntry has-models clickable'
-                    onClick={() => openExtensionService(PopupWindowType.VECTOR_DB)}>
-                    <div className='LocalModelName'>{currentTexts.modelManagement.vectorDb}</div>
-                </div>
-                <div className='LocalModelEntry has-models clickable'
-                    onClick={() => openExtensionService(PopupWindowType.L2G_RETRIEVAL)}>
-                    <div className='LocalModelName'>{currentTexts.modelManagement.l2gRetrieval}</div>
-                </div>
-            </>
-        );
-    };
-
-    const renderLocalModels = () => {
+    const renderProvidedServices = () => {
         const selectedEngine = aiModels.find(m => m.id === selectedModelId);
-        const engineType = selectedEngine?.modelType;
+        const services = selectedEngine?.modelType === 'extension'
+            ? extensionServices
+            : coreServices;
+
         return (
-            <div className='LocalModelsSection'>
+            <div className='ProvidedServicesSection'>
                 <div className='SectionTitle'>
                     {currentTexts.modelManagement.providedServices}
                 </div>
-                <div className='LocalModelsList'>
-                    {engineType === 'core'
-                        ? renderModelFamilyList([...YOLO_MODEL_FAMILIES, ...SEG_MODEL_FAMILIES])
-                        : renderExtensionServices()}
+                <div className='ProvidedServicesList'>
+                    {services.map(service => (
+                        <button
+                            type='button'
+                            key={service.id}
+                            className='EngineServiceEntry'
+                            onClick={() => openProvidedService(service)}
+                            aria-label={service.name}
+                        >
+                            <span className='EngineServiceText'>
+                                <span className='EngineServiceName'>{service.name}</span>
+                                <span className='EngineServicePath'>{service.servicePath}</span>
+                            </span>
+                            <span className='EngineServiceAction' aria-hidden='true'>›</span>
+                        </button>
+                    ))}
                 </div>
             </div>
         );
@@ -377,7 +405,7 @@ const ManageAIModelsPopup: React.FC<IProps> = ({
                             <div className={`ModelsContainer${aiModels.length === 0 ? ' empty' : ''}`}>
                                 {renderModelList()}
                             </div>
-                            {aiModels.length > 0 && renderLocalModels()}
+                            {aiModels.length > 0 && renderProvidedServices()}
                         </div>
                         <div className='ModelDetailsContainer'>
                             <div className='SectionTitle'>

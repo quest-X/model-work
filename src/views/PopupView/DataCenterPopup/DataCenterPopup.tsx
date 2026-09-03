@@ -387,6 +387,10 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const [datasetAnnotationCounts, setDatasetAnnotationCounts] = useState<Record<string, number | null>>({});
     const [datasetAnnotationLoading, setDatasetAnnotationLoading] = useState(false);
     const [datasetAnnotationError, setDatasetAnnotationError] = useState<string | null>(null);
+    const [datasetRenameId, setDatasetRenameId] = useState<string | null>(null);
+    const [datasetRenameValue, setDatasetRenameValue] = useState('');
+    const [datasetRenameSaving, setDatasetRenameSaving] = useState(false);
+    const [datasetRenameError, setDatasetRenameError] = useState<string | null>(null);
     const [models, setModels] = useState<ModelAsset[]>([]);
     const [modelRuntime, setModelRuntime] = useState<ModelRuntimeStatus>({});
     const [modelsLoading, setModelsLoading] = useState(true);
@@ -799,6 +803,58 @@ export const DataCenterPopup: React.FC<IProps> = ({
         const localSource = dataset.source_id ? queueItemById.get(dataset.source_id) : null;
         const inferredLegacyProject = !dataset.project_name && localSource ? projectName.trim() : '';
         return inferredLegacyProject || dataset.name;
+    };
+
+    const beginDatasetRename = (dataset: DatasetSummary) => {
+        setDatasetRenameId(dataset.id);
+        setDatasetRenameValue(datasetDisplayName(dataset));
+        setDatasetRenameSaving(false);
+        setDatasetRenameError(null);
+    };
+
+    const cancelDatasetRename = () => {
+        if (datasetRenameSaving) return;
+        setDatasetRenameId(null);
+        setDatasetRenameValue('');
+        setDatasetRenameError(null);
+    };
+
+    const saveDatasetRename = async (dataset: DatasetSummary) => {
+        if (datasetRenameSaving || datasetRenameId !== dataset.id) return;
+        const cleanName = datasetRenameValue.trim();
+        if (!cleanName) {
+            setDatasetRenameError(zh ? '名称不能为空' : 'Name cannot be empty');
+            return;
+        }
+        if (cleanName === datasetDisplayName(dataset)) {
+            cancelDatasetRename();
+            return;
+        }
+
+        setDatasetRenameSaving(true);
+        setDatasetRenameError(null);
+        try {
+            const response = await fetch(`${baseUrl}/datasets/${dataset.id}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: cleanName, project_name: cleanName}),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(typeof body.detail === 'string' ? body.detail : `${response.status}`);
+            }
+            setDatasets(current => current.map(item => (
+                item.id === dataset.id ? {...item, ...body, name: cleanName, project_name: cleanName} : item
+            )));
+            setDatasetRenameId(null);
+            setDatasetRenameValue('');
+        } catch (cause) {
+            setDatasetRenameError(cause instanceof Error
+                ? cause.message
+                : (zh ? '名称修改失败' : 'Failed to rename dataset'));
+        } finally {
+            setDatasetRenameSaving(false);
+        }
     };
 
     const syncStatus = (item: QueueItem): {className: string; label: string} => {
@@ -1254,22 +1310,88 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const renderDatasetItem = (dataset: DatasetSummary) => {
         const expanded = selectedId === dataset.id;
         const datasetName = datasetDisplayName(dataset);
+        const renaming = datasetRenameId === dataset.id;
         const status = getDatasetStatus(dataset, zh);
         const detailsId = `dataset-details-${dataset.id}`;
         const localSource = dataset.source_id ? queueItemById.get(dataset.source_id) : null;
         const sourceLabel = datasetSourceLabel(dataset, !!localSource);
+        const mediaLabel = dataset.camera
+            ? `${zh ? '相机' : 'Camera'} ${zh ? '实时' : 'Live'} ${zh ? '通道' : 'Channel'} ${dataset.camera.channel_id}`
+            : `${dataset.media_type === 'video' ? (zh ? '视频' : 'Video') : (zh ? '图片' : 'Images')} ${dataset.image_count} ${dataset.media_type === 'video'
+                ? (zh ? '帧' : 'frames')
+                : (zh ? '张' : 'images')} ${dataset.classes.length} ${zh ? '类别' : 'classes'}`;
         return <article key={dataset.id} className={`DatasetItem${expanded ? ' selected' : ''}`}>
             <div className='DatasetRow'>
-                <button
-                    type='button'
-                    className='DatasetToggle'
-                    aria-expanded={expanded}
-                    aria-controls={detailsId}
-                    onClick={() => setSelectedId(expanded ? null : dataset.id)}
-                >
+                <div className={`DatasetToggle${renaming ? ' renaming' : ''}`}>
+                    <button
+                        type='button'
+                        className='DatasetToggleHitArea'
+                        aria-label={`${datasetName} ${mediaLabel} ${sourceLabel}`}
+                        aria-expanded={expanded}
+                        aria-controls={detailsId}
+                        disabled={renaming}
+                        onClick={() => setSelectedId(expanded ? null : dataset.id)}
+                    />
                     <span className='DatasetRowMain'>
                         <span className='DatasetTitleRow'>
-                            <span className='DatasetName'>{datasetName}</span>
+                            {renaming ? <span
+                                className='DatasetRenameEditor'
+                                onClick={event => event.stopPropagation()}
+                                onBlur={event => {
+                                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                                        void saveDatasetRename(dataset);
+                                    }
+                                }}
+                            >
+                                <input
+                                    autoFocus
+                                    type='text'
+                                    maxLength={255}
+                                    value={datasetRenameValue}
+                                    aria-label={zh ? `修改 ${datasetName} 的名称` : `Rename ${datasetName}`}
+                                    disabled={datasetRenameSaving}
+                                    onChange={event => {
+                                        setDatasetRenameValue(event.target.value);
+                                        setDatasetRenameError(null);
+                                    }}
+                                    onKeyDown={event => {
+                                        if (event.key === 'Enter') {
+                                            event.preventDefault();
+                                            void saveDatasetRename(dataset);
+                                        }
+                                        if (event.key === 'Escape') {
+                                            event.preventDefault();
+                                            cancelDatasetRename();
+                                        }
+                                    }}
+                                />
+                                <button
+                                    type='button'
+                                    className='DatasetRenameSave'
+                                    aria-label={zh ? '保存名称' : 'Save name'}
+                                    title={zh ? '保存' : 'Save'}
+                                    disabled={datasetRenameSaving}
+                                    onClick={() => void saveDatasetRename(dataset)}
+                                >✓</button>
+                                <button
+                                    type='button'
+                                    className='DatasetRenameCancel'
+                                    aria-label={zh ? '取消修改名称' : 'Cancel rename'}
+                                    title={zh ? '取消' : 'Cancel'}
+                                    disabled={datasetRenameSaving}
+                                    onClick={cancelDatasetRename}
+                                >×</button>
+                            </span> : <button
+                                type='button'
+                                className='DatasetNameButton'
+                                aria-label={zh ? `修改名称 ${datasetName}` : `Rename ${datasetName}`}
+                                title={zh ? '修改名称' : 'Rename'}
+                                disabled={Boolean(dataset.camera)}
+                                onClick={() => beginDatasetRename(dataset)}
+                            >
+                                <span className='DatasetName'>{datasetName}</span>
+                                {!dataset.camera && <span className='DatasetRenameIcon' aria-hidden='true' />}
+                            </button>}
                             <span className={`DatasetState ${status.className}`} aria-live='polite'>{status.label}</span>
                         </span>
                         <span className='DatasetMeta'>
@@ -1287,9 +1409,11 @@ export const DataCenterPopup: React.FC<IProps> = ({
                             </>}
                         </span>
                         <span className='DatasetSource'>{sourceLabel}</span>
+                        {renaming && datasetRenameError
+                            && <span className='DatasetRenameError' role='alert'>{datasetRenameError}</span>}
                     </span>
                     <span className={`DatasetChevron${expanded ? ' expanded' : ''}`} aria-hidden='true' />
-                </button>
+                </div>
                 <button
                     type='button'
                     className='DeleteButton'

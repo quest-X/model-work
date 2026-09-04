@@ -57,6 +57,9 @@ const lastSeen = (seconds: number, zh: boolean): string => {
     return zh ? `${minutes} 分钟前` : `${minutes}m ago`;
 };
 
+const healthLabel = (healthy: boolean, zh: boolean): string =>
+    healthy ? (zh ? '正常' : 'Normal') : (zh ? '故障' : 'Fault');
+
 const taskState = (state: ComputeTask['state'], zh: boolean): string => {
     const labels: Record<ComputeTask['state'], [string, string]> = {
         queued: ['排队中', 'Queued'],
@@ -188,7 +191,7 @@ const TaskCard: React.FC<TaskCardProps> = ({task, zh, busy, onControl}) => {
             </div>
             {discovery?.hosts.map(host => <div className='ComputeLanHost' key={host.address}>
                 <strong>{host.address}</strong>
-                <span>{host.hostname || host.mac || (zh ? '在线设备' : 'Online device')}</span>
+                <span>{host.hostname || host.mac || (zh ? '未命名设备' : 'Unnamed device')}</span>
                 <small>{host.ports.length
                     ? host.ports.map(port => `${port.port}/${port.service}`).join(' · ')
                     : (zh ? '未发现白名单 TCP 服务' : 'No allowlisted TCP service')}</small>
@@ -208,7 +211,7 @@ interface NodeCardProps {
 const NodeCard: React.FC<NodeCardProps> = ({node, zh}) => <article className={`ComputeNodeCard ${node.online ? 'online' : 'offline'}`}>
     <div className='ComputeNodeHeading'>
         <div className='ComputeNodeIdentity'>
-            <span className='ComputeNodeStatus'><i/>{node.online ? (zh ? '在线' : 'Online') : (zh ? '离线' : 'Offline')}</span>
+            <span className='ComputeNodeStatus'><i/>{healthLabel(node.online, zh)}</span>
             <h3>{node.name}</h3>
             <code>{node.node_id.slice(0, 8)}</code>
         </div>
@@ -239,9 +242,7 @@ const NodeCard: React.FC<NodeCardProps> = ({node, zh}) => <article className={`C
         <div className='ComputeNodeDeviceHeading'>
             <strong>{zh ? '节点设备' : 'Node devices'}</strong>
             <span>{node.device_inventory.devices.length}</span>
-            <small>{node.device_inventory.state === 'unavailable'
-                ? (zh ? '设备源暂不可用' : 'Device source unavailable')
-                : (zh ? '由本节点服务管理' : 'Managed by services on this node')}</small>
+            <small>{zh ? '设备源：' : 'Device source: '}{healthLabel(node.device_inventory.state === 'ready', zh)}</small>
         </div>
         {node.device_inventory.devices.length > 0 && <div className='ComputeNodeDeviceList'>
             {node.device_inventory.devices.map(device => <div key={device.device_id}>
@@ -254,19 +255,20 @@ const NodeCard: React.FC<NodeCardProps> = ({node, zh}) => <article className={`C
                     <span>{device.channels} {zh ? '个通道' : 'channels'}</span>
                     <small>{device.provider}</small>
                 </div>
-                <span className={`ComputeDeviceStatus ${device.status}`}>{device.status === 'registered'
-                    ? (zh ? '已归属' : 'Assigned')
-                    : device.status}</span>
+                <span className={`ComputeDeviceStatus ${device.status}`}>{healthLabel(
+                    ['online', 'available', 'healthy'].includes(device.status),
+                    zh,
+                )}</span>
             </div>)}
         </div>}
     </div>
 
     <footer>
-        <span>Tailscale: {node.network.online ? (zh ? '已连接' : 'Connected') : (zh ? '未连接' : 'Disconnected')}</span>
+        <span>Tailscale: {healthLabel(node.network.online, zh)}</span>
         <span className={node.network.ssh_available ? 'ssh-ready' : ''}>SSH: {node.network.ssh_available
-            ? (zh ? '可连接' : 'Ready')
-            : (zh ? '未就绪' : 'Unavailable')}</span>
-        <span>Agent v{node.agent_version}</span>
+            ? healthLabel(true, zh)
+            : healthLabel(false, zh)}</span>
+        <span>{zh ? '节点服务' : 'Node service'} v{node.agent_version}</span>
         <span>{node.capabilities.length} {zh ? '项能力' : 'capabilities'}</span>
     </footer>
 </article>;
@@ -288,7 +290,6 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
     const [loading, setLoading] = useState(true);
     const [maximized, setMaximized] = useState(false);
     const [activeWorkspace, setActiveWorkspace] = useState<ComputeWorkspace>(initialWorkspace);
-    const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState('');
     const [taskError, setTaskError] = useState('');
     const [selectedNode, setSelectedNode] = useState(preferredNodeId || AUTO_PLACEMENT);
@@ -320,10 +321,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
 
     // The refresh is one atomic snapshot transaction: directory, tasks, and online leases.
     // eslint-disable-next-line complexity
-    const refresh = useCallback(async (signal?: AbortSignal, initial = false) => {
+    const refresh = useCallback(async (signal?: AbortSignal) => {
         if (refreshingRef.current) return;
         refreshingRef.current = true;
-        if (!initial && mounted.current) setRefreshing(true);
         try {
             const [nextStatus, nextNodes] = await Promise.all([
                 ComputeClusterService.status(signal),
@@ -407,7 +407,6 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
         } finally {
             if (mounted.current) {
                 setLoading(false);
-                setRefreshing(false);
             }
             refreshingRef.current = false;
         }
@@ -416,7 +415,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
     useEffect(() => {
         mounted.current = true;
         const controller = new AbortController();
-        void refresh(controller.signal, true);
+        void refresh(controller.signal);
         const timer = window.setInterval(() => void refresh(controller.signal), 2000);
         return () => {
             mounted.current = false;
@@ -615,13 +614,9 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
     const windowToggleLabel = maximized
         ? (zh ? '还原计算群窗口' : 'Restore compute cluster window')
         : (zh ? '放大计算群窗口' : 'Maximize compute cluster window');
-    const serviceState = error ? 'error' : loading || refreshing ? 'syncing' : 'ready';
-    const serviceStateLabel = error
-        ? (zh ? '连接异常，正在自动重试' : 'Connection unavailable, retrying automatically')
-        : loading || refreshing
-            ? (zh ? '正在自动同步' : 'Synchronizing automatically')
-            : (zh ? '自动刷新正常' : 'Automatic refresh healthy');
-    const serviceVersion = `v${status?.version || '0.1.0'}`;
+    const serviceNormal = !error && status?.state === 'ready';
+    const serviceStateLabel = healthLabel(serviceNormal, zh);
+    const serviceVersion = status ? `v${status.version}` : '';
     const operationsGraphEntityCount = resourceGraph?.entities.filter(entity =>
         entity.kind === 'compute_node' || entity.kind === 'managed_device',
     ).length ?? 0;
@@ -638,15 +633,15 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                         : 'View resource relationships, work scheduling, network assets, node status, and terminal access.'}</p>
                 </div>
                 <div className='ComputeClusterHeaderActions'>
-                    <span
-                        className={`ComputeClusterServiceState ${serviceState}`}
+                    {(status || error) && <span
+                        className={`ComputeClusterServiceState ${serviceNormal ? 'ready' : 'error'}`}
                         role='status'
                         aria-live='polite'
-                        aria-label={`${serviceStateLabel} · ${serviceVersion}`}
+                        aria-label={`${serviceStateLabel}${serviceVersion ? ` · ${serviceVersion}` : ''}`}
                         title={`${serviceStateLabel} · ${zh ? '每 2 秒同步' : 'syncs every 2 seconds'}`}
                     >
                         <i aria-hidden='true'/><span>{serviceVersion}</span>
-                    </span>
+                    </span>}
                     <button
                         type='button'
                         className={`window-toggle ${maximized ? 'restore' : 'maximize'}`}
@@ -661,7 +656,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
 
             <div className='ComputeClusterSummary'>
                 <div>
-                    <span>{zh ? '在线可用节点 / 总节点' : 'Online / Total nodes'}</span>
+                    <span>{zh ? '正常节点 / 总节点' : 'Normal / Total nodes'}</span>
                     <strong className='online'>{totals.online} / {totals.total}</strong>
                 </div>
                 <div><span>{zh ? '逻辑 CPU' : 'Logical CPUs'}</span><strong>{totals.cpu}</strong></div>
@@ -712,7 +707,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                         </div>
                         <div className='ComputeSchedulerPolicy'>
                             <strong>{zh ? '优先选择余量充足节点' : 'Most available node'}</strong>
-                            <span>{scheduler.policy} · {scheduler.online_nodes} {zh ? '个在线成员' : 'online members'}</span>
+                            <span>{scheduler.policy} · {scheduler.online_nodes} {zh ? '个正常成员' : 'Normal members'}</span>
                         </div>
                     </div>
                     <div className='ComputeSchedulerCapacity'>
@@ -734,7 +729,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                 {!loading && activeWorkspace === 'tasks' && taskControlEnabled && <section className='ComputeTaskControl' ref={taskFormRef}>
                     <div className='ComputeTaskControlHeading'>
                         <div>
-                            <span>{zh ? '任务执行 · work agent' : 'Task execution · Work agent'}</span>
+                            <span>{zh ? '任务执行器' : 'Task worker'}</span>
                             <h3>{zh ? '分发节点工作' : 'Dispatch node work'}</h3>
                             <p>{zh
                                 ? '可下发公开信息抓取与受限局域网发现；扫描范围由目标节点实时上报，拒绝公网、自定义端口、凭据与 Shell。'
@@ -744,16 +739,16 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                             <strong>{informationTask || discoveryTask || taskMode === 'background' ? (zh ? '后台任务' : 'Background') : (zh ? '在线任务' : 'Online')}</strong>
                             <span>{!informationTask && !discoveryTask && taskMode === 'online'
                                 ? (zh ? '关闭页面并超过租约后自动取消' : 'Cancels after the lease when this console closes')
-                                : (zh ? '群主离线后节点仍继续执行' : 'Keeps running when the owner is offline')}</span>
+                                : (zh ? '群主断开连接后节点仍继续执行' : 'Keeps running after the owner disconnects')}</span>
                         </div>
                     </div>
                     {graphSelection && <div className='ComputeGraphSelection' role='status'>
                         <strong>{zh ? '已从图谱带入' : 'Filled from graph'}</strong>
                         <span>{graphSelection.taskType === 'information.web_fetch'
-                            ? (zh ? '公开信息采集 agent' : 'Public information agent')
+                            ? (zh ? '公开信息采集任务执行器' : 'Public information task worker')
                             : graphSelection.taskType === 'network.lan_discovery'
-                                ? (zh ? '局域网发现 agent' : 'LAN discovery agent')
-                                : (zh ? '等待诊断 agent' : 'Wait diagnostic agent')}</span>
+                                ? (zh ? '局域网发现任务执行器' : 'LAN discovery task worker')
+                                : (zh ? '等待诊断任务执行器' : 'Wait diagnostic task worker')}</span>
                         <span>{nodes.find(node => node.node_id === graphSelection.nodeId)?.name || graphSelection.nodeId}</span>
                         <span>CPU {taskCpu} · {taskMemoryGb} GB RAM · {taskDiskGb} GB Disk · GPU {taskGpu}</span>
                     </div>}
@@ -788,7 +783,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                             }}>
                                 {orchestrationEnabled && !discoveryTask && <option value={AUTO_PLACEMENT}>{zh ? '计算群自动调度（推荐）' : 'Automatic group placement (recommended)'}</option>}
                                 {nodes.map(node => <option value={node.node_id} key={node.node_id} disabled={!node.online}>
-                                    {node.name}{node.online ? '' : (zh ? '（离线）' : ' (offline)')}
+                                    {node.name}{node.online ? '' : (zh ? '（故障）' : ' (Fault)')}
                                 </option>)}
                             </select>
                         </label>
@@ -828,7 +823,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                             ? (zh ? '只扫描节点实时上报的私有网段，固定常用端口，最多 256 个地址；不执行漏洞、口令或公网扫描。' : 'Only live node-advertised private networks and fixed common ports are scanned, up to 256 addresses; no exploits, credentials, or public scans.')
                             : informationTask
                             ? (zh ? '正文、原始响应和节点路径留在执行节点；控制台仅显示来源、状态与内容哈希。' : 'Content, raw responses, and paths stay on the Node; the console shows only source, status, and digest.')
-                            : (zh ? '调度器会排除离线、过期、能力不匹配或资源不足的节点。' : 'Offline, stale, incompatible, or undersized nodes are excluded.')}</p>
+                            : (zh ? '调度器会排除故障、过期、能力不匹配或资源不足的节点。' : 'Faulty, stale, incompatible, or undersized nodes are excluded.')}</p>
                     </div>}
 
                     <div className='ComputeTaskListHeading'>
@@ -836,7 +831,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                         <span>{tasks.length}</span>
                     </div>
                     {tasks.length === 0 && <div className='ComputeTaskEmpty'>
-                        {zh ? '还没有任务。使用默认公开 URL，点击“自动调度”即可验收 work agent。' : 'No tasks yet. Keep the public URL and click Auto place to validate the work agent.'}
+                        {zh ? '还没有任务。使用默认公开 URL，点击“自动调度”即可验收任务执行器。' : 'No tasks yet. Keep the public URL and click Auto place to validate the task worker.'}
                     </div>}
                     {tasks.length > 0 && <div className='ComputeTaskList'>
                         {tasks.map(task => <TaskCard
@@ -912,14 +907,14 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                             <span>{zh ? '资产台账' : 'Asset inventory'}</span>
                             <h3>{zh ? '节点局域网资产' : 'Node LAN assets'}</h3>
                             <p>{zh
-                                ? '每次安全扫描都会与该节点上一次结果比较；历史资产不会因节点暂时离线而消失。'
-                                : 'Each bounded scan is compared with the node previous result; history remains when a node is temporarily offline.'}</p>
+                                ? '每次安全扫描都会与该节点上一次结果比较；历史资产不会因节点暂时故障而消失。'
+                                : 'Each bounded scan is compared with the node previous result; history remains when a node is temporarily faulty.'}</p>
                         </div>
                         <div className='ComputeLanAssetStats'>
-                            <strong>{lanAssets.summary.online}</strong><span>{zh ? '在线' : 'online'}</span>
+                            <strong>{lanAssets.summary.online}</strong><span>{zh ? '正常' : 'Normal'}</span>
                             <strong>{lanAssets.summary.new}</strong><span>{zh ? '新增' : 'new'}</span>
                             <strong>{lanAssets.summary.changed}</strong><span>{zh ? '变化' : 'changed'}</span>
-                            <strong>{lanAssets.summary.offline}</strong><span>{zh ? '离线' : 'offline'}</span>
+                            <strong>{lanAssets.summary.offline}</strong><span>{zh ? '故障' : 'Fault'}</span>
                         </div>
                     </div>
                     {lanAssets.assets.length === 0 && <div className='ComputeLanAssetsEmpty'>
@@ -930,8 +925,8 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                             <span className={`ComputeLanAssetState ${asset.change_type}`}>{asset.online
                                 ? asset.change_type === 'new' ? (zh ? '新增' : 'New')
                                     : asset.change_type === 'changed' ? (zh ? '变化' : 'Changed')
-                                        : (zh ? '在线' : 'Online')
-                                : (zh ? '离线' : 'Offline')}</span>
+                                        : healthLabel(true, zh)
+                                : healthLabel(false, zh)}</span>
                             <div><strong>{asset.hostname || asset.address}</strong><small>{asset.address} · {asset.cidr}</small></div>
                             <div><strong>{asset.node_name}</strong><small>{asset.mac || (zh ? '未获取 MAC' : 'MAC unavailable')}</small></div>
                             <div className='ComputeLanAssetPorts'>{asset.ports.length

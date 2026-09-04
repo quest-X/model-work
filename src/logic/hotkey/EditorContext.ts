@@ -15,17 +15,22 @@ import {RectRenderEngine} from "../render/RectRenderEngine";
 import {AutoSaveService} from "../../services/AutoSaveService";
 import {UndoActions} from "../actions/UndoActions";
 
+const forceSave = (event: KeyboardEvent) => {
+    event.preventDefault();
+    void AutoSaveService.saveCurrentState(true);
+};
+
+const saveShortcuts: HotKeyAction[] = [
+    {keyCombo: ["Control", "s"], action: forceSave},
+    {keyCombo: ["Meta", "s"], action: forceSave},
+];
+const undoShortcut = PlatformUtil.isMac(window.navigator.userAgent) ? ["Meta", "z"] : ["Control", "z"];
+
 export class EditorContext extends BaseContext {
     public static actions: HotKeyAction[] = [
+        ...saveShortcuts,
         {
-            keyCombo: PlatformUtil.isMac(window.navigator.userAgent) ? ["Meta", "s"] : ["Control", "s"],
-            action: (event: KeyboardEvent) => {
-                event.preventDefault();
-                AutoSaveService.saveCurrentState(true);
-            }
-        },
-        {
-            keyCombo: PlatformUtil.isMac(window.navigator.userAgent) ? ["Meta", "z"] : ["Control", "z"],
+            keyCombo: undoShortcut,
             action: (event: KeyboardEvent) => {
                 event.preventDefault();
                 UndoActions.undo();

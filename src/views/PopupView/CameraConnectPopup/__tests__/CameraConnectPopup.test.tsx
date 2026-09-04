@@ -2,9 +2,11 @@ import React from 'react';
 import {fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {Language} from '../../../../data/LanguageConfig';
 import {CameraResourceService} from '../../../../services/CameraResourceService';
+import {ComputeClusterService} from '../../../../services/ComputeClusterService';
 import {CameraConnectPopup} from '../CameraConnectPopup';
 
 jest.mock('../../GenericYesNoPopup/GenericYesNoPopup', () => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     GenericYesNoPopup: ({title, renderContent, acceptLabel, onAccept, disableAcceptButton, rejectLabel, onReject, footerContent}: any) => <div>
         <h1>{title}</h1>
         {renderContent()}
@@ -24,12 +26,24 @@ jest.mock('../../../../utils/DefaultBackendUrl', () => ({
 
 jest.mock('../../../../services/CameraResourceService', () => ({
     CameraResourceService: {
+        connect: jest.fn(),
+        snapshot: jest.fn(),
         discover: jest.fn(),
         list: jest.fn(),
         create: jest.fn(),
         credentials: jest.fn(),
         update: jest.fn(),
         open: jest.fn(),
+        openCluster: jest.fn(),
+    },
+}));
+
+jest.mock('../../../../services/ComputeClusterService', () => ({
+    ComputeClusterService: {
+        discoverCameras: jest.fn(),
+        connectCamera: jest.fn(),
+        snapshotCamera: jest.fn(),
+        createCameraResource: jest.fn(),
     },
 }));
 
@@ -57,20 +71,19 @@ const savedResource = {
 describe('CameraConnectPopup LAN discovery', () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        global.fetch = jest.fn().mockResolvedValue({
-            ok: true,
-            status: 200,
-            json: async () => ({
-                status: 'success',
-                device: savedResource.device,
-                channels: [
-                    {id: '101', name: 'Main', enabled: true, width: 3840, height: 2160, rtsp_url: 'rtsp://camera/101'},
-                    {id: '102', name: 'Sub', enabled: true, width: 640, height: 360, rtsp_url: 'rtsp://camera/102'},
-                ],
-                snapshot_channel: '102',
-                playback_channel: '102',
-            }),
-        }) as jest.Mock;
+        const connected = {
+            status: 'success',
+            device: savedResource.device,
+            channels: [
+                {id: '101', name: 'Main', enabled: true, codec: 'H.265', width: 3840, height: 2160, frame_rate: 25, rtsp_url: 'rtsp://camera/101'},
+                {id: '102', name: 'Sub', enabled: true, codec: 'H.264', width: 640, height: 360, frame_rate: 25, rtsp_url: 'rtsp://camera/102'},
+            ],
+            snapshot_channel: '102',
+            playback_channel: '102',
+        } as const;
+        (CameraResourceService.connect as jest.Mock).mockResolvedValue(connected);
+        (ComputeClusterService.connectCamera as jest.Mock).mockResolvedValue(connected);
+        (ComputeClusterService.snapshotCamera as jest.Mock).mockResolvedValue(new Blob(['jpeg']));
         (CameraResourceService.discover as jest.Mock).mockResolvedValue({
             networks: ['192.168.10.0/24'],
             scanned_hosts: 253,
@@ -88,6 +101,19 @@ describe('CameraConnectPopup LAN discovery', () => {
                 services: ['HTTP', 'RTSP', 'Hikvision SDK'],
                 discovery_methods: ['WS-Discovery', 'RTSP'],
                 confidence: 'confirmed',
+            }, {
+                host: '192.168.10.30',
+                name: 'Office Axis',
+                manufacturer: 'Axis Communications',
+                model: 'M3085-V',
+                scheme: 'http',
+                port: 80,
+                rtsp_port: 554,
+                sdk_port: null,
+                open_ports: [80, 554],
+                services: ['HTTP', 'RTSP'],
+                discovery_methods: ['WS-Discovery', 'RTSP'],
+                confidence: 'confirmed',
             }],
         });
         (CameraResourceService.list as jest.Mock).mockResolvedValue([savedResource]);
@@ -103,19 +129,19 @@ describe('CameraConnectPopup LAN discovery', () => {
         });
         (CameraResourceService.update as jest.Mock).mockResolvedValue(savedResource);
         (CameraResourceService.open as jest.Mock).mockResolvedValue(undefined);
+        (CameraResourceService.openCluster as jest.Mock).mockResolvedValue(undefined);
     });
 
-    it('shows saved cameras without rescanning and updates the selected camera after confirmation', async () => {
+    it('hides saved cameras while still loading known credentials by IP', async () => {
         render(<CameraConnectPopup language={Language.CHINESE} imagesData={[]} />);
 
-        const savedCamera = await screen.findByRole('button', {
-            name: '使用已保存相机 IP CAMERA 192.168.10.12',
-        });
-        expect(CameraResourceService.list).toHaveBeenCalledTimes(1);
+        await waitFor(() => expect(CameraResourceService.list).toHaveBeenCalledTimes(1));
         expect(CameraResourceService.discover).not.toHaveBeenCalled();
-        expect(screen.getByText('上次使用的相机')).toBeInTheDocument();
+        expect(screen.queryByText('上次使用的相机')).not.toBeInTheDocument();
 
-        fireEvent.click(savedCamera);
+        const hostInput = screen.getByPlaceholderText('192.168.10.64');
+        fireEvent.change(hostInput, {target: {value: savedResource.host}});
+        fireEvent.blur(hostInput);
 
         await waitFor(() => {
             expect(CameraResourceService.credentials).toHaveBeenCalledWith(savedResource.id);
@@ -125,14 +151,10 @@ describe('CameraConnectPopup LAN discovery', () => {
         const ports = screen.getAllByRole('spinbutton');
         expect(ports[0]).toHaveValue(80);
         expect(ports[1]).toHaveValue(554);
-        expect(screen.queryByText('已记住')).not.toBeInTheDocument();
-        expect(screen.getByText('已选择')).toBeInTheDocument();
-        expect(screen.queryByText('填入表单')).not.toBeInTheDocument();
-        expect(screen.queryByText('已记住此相机')).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', {name: '使用已保存连接'})).not.toBeInTheDocument();
         expect(screen.getByLabelText('用户名')).toBeEnabled();
         expect(screen.getByLabelText('密码')).toHaveValue('saved-camera-password');
         expect(screen.getByLabelText('密码')).toBeEnabled();
+        expect(screen.getByLabelText('用户名').closest('.CameraCredentials')).toContainElement(screen.getByLabelText('密码'));
 
         fireEvent.change(screen.getByLabelText('用户名'), {target: {value: 'edited-operator'}});
         fireEvent.click(screen.getByRole('button', {name: '连接'}));
@@ -166,8 +188,9 @@ describe('CameraConnectPopup LAN discovery', () => {
         (CameraResourceService.list as jest.Mock).mockResolvedValue([]);
         render(<CameraConnectPopup language={Language.CHINESE} imagesData={[]} />);
 
-        fireEvent.click(screen.getByRole('button', {name: '扫描局域网'}));
+        fireEvent.click(screen.getByRole('button', {name: '开始扫描'}));
         await waitFor(() => expect(screen.getByText('North gate')).toBeInTheDocument());
+        expect(screen.queryByText('Office Axis')).not.toBeInTheDocument();
         fireEvent.click(screen.getByText('North gate').closest('button') as HTMLButtonElement);
 
         expect(screen.getByPlaceholderText('192.168.10.64')).toHaveValue('192.168.10.12');
@@ -175,5 +198,150 @@ describe('CameraConnectPopup LAN discovery', () => {
         expect(screen.getByPlaceholderText('123456')).toHaveValue('');
         expect(screen.getByText('未连接')).toBeInTheDocument();
         expect(screen.getByRole('button', {name: '连接'})).toBeDisabled();
+    });
+
+    it('runs discovery on the selected remote node instead of this computer', async () => {
+        (CameraResourceService.list as jest.Mock).mockResolvedValue([]);
+        (ComputeClusterService.discoverCameras as jest.Mock).mockResolvedValue({
+            networks: ['192.168.50.0/24'],
+            scanned_hosts: 253,
+            duration_ms: 1500,
+            devices: [{
+                host: '192.168.50.12', name: 'remote-camera', manufacturer: 'Hikvision',
+                model: '', scheme: 'http', port: 80, rtsp_port: 554, sdk_port: 8000,
+                open_ports: [80, 554, 8000], services: ['HTTP', 'RTSP'],
+                discovery_methods: ['RTSP'], confidence: 'confirmed',
+            }, {
+                host: '192.168.50.13', name: 'dahua-camera', manufacturer: 'Dahua',
+                model: '', scheme: 'http', port: 80, rtsp_port: 554, sdk_port: 37777,
+                open_ports: [554, 37777], services: ['RTSP'],
+                discovery_methods: ['SDK 37777'], confidence: 'probable',
+            }, {
+                host: '192.168.50.20', name: 'web-server', manufacturer: 'Unknown',
+                model: '', scheme: 'http', port: 80, rtsp_port: 554, sdk_port: null,
+                open_ports: [80], services: ['HTTP'], discovery_methods: [], confidence: 'probable',
+            }],
+        });
+
+        render(<CameraConnectPopup
+            language={Language.CHINESE}
+            imagesData={[]}
+            nodeId='remote-node'
+            nodeName='在线节点'
+            remote
+        />);
+        expect(CameraResourceService.list).not.toHaveBeenCalled();
+        expect(screen.getByText('扫描范围：在线节点 节点所在的远程局域网')).toBeInTheDocument();
+        expect(screen.queryByText(/remote-node/)).not.toBeInTheDocument();
+        expect(screen.getByText('海康、大华相机发现')).toBeInTheDocument();
+        expect(screen.getByText(/扫描结果只显示海康、大华相机/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', {name: '开始扫描'}));
+
+        expect(await screen.findByText('remote-camera')).toBeInTheDocument();
+        expect(screen.getByText('dahua-camera')).toBeInTheDocument();
+        expect(screen.queryByText('web-server')).not.toBeInTheDocument();
+        expect(ComputeClusterService.discoverCameras).toHaveBeenCalledWith('remote-node');
+        expect(CameraResourceService.discover).not.toHaveBeenCalled();
+    });
+
+    it('shows progress while scanning a selected remote node', async () => {
+        (ComputeClusterService.discoverCameras as jest.Mock).mockImplementation(() =>
+            new Promise(() => undefined),
+        );
+        render(<CameraConnectPopup
+            language={Language.CHINESE}
+            imagesData={[]}
+            nodeId='remote-node'
+        />);
+
+        fireEvent.click(screen.getByRole('button', {name: '开始扫描'}));
+
+        expect(await screen.findByRole('progressbar', {name: '扫描进度'})).not.toHaveAttribute('value');
+    });
+
+    it('does not create a remote resource when camera authentication fails', async () => {
+        (ComputeClusterService.connectCamera as jest.Mock).mockRejectedValueOnce(
+            new Error('相机认证失败，请检查用户名和密码'),
+        );
+        render(<CameraConnectPopup
+            language={Language.CHINESE}
+            imagesData={[]}
+            nodeId='remote-node'
+        />);
+
+        fireEvent.change(screen.getByPlaceholderText('192.168.10.64'), {
+            target: {value: '192.168.50.12'},
+        });
+        fireEvent.change(screen.getByLabelText('用户名'), {target: {value: 'operator'}});
+        fireEvent.change(screen.getByLabelText('密码'), {target: {value: 'secret'}});
+        fireEvent.click(screen.getByRole('button', {name: '连接'}));
+
+        expect(await screen.findByText('相机认证失败，请检查用户名和密码')).toBeInTheDocument();
+        expect(ComputeClusterService.createCameraResource).not.toHaveBeenCalled();
+        expect(CameraResourceService.openCluster).not.toHaveBeenCalled();
+    });
+
+    it('keeps connect, snapshot, save, and live opening on the selected node', async () => {
+        const remoteResource = {
+            ...savedResource,
+            id: '00000000-0000-4000-8000-000000000055',
+            host: '192.168.50.12',
+            name: 'remote-camera',
+            channels: [{
+                id: '102', name: 'Sub', enabled: true, codec: 'H.264', width: 640,
+                height: 360, frame_rate: 25, rtsp_url: 'rtsp://192.168.50.12/102',
+            }],
+        };
+        (ComputeClusterService.discoverCameras as jest.Mock).mockResolvedValue({
+            networks: ['192.168.50.0/24'], scanned_hosts: 253, duration_ms: 1000,
+            devices: [{
+                host: '192.168.50.12', name: 'remote-camera', manufacturer: 'Hikvision',
+                model: '', scheme: 'http', port: 80, rtsp_port: 554, sdk_port: 8000,
+                open_ports: [80, 554, 8000], services: ['HTTP', 'RTSP'],
+                discovery_methods: ['RTSP'], confidence: 'confirmed',
+            }],
+        });
+        (ComputeClusterService.createCameraResource as jest.Mock).mockResolvedValue(remoteResource);
+        Object.defineProperty(URL, 'createObjectURL', {
+            configurable: true,
+            value: jest.fn(() => 'blob:remote-camera'),
+        });
+        Object.defineProperty(URL, 'revokeObjectURL', {
+            configurable: true,
+            value: jest.fn(),
+        });
+
+        render(<CameraConnectPopup
+            language={Language.CHINESE}
+            imagesData={[]}
+            nodeId='remote-node'
+            nodeName='远程节点'
+        />);
+        fireEvent.click(screen.getByRole('button', {name: '开始扫描'}));
+        fireEvent.click((await screen.findByText('remote-camera')).closest('button') as HTMLButtonElement);
+        fireEvent.change(screen.getByLabelText('用户名'), {target: {value: 'operator'}});
+        fireEvent.change(screen.getByLabelText('密码'), {target: {value: 'secret'}});
+        fireEvent.click(screen.getByRole('button', {name: '连接'}));
+
+        await screen.findByText('相机连接成功');
+        fireEvent.click(screen.getByRole('button', {name: '抓图预览'}));
+        await screen.findByAltText('相机抓图预览');
+        fireEvent.click(screen.getByRole('button', {name: '确认'}));
+
+        await waitFor(() => expect(CameraResourceService.openCluster).toHaveBeenCalled());
+        expect(ComputeClusterService.connectCamera).toHaveBeenCalledWith(
+            'remote-node', expect.objectContaining({host: '192.168.50.12', username: 'operator'}),
+        );
+        expect(ComputeClusterService.snapshotCamera).toHaveBeenCalledWith(
+            'remote-node', expect.objectContaining({host: '192.168.50.12', channel_id: '102'}),
+        );
+        expect(ComputeClusterService.createCameraResource).toHaveBeenCalledWith(
+            'remote-node', expect.objectContaining({host: '192.168.50.12', channel_id: '102'}),
+        );
+        expect(CameraResourceService.openCluster).toHaveBeenCalledWith(
+            'remote-node', '远程节点', expect.objectContaining({device_id: remoteResource.id}), [],
+        );
+        expect(CameraResourceService.create).not.toHaveBeenCalled();
+        expect(CameraResourceService.open).not.toHaveBeenCalled();
     });
 });

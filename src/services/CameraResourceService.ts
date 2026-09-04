@@ -53,6 +53,14 @@ export type CameraConnectionProfile = {
     timeout_seconds: number;
 };
 
+export type CameraConnectResult = {
+    status: 'success';
+    device: CameraDevice;
+    channels: CameraChannel[];
+    snapshot_channel: string;
+    playback_channel: string;
+};
+
 export type CameraDiscoveryDevice = {
     host: string;
     name: string;
@@ -139,6 +147,28 @@ const errorDetail = async (response: Response): Promise<string> => {
 };
 
 export class CameraResourceService {
+    public static async connect(payload: CameraConnectionProfile): Promise<CameraConnectResult> {
+        const response = await fetch(`${cameraBaseUrl()}/connect`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        if (!response.ok) throw new Error(await errorDetail(response));
+        return response.json();
+    }
+
+    public static async snapshot(
+        payload: CameraConnectionProfile & {channel_id: string},
+    ): Promise<Blob> {
+        const response = await fetch(`${cameraBaseUrl()}/snapshot`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        if (!response.ok) throw new Error(await errorDetail(response));
+        return response.blob();
+    }
+
     public static async discover(timeoutSeconds: number = 0.35): Promise<CameraDiscoveryResponse> {
         const response = await fetch(`${cameraBaseUrl()}/discovery`, {
             method: 'POST',

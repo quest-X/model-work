@@ -5,49 +5,31 @@ import {PopupActions} from '../../../logic/actions/PopupActions';
 import {AppState} from '../../../store';
 import {ImageData} from '../../../store/labels/types';
 import {
+    CameraChannel,
+    CameraConnectResult,
     CameraDiscoveryDevice,
     CameraDiscoveryResponse,
     CameraResource,
     CameraResourceService,
 } from '../../../services/CameraResourceService';
-import {getExtensionEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
+import {ComputeClusterService} from '../../../services/ComputeClusterService';
 import {GenericYesNoPopup} from '../GenericYesNoPopup/GenericYesNoPopup';
 import './CameraConnectPopup.scss';
-
-type CameraDevice = {
-    name: string;
-    model: string;
-    serial_number: string;
-    firmware_version: string;
-    device_type: string;
-    mac_address: string;
-};
-
-type CameraChannel = {
-    id: string;
-    name: string;
-    enabled: boolean;
-    codec: string;
-    width: number | null;
-    height: number | null;
-    frame_rate: number | null;
-    rtsp_url: string;
-};
-
-type CameraConnectResult = {
-    status: 'success';
-    device: CameraDevice;
-    channels: CameraChannel[];
-    snapshot_channel: string;
-    playback_channel: string;
-};
 
 interface IProps {
     language: Language;
     imagesData: ImageData[];
+    // 目标节点 id：由打开入口决定。非空 = 扫描该远程 model-work-node 所在的局域网；
+    // 为空/未传 = 保留旧行为，扫描 extension-engine 后端自身所在的局域网。
+    nodeId?: string | null;
+    nodeName?: string | null;
+    remote?: boolean;
 }
 
-export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => {
+// eslint-disable-next-line complexity
+export const CameraConnectPopup: React.FC<IProps> = (
+    {language, imagesData, nodeId = null, nodeName = null, remote = false},
+) => {
     const chinese = language === Language.CHINESE;
     const [scheme, setScheme] = useState<'http' | 'https'>('http');
     const [host, setHost] = useState('');
@@ -69,8 +51,6 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
     const [discovery, setDiscovery] = useState<CameraDiscoveryResponse | null>(null);
     const [savedResources, setSavedResources] = useState<CameraResource[]>([]);
     const [savedResource, setSavedResource] = useState<CameraResource | null>(null);
-    const [loadingSavedResources, setLoadingSavedResources] = useState(true);
-    const [savedResourcesError, setSavedResourcesError] = useState('');
     const [loadingCredentials, setLoadingCredentials] = useState(false);
 
     useEffect(() => () => {
@@ -78,25 +58,21 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
     }, [previewUrl]);
 
     useEffect(() => {
+        if (nodeId) {
+            setSavedResources([]);
+            setSavedResource(null);
+            return undefined;
+        }
         let active = true;
         CameraResourceService.list()
             .then(resources => {
                 if (active) setSavedResources(resources);
             })
-            .catch(resourceError => {
-                if (active) {
-                    setSavedResourcesError(resourceError instanceof Error
-                        ? resourceError.message
-                        : String(resourceError));
-                }
-            })
-            .finally(() => {
-                if (active) setLoadingSavedResources(false);
-            });
+            .catch(() => undefined);
         return () => {
             active = false;
         };
-    }, []);
+    }, [nodeId]);
 
     const orderedSavedResources = useMemo(() => [...savedResources]
         .sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at)), [savedResources]);
@@ -131,25 +107,20 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
         || Number(rtspPort) > 65535;
     const formInvalid = manualFormInvalid;
 
-    const readError = async (response: Response): Promise<string> => {
-        try {
-            const body = await response.json();
-            if (typeof body?.detail === 'string') return body.detail;
-            if (Array.isArray(body?.detail)) {
-                return body.detail.map((item: any) => item?.msg || String(item)).join('；');
-            }
-        } catch {
-            // Fall through to the status-based message.
-        }
-        return chinese ? `请求失败（HTTP ${response.status}）` : `Request failed (HTTP ${response.status})`;
-    };
-
     const scanCameras = async () => {
         if (scanning) return;
         setScanning(true);
         setScanError('');
         try {
-            setDiscovery(await CameraResourceService.discover());
+            const nextDiscovery = nodeId
+                ? await ComputeClusterService.discoverCameras(nodeId)
+                : await CameraResourceService.discover();
+            setDiscovery({
+                ...nextDiscovery,
+                devices: nextDiscovery.devices.filter(({manufacturer}) =>
+                    /^(?:(?:hikvision|dahua)(?:\b|-)|海康|大华)/i.test(manufacturer),
+                ),
+            });
         } catch (scanFailure) {
             setScanError(scanFailure instanceof Error ? scanFailure.message : String(scanFailure));
         } finally {
@@ -223,13 +194,9 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
             setPreviewUrl('');
         }
         try {
-            const response = await fetch(`${getExtensionEngineBaseUrl()}/extensions/camera-connect/connect`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(requestBody),
-            });
-            if (!response.ok) throw new Error(await readError(response));
-            const connected = await response.json() as CameraConnectResult;
+            const connected = nodeId
+                ? await ComputeClusterService.connectCamera(nodeId, requestBody)
+                : await CameraResourceService.connect(requestBody);
             setResult(connected);
             const availableChannels = new Set(connected.channels.map(channel => channel.id));
             const savedChannel = savedResource?.channel_id;
@@ -249,13 +216,12 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
         setPreviewing(true);
         setError('');
         try {
-            const response = await fetch(`${getExtensionEngineBaseUrl()}/extensions/camera-connect/snapshot`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({...requestBody, channel_id: channelId}),
-            });
-            if (!response.ok) throw new Error(await readError(response));
-            const nextUrl = URL.createObjectURL(await response.blob());
+            const blob = nodeId
+                ? await ComputeClusterService.snapshotCamera(
+                    nodeId, {...requestBody, channel_id: channelId},
+                )
+                : await CameraResourceService.snapshot({...requestBody, channel_id: channelId});
+            const nextUrl = URL.createObjectURL(blob);
             if (previewUrl) URL.revokeObjectURL(previewUrl);
             setPreviewUrl(nextUrl);
         } catch (snapshotError) {
@@ -275,12 +241,27 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
                 name: resourceName.trim(),
                 channel_id: channelId,
             };
-            const resource = savedResource
-                ? await CameraResourceService.update(savedResource.id, payload)
-                : await CameraResourceService.create(payload);
+            const resource = nodeId
+                ? await ComputeClusterService.createCameraResource(nodeId, payload)
+                : savedResource
+                    ? await CameraResourceService.update(savedResource.id, payload)
+                    : await CameraResourceService.create(payload);
             setPassword('');
             window.dispatchEvent(new CustomEvent('opensight:camera-resource-updated'));
-            await CameraResourceService.open(resource, imagesData);
+            if (nodeId) {
+                await CameraResourceService.openCluster(nodeId, nodeName || nodeId, {
+                    device_id: resource.id,
+                    kind: 'camera',
+                    provider: 'camera-connect',
+                    name: resource.name,
+                    model: resource.device.model,
+                    status: 'online',
+                    channels: resource.channels.length,
+                    capabilities: ['camera.registry.v1', 'camera.stream.v1'],
+                }, imagesData);
+            } else {
+                await CameraResourceService.open(resource, imagesData);
+            }
             PopupActions.close();
         } catch (saveError) {
             setError(saveError instanceof Error ? saveError.message : String(saveError));
@@ -289,64 +270,14 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
         }
     };
 
+    // eslint-disable-next-line complexity
     const renderContent = () => (
         <div className='CameraConnectPopupContent'>
             <div className='CameraIntro'>
                 {chinese
-                    ? '使用 ISAPI Digest 验证海康网络摄像机。首次确认后会自动记住连接方式；下次选择相机时直接填入账号密码，可自行修改。'
-                    : 'Connect with Hikvision ISAPI Digest. Confirmed settings are remembered and filled into the editable form when the camera is selected again.'}
+                    ? '使用 ISAPI Digest 验证海康网络摄像机。首次确认后会自动记住连接方式；下次输入或扫描到该相机时直接填入账号密码，可自行修改。'
+                    : 'Connect with Hikvision ISAPI Digest. Confirmed settings are remembered and filled into the editable form when the camera is entered or discovered again.'}
             </div>
-
-            <section className='CameraSavedPanel' aria-label={chinese ? '已保存的相机' : 'Saved cameras'}>
-                <div className='CameraSavedHeader'>
-                    <div>
-                        <strong>{chinese ? '上次使用的相机' : 'Previously used cameras'}</strong>
-                        <span>{chinese
-                            ? '选择后会读取已加密保存的连接信息，无需重新扫描局域网。'
-                            : 'Select a camera to load its encrypted saved connection without scanning the LAN again.'}</span>
-                    </div>
-                    <span className='CameraSavedCount'>{orderedSavedResources.length}</span>
-                </div>
-                {loadingSavedResources && <div className='CameraDiscoverySummary'>
-                    {chinese ? '正在读取已保存相机…' : 'Loading saved cameras…'}
-                </div>}
-                {savedResourcesError && <div className='CameraDiscoveryError'>
-                    {chinese ? `读取已保存相机失败：${savedResourcesError}` : `Unable to load saved cameras: ${savedResourcesError}`}
-                </div>}
-                {!loadingSavedResources && !savedResourcesError && orderedSavedResources.length === 0 &&
-                    <div className='CameraDiscoveryEmpty'>
-                        {chinese ? '暂无已保存相机，可手动填写或扫描局域网。' : 'No saved cameras. Enter one manually or scan the LAN.'}
-                    </div>}
-                {orderedSavedResources.length > 0 && <div className='CameraDiscoveryResults CameraSavedResults'>
-                    {orderedSavedResources.map(resource => {
-                        const selected = savedResource?.id === resource.id;
-                        return <button
-                            type='button'
-                            className={`CameraDiscoveryRow CameraSavedRow remembered${selected ? ' selected' : ''}`}
-                            key={resource.id}
-                            onClick={() => void useSavedResource(resource)}
-                            disabled={loadingCredentials}
-                            aria-label={`${chinese ? '使用已保存相机' : 'Use saved camera'} ${resource.name} ${resource.host}`}
-                            aria-pressed={selected}
-                        >
-                            <span className='CameraDiscoveryDot confirmed'/>
-                            <span className='CameraDiscoveryIdentity'>
-                                <strong>{resource.name}</strong>
-                                <span>{resource.device.model || (chinese ? '网络相机' : 'Network camera')}</span>
-                            </span>
-                            <code>{resource.host}</code>
-                            <span className='CameraDiscoveryPorts'>
-                                {chinese ? '通道' : 'Channel'} {resource.channel_id} · RTSP {resource.rtsp_port}
-                            </span>
-                            <span className='CameraDiscoveryStatus saved'>
-                                {selected
-                                    ? (chinese ? '已选择' : 'Selected')
-                                    : (chinese ? '使用' : 'Use')}
-                            </span>
-                        </button>;
-                    })}
-                </div>}
-            </section>
 
             {result && <div className='CameraBanner success CameraConnectionSuccess'>
                 {chinese ? '相机连接成功' : 'Camera connected'}
@@ -381,29 +312,31 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
                     <span>{chinese ? '管理端口' : 'HTTP port'}</span>
                     <input type='number' min='1' max='65535' value={port} onChange={event => setPort(event.target.value)}/>
                 </label>
-                <label>
-                    <span>{chinese ? 'RTSP 端口' : 'RTSP port'}</span>
-                    <input type='number' min='1' max='65535' value={rtspPort} onChange={event => setRtspPort(event.target.value)}/>
-                </label>
-                <label>
-                    <span>{chinese ? '用户名' : 'Username'}</span>
-                    <input
-                        value={username}
-                        autoComplete='username'
-                        placeholder='admin'
-                        onChange={event => setUsername(event.target.value)}
-                    />
-                </label>
-                <label className='wide'>
-                    <span>{chinese ? '密码' : 'Password'}</span>
-                    <input
-                        type='password'
-                        value={password}
-                        autoComplete='current-password'
-                        placeholder='123456'
-                        onChange={event => setPassword(event.target.value)}
-                    />
-                </label>
+                <div className='CameraCredentials'>
+                    <label>
+                        <span>{chinese ? 'RTSP 端口' : 'RTSP port'}</span>
+                        <input type='number' min='1' max='65535' value={rtspPort} onChange={event => setRtspPort(event.target.value)}/>
+                    </label>
+                    <label>
+                        <span>{chinese ? '用户名' : 'Username'}</span>
+                        <input
+                            value={username}
+                            autoComplete='username'
+                            placeholder='admin'
+                            onChange={event => setUsername(event.target.value)}
+                        />
+                    </label>
+                    <label>
+                        <span>{chinese ? '密码' : 'Password'}</span>
+                        <input
+                            type='password'
+                            value={password}
+                            autoComplete='current-password'
+                            placeholder='123456'
+                            onChange={event => setPassword(event.target.value)}
+                        />
+                    </label>
+                </div>
                 {scheme === 'https' && <label className='CameraCheckbox wide'>
                     <input type='checkbox' checked={verifyTls} onChange={event => setVerifyTls(event.target.checked)}/>
                     <span>{chinese ? '校验相机 TLS 证书' : 'Verify camera TLS certificate'}</span>
@@ -411,19 +344,27 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
             </div>
 
             <section className='CameraDiscoveryPanel' aria-label={chinese ? '局域网相机发现' : 'LAN camera discovery'}>
+                <div className='CameraDiscoveryScope remote'>{nodeId
+                    ? (chinese
+                        ? `扫描范围：${nodeName ? `${nodeName} 节点` : '所选节点'}所在的${remote ? '远程' : '本地'}局域网`
+                        : `Scan scope: ${nodeName ? `${nodeName} node` : 'selected node'} ${remote ? 'remote' : 'local'} LAN`)
+                    : (chinese ? '扫描范围：当前服务器所在的本地局域网' : 'Scan scope: the current server local LAN')}</div>
                 <div className='CameraDiscoveryHeader'>
                     <div>
-                        <strong>{chinese ? '局域网相机发现' : 'LAN camera discovery'}</strong>
+                        <strong>{chinese ? '海康、大华相机发现' : 'Hikvision and Dahua camera discovery'}</strong>
                         <span>{chinese
-                            ? '从服务器当前网段发现 ONVIF、RTSP 及常见厂商相机；扫描不会提交账号密码。'
-                            : 'Find ONVIF, RTSP, and common vendor cameras on the server LAN without sending credentials.'}</span>
+                            ? '扫描结果只显示海康、大华相机，其他设备不会显示；扫描不会提交账号密码。'
+                            : 'Scan results show only Hikvision and Dahua cameras; other devices are hidden and no credentials are sent.'}</span>
                     </div>
                     <button type='button' onClick={scanCameras} disabled={scanning}>
                         {scanning
                             ? (chinese ? '正在扫描…' : 'Scanning…')
-                            : (chinese ? '扫描局域网' : 'Scan LAN')}
+                            : (chinese ? '开始扫描' : 'Start scan')}
                     </button>
                 </div>
+                {scanning && nodeId && <div className='JetsonScanProgress'>
+                    <progress aria-label={chinese ? '扫描进度' : 'Scan progress'}/>
+                </div>}
                 {scanError && <div className='CameraDiscoveryError'>{scanError}</div>}
                 {discovery && <>
                     <div className='CameraDiscoverySummary'>
@@ -436,7 +377,9 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
                             {chinese ? '未发现可识别的网络相机，可继续手动填写 IP。' : 'No identifiable network cameras found. You can still enter an IP manually.'}
                         </div>
                         : <div className='CameraDiscoveryResults'>
-                            {discovery.devices.map(camera => {
+                            {discovery.devices.map(
+                                // eslint-disable-next-line complexity
+                                camera => {
                                 const remembered = savedByHost.get(camera.host);
                                 const selected = remembered
                                     ? savedResource?.id === remembered.id
@@ -466,7 +409,8 @@ export const CameraConnectPopup: React.FC<IProps> = ({language, imagesData}) => 
                                             : (chinese ? '未连接' : 'Not connected')}
                                     </span>
                                 </button>;
-                            })}
+                                },
+                            )}
                         </div>}
                 </>}
                 {error && <div className='CameraBanner error'>{error}</div>}

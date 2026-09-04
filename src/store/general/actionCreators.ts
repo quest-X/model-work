@@ -15,11 +15,19 @@ export function updateWindowSize(windowSize: ISize): GeneralActionTypes {
     };
 }
 
-export function updateActivePopupType(activePopupType: PopupWindowType): GeneralActionTypes {
+export function updateActivePopupType(
+    activePopupType: PopupWindowType,
+    activePopupNodeId: string | null = null,
+    activePopupNodeName: string | null = null,
+    activePopupNodeRemote = false,
+): GeneralActionTypes {
     return {
         type: Action.UPDATE_ACTIVE_POPUP_TYPE,
         payload: {
             activePopupType,
+            activePopupNodeId,
+            activePopupNodeName,
+            activePopupNodeRemote,
         }
     }
 }

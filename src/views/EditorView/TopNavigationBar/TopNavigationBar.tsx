@@ -397,7 +397,7 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                                         <img src='ico/ai.png' alt='l2g-retrieval'/>
                                         {currentTexts.modelManagement.l2gRetrieval}
                                     </div>
-                                    <div className='DropDownMenuContentOption active'
+                                    <div className={`DropDownMenuContentOption active${cameraConnectAvailable || computeClusterAvailable ? ' divider' : ''}`}
                                         onClick={openModelInspector}>
                                         <div className='Marker'/>
                                         <img src='ico/eye.png' alt='model-inspector'/>

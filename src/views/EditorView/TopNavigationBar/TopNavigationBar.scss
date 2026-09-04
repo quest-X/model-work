@@ -184,6 +184,7 @@
 
       .DropDownMenuContentOption {
         display: flex;
+        position: relative;
         flex-direction: row;
         align-items: center;
         cursor: pointer;
@@ -191,6 +192,22 @@
         height: 40px;
         color: white;
         font-size: 14px;
+
+        &.divider::after {
+          content: '';
+          position: absolute;
+          right: 0;
+          bottom: 0;
+          left: 0;
+          height: 1px;
+          background: linear-gradient(
+            to right,
+            transparent,
+            rgba(255, 255, 255, 0.2) 20%,
+            rgba(255, 255, 255, 0.2) 80%,
+            transparent
+          );
+        }
 
         .ServicesOptionLabel {
           flex: 1;
@@ -288,6 +305,7 @@
       align-items: center;
       align-self: stretch;
       margin-left: 2px;
+      margin-right: 1px;
     }
 
     .AccountAvatarButton {

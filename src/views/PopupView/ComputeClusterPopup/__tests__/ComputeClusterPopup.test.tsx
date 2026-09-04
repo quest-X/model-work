@@ -12,6 +12,7 @@ jest.mock('../../../../services/ComputeClusterService', () => ({
     ComputeClusterService: {
         status: jest.fn(), nodes: jest.fn(), tasks: jest.fn(), scheduler: jest.fn(),
         resourceGraph: jest.fn(), lanScanTargets: jest.fn(), lanAssets: jest.fn(),
+        connectJetson: jest.fn(),
         lanSchedules: jest.fn(), createLanSchedule: jest.fn(), controlLanSchedule: jest.fn(),
         terminalTargets: jest.fn(), startTerminal: jest.fn(), terminal: jest.fn(),
         terminalInput: jest.fn(), terminalControl: jest.fn(),
@@ -193,6 +194,7 @@ describe('ComputeClusterPopup', () => {
                 first_seen_at: 1, last_seen_at: 1, last_changed_at: 1, change_type: 'new',
             }],
         });
+        service.connectJetson.mockResolvedValue({} as never);
         service.lanSchedules.mockResolvedValue({
             version: 1, group_id: 'group-1',
             summary: {total: 1, enabled: 1, paused: 0, failed: 0},
@@ -234,15 +236,19 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('IP CAMERA')).toBeInTheDocument();
         expect(screen.getByText('DS-2CD2686FWDA2-IZS')).toBeInTheDocument();
         expect(screen.getByText('2 个通道')).toBeInTheDocument();
-        expect(screen.getByText('已归属')).toBeInTheDocument();
-        expect(screen.getByText('SSH: 可连接')).toBeInTheDocument();
+        const nodeCard = screen.getByText('edge-01').closest('.ComputeNodeCard') as HTMLElement;
+        expect(nodeCard.querySelector('.ComputeNodeStatus')).toHaveTextContent('正常');
+        expect(nodeCard.querySelector('.ComputeNodeDeviceHeading')).toHaveTextContent('设备源：正常');
+        expect(nodeCard.querySelector('.ComputeDeviceStatus')).toHaveTextContent('故障');
+        expect(screen.getByText('SSH: 正常')).toBeInTheDocument();
+        expect(screen.getByText('Tailscale: 正常')).toBeInTheDocument();
         expect(screen.getByText('统一查看资源关系、工作调度、网络资产、节点状态与终端连接。')).toBeInTheDocument();
         expect(screen.getAllByText('16')).toHaveLength(2);
-        const availability = screen.getByText('在线可用节点 / 总节点').closest('div');
+        const availability = screen.getByText('正常节点 / 总节点').closest('div');
         expect(availability).not.toBeNull();
         expect(within(availability as HTMLElement).getByText('1 / 1')).toHaveClass('online');
         expect(screen.queryByRole('button', {name: '刷新'})).not.toBeInTheDocument();
-        expect(screen.getByRole('status', {name: '自动刷新正常 · v0.1.0'})).toBeInTheDocument();
+        expect(screen.getByRole('status', {name: '正常 · v0.1.0'})).toBeInTheDocument();
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
     });
 
@@ -460,6 +466,8 @@ describe('ComputeClusterPopup', () => {
         const graphStats = graphPanel?.querySelector('.ComputeKnowledgeStats');
         expect(graphStats?.querySelector('.online strong')).toHaveTextContent('1');
         expect(graphStats?.querySelector('.offline strong')).toHaveTextContent('1');
+        expect(graphStats?.querySelector('.online')).toHaveTextContent('正常');
+        expect(graphStats?.querySelector('.offline')).toHaveTextContent('故障');
         const offlineNode = screen.getByRole('button', {name: '查看 edge-offline 节点信息'});
         expect(offlineNode).toHaveClass('node-offline');
         expect(offlineNode).toHaveAttribute('data-entity-kind', 'compute_node');
@@ -480,7 +488,9 @@ describe('ComputeClusterPopup', () => {
         expect(within(operationsCard).getByText('SSH 通路')).toBeInTheDocument();
         expect(within(operationsCard).getByText('公网出口')).toBeInTheDocument();
         expect(within(operationsCard).getByText('Tailscale 私有组网')).toBeInTheDocument();
-        expect(within(operationsCard).getByText('可调用 agents')).toBeInTheDocument();
+        expect(within(operationsCard).getByText('正常 · 心跳 刚刚')).toBeInTheDocument();
+        expect(within(operationsCard).getAllByText('正常')).toHaveLength(3);
+        expect(within(operationsCard).getByText('可调用任务执行器')).toBeInTheDocument();
         expect(within(operationsCard).getByText(/A-\d{3} · 公开信息采集/)).toBeInTheDocument();
         expect(within(operationsCard).getByText(/A-\d{3} · 等待诊断/)).toBeInTheDocument();
 
@@ -509,11 +519,12 @@ describe('ComputeClusterPopup', () => {
 
         await user.hover(offlineNode);
         const offlineCard = screen.getByRole('status', {name: 'edge-offline 运维信息'});
-        expect(within(offlineCard).getByText('离线 · 最后心跳 20 小时前')).toBeInTheDocument();
+        expect(within(offlineCard).getByText('故障 · 最后心跳 20 小时前')).toBeInTheDocument();
 
         await user.unhover(offlineNode);
         await user.hover(camera);
         const sensorCard = screen.getByRole('status', {name: 'IP CAMERA 运维信息'});
+        expect(within(sensorCard).getByText('摄像头传感器 S-003 · 故障')).toBeInTheDocument();
         expect(within(sensorCard).getByText('DS-2CD2686FWDA2-IZS')).toBeInTheDocument();
         expect(within(sensorCard).getByText('2 个通道')).toBeInTheDocument();
         expect(within(sensorCard).getByText('归属节点 · edge-01')).toBeInTheDocument();
@@ -544,7 +555,7 @@ describe('ComputeClusterPopup', () => {
 
         rerender(<ComputeClusterPopup language={Language.ENGLISH}/>);
 
-        expect(screen.getByText('Online / Total nodes')).toBeInTheDocument();
+        expect(screen.getByText('Normal / Total nodes')).toBeInTheDocument();
         expect(await screen.findByText('shanghai')).toBeInTheDocument();
         expect(screen.queryByText('上海')).not.toBeInTheDocument();
     });
@@ -731,6 +742,9 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('camera.local')).toBeInTheDocument();
         expect(screen.getByText('rtsp:554')).toBeInTheDocument();
         expect(screen.getByText('00:11:22:33:44:55')).toBeInTheDocument();
+        const assetStats = screen.getByText('资产台账').closest('.ComputeLanAssets')?.querySelector('.ComputeLanAssetStats');
+        expect(assetStats).toHaveTextContent('正常');
+        expect(assetStats).toHaveTextContent('故障');
         await waitFor(() => expect(service.lanAssets).toHaveBeenCalledTimes(1));
     });
 
@@ -793,10 +807,12 @@ describe('ComputeClusterPopup', () => {
         await screen.findByRole('navigation', {name: '计算群工作区'});
         await user.click(await screen.findByRole('button', {name: '终端连接 1'}));
         expect(await screen.findByText('节点终端连接')).toBeInTheDocument();
+        expect(screen.getByText('选择正常节点并连接。故障节点不可选，恢复正常后会自动变为可连接。')).toBeInTheDocument();
         expect(screen.getByText(/连接目标与认证材料由 Mac Client 保管/)).toBeInTheDocument();
+        expect(screen.getByRole('option', {name: 'edge-01 · linux · 正常'})).toBeInTheDocument();
         await user.click(screen.getByRole('button', {name: '连接终端'}));
         await waitFor(() => expect(service.startTerminal).toHaveBeenCalledWith('node-12345678'));
-        const connectionState = await screen.findByText('局域网 SSH · 已连接');
+        const connectionState = await screen.findByText('局域网 SSH · 正常');
         expect(connectionState.closest('.ComputeTerminalState')).toHaveClass('lan');
         const input = screen.getByRole('textbox', {name: '终端指令'});
         await user.type(input, 'uname -a');
@@ -827,7 +843,7 @@ describe('ComputeClusterPopup', () => {
 
         await user.click(await screen.findByRole('button', {name: '终端连接 1'}));
         await user.click(screen.getByRole('button', {name: '连接终端'}));
-        const connectionState = await screen.findByText('Tailscale · 已连接');
+        const connectionState = await screen.findByText('Tailscale · 正常');
         expect(connectionState.closest('.ComputeTerminalState')).toHaveClass('remote');
         expect(connectionState.closest('.ComputeTerminalState')).not.toHaveClass('lan');
     });

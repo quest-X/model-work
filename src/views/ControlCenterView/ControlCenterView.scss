@@ -202,6 +202,7 @@ span.ControlMachineIcon {
   font-size: 9px;
 
   &.healthy { color: #79d89e; }
+  &.warning { color: #e7a640; }
   &.offline { color: #ef8b8b; }
 }
 
@@ -480,25 +481,14 @@ span.ControlMachineIcon {
 }
 
 .ControlRefreshWarning {
-  margin-bottom: 14px;
-  border-left: 3px solid #e7a640;
-  background: rgba(231, 166, 64, 0.08);
-  padding: 9px 11px;
-  color: #e8bd79;
-  font-size: 10px;
-}
-
-.ControlRuntimeWarning {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  box-sizing: border-box;
-  width: 100%;
+  margin-bottom: 14px;
   border-left: 3px solid #e7a640;
-  border-bottom: 1px solid rgba(231, 166, 64, 0.18);
   background: rgba(231, 166, 64, 0.08);
-  padding: 7px 12px 7px 16px;
+  padding: 9px 11px;
   color: #e8bd79;
   font-size: 10px;
 
@@ -567,6 +557,9 @@ span.ControlMachineIcon {
 .ControlNodeTag {
   padding-left: 8px;
 
+  &.location,
+  &.static { padding-right: 8px; }
+
   button {
     width: 22px;
     height: 20px;
@@ -587,7 +580,8 @@ span.ControlMachineIcon {
   &:focus-within { border-color: $primaryColor; }
 
   input {
-    width: 50px;
+    width: 64px;
+    flex-shrink: 0;
     height: 20px;
     border: 0;
     outline: 0;
@@ -673,12 +667,20 @@ span.ControlMachineIcon {
   justify-content: space-between;
   margin-bottom: 10px;
 
+  > div {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   h2 {
     margin: 0;
     color: rgba(255, 255, 255, 0.9);
     font-size: 14px;
   }
 
+  > div > span,
+  > div > .ControlSectionCountButton,
   > span {
     display: grid;
     place-items: center;
@@ -688,6 +690,19 @@ span.ControlMachineIcon {
     background: rgba(255, 255, 255, 0.07);
     color: rgba(255, 255, 255, 0.58);
     font-size: 9px;
+  }
+
+  .ControlSectionCountButton {
+    border: 0;
+    padding: 0;
+    color: rgba(255, 255, 255, 0.58);
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+      background: rgba(255, 255, 255, 0.14);
+      outline: none;
+    }
   }
 }
 
@@ -747,13 +762,6 @@ button.ControlServiceCard {
   &:disabled { cursor: default; }
 }
 
-.ControlRuntimeServiceGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(240px, 1fr));
-  align-items: start;
-  gap: 8px;
-}
-
 .ControlRuntimeService { width: 100%; }
 
 .ControlRuntimeIdentity {
@@ -771,26 +779,6 @@ button.ControlServiceCard {
   margin-left: 10px;
   color: rgba(255, 255, 255, 0.38) !important;
   font-size: 16px !important;
-}
-
-.ControlRuntimeEvents {
-  margin-top: 10px;
-
-  > strong { color: rgba(255, 255, 255, 0.55); font-size: 9px; }
-  ul { margin: 7px 0 0; padding: 0; list-style: none; }
-  li {
-    display: flex;
-    flex-direction: column;
-    margin-top: 5px;
-    border-left: 2px solid #6a7175;
-    padding-left: 7px;
-
-    &.warning { border-left-color: #e7a640; }
-    &.error { border-left-color: #df6262; }
-  }
-  span { color: rgba(255, 255, 255, 0.34); font-size: 8px; }
-  small { margin-top: 2px; color: rgba(255, 255, 255, 0.68); font-size: 9px; }
-  p { margin: 7px 0 0; color: rgba(255, 255, 255, 0.34); font-size: 9px; }
 }
 
 .ControlResourceMonitorBackdrop {
@@ -1007,17 +995,6 @@ button.ControlServiceCard {
   min-height: 0;
   overflow: auto;
   padding: 18px 20px;
-
-  > header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
-
-    h3 { margin: 0; color: white; font-size: 18px; font-weight: 500; }
-    p { margin: 4px 0 0; color: rgba(255, 255, 255, 0.36); font-size: 8px; }
-    > span { color: rgba(255, 255, 255, 0.36); font-size: 9px; }
-  }
 }
 
 .ControlMonitorTaskHistory {
@@ -1026,7 +1003,7 @@ button.ControlServiceCard {
   table { width: 100%; border-collapse: collapse; font-size: 9px; }
   th,
   td { border-bottom: 1px solid rgba(255, 255, 255, 0.07); padding: 10px 8px; color: rgba(255, 255, 255, 0.58); text-align: left; }
-  th { position: sticky; top: 0; background: #191a1c; color: rgba(255, 255, 255, 0.34); font-size: 8px; font-weight: 500; }
+  th { position: sticky; top: -18px; background: #191a1c; color: rgba(255, 255, 255, 0.34); font-size: 8px; font-weight: 500; }
   th button {
     display: flex;
     align-items: center;
@@ -1118,8 +1095,9 @@ button.ControlServiceCard {
   article { display: flex; max-width: 72%; flex-direction: column; align-items: flex-start; align-self: flex-start; margin-bottom: 12px; }
   article.user { align-items: flex-end; align-self: flex-end; }
   article > span { color: rgba(255, 255, 255, 0.34); font-size: 8px; }
-  article > p { max-width: 100%; margin: 4px 0 0; border-radius: 8px 8px 8px 2px; background: rgba(255, 255, 255, 0.08); padding: 8px 10px; color: rgba(255, 255, 255, 0.76); font-size: 9px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
-  article.user > p { border-radius: 8px 8px 2px; background: rgba(0, 154, 255, 0.18); text-align: left; }
+  article > .ControlConversationMessageContent { max-width: 100%; margin: 4px 0 0; border-radius: 8px 8px 8px 2px; background: rgba(255, 255, 255, 0.08); padding: 8px 10px; color: rgba(255, 255, 255, 0.76); font-size: 9px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+  article.user > .ControlConversationMessageContent { border-radius: 8px 8px 2px; background: rgba(0, 154, 255, 0.18); text-align: left; }
+  .ControlConversationTaskId { margin: 3px 2px 0; color: rgba(255, 255, 255, 0.28); font-size: 7px; }
 }
 
 .ControlMonitorHistoryError {
@@ -1128,15 +1106,55 @@ button.ControlServiceCard {
   font-size: 9px;
 }
 
-.ControlMonitorBody {
-  display: grid;
-  min-height: 0;
-  flex: 1;
-  grid-template-columns: minmax(420px, 1.4fr) minmax(280px, 0.8fr);
+.ControlMonitorSearchHeader {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+
+  h3 { margin: 0; color: rgba(255, 255, 255, 0.88); font-size: 12px; font-weight: 500; }
+  p { margin: 4px 0 0; color: rgba(255, 255, 255, 0.36); font-size: 8px; }
 }
 
-.ControlMonitorProcesses,
-.ControlMonitorInspector {
+.ControlMonitorSearchTools {
+  display: grid;
+  flex: 0 0 auto;
+  width: min(270px, 60vw);
+  align-self: flex-start;
+  align-items: center;
+  grid-template-columns: 40px minmax(0, 220px);
+  gap: 10px;
+
+  input {
+    grid-column: 2;
+    grid-row: 1;
+    box-sizing: border-box;
+    width: 100%;
+    height: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 2px;
+    outline: 0;
+    background: rgba(0, 0, 0, 0.16);
+    padding: 0 8px;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 10px;
+
+    &::placeholder { color: rgba(255, 255, 255, 0.28); }
+    &:focus-visible { border-color: rgba(255, 255, 255, 0.42); }
+  }
+
+  > span {
+    grid-column: 1;
+    grid-row: 1;
+    color: rgba(255, 255, 255, 0.36);
+    font-size: 9px;
+    text-align: right;
+  }
+}
+
+.ControlMonitorProcesses {
   min-width: 0;
   overflow: auto;
   padding: 18px 20px;
@@ -1147,33 +1165,18 @@ button.ControlServiceCard {
 .ControlMonitorProcesses {
   border-right: 1px solid rgba(255, 255, 255, 0.08);
 
-  .ControlInventoryHeader {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 12px;
-
-    h3 { margin: 0; color: rgba(255, 255, 255, 0.88); font-size: 12px; }
-    div { display: flex; align-items: center; gap: 8px; }
-    input {
-      box-sizing: border-box;
-      width: min(220px, 24vw);
-      height: 30px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 5px;
-      background: rgba(0, 0, 0, 0.2);
-      padding: 0 8px;
-      color: rgba(255, 255, 255, 0.82);
-      font-size: 10px;
-    }
-    span { color: rgba(255, 255, 255, 0.34); font-size: 9px; }
-  }
-
   table { width: 100%; border-collapse: collapse; font-size: 10px; }
   th,
   td { border-bottom: 1px solid rgba(255, 255, 255, 0.07); padding: 10px 8px; color: rgba(255, 255, 255, 0.58); text-align: left; }
-  th { color: rgba(255, 255, 255, 0.34); font-size: 8px; font-weight: 500; }
+  th {
+    position: sticky;
+    top: -18px;
+    z-index: 1;
+    background: #191a1c;
+    color: rgba(255, 255, 255, 0.34);
+    font-size: 8px;
+    font-weight: 500;
+  }
   th button {
     display: flex;
     border: 0;
@@ -1211,17 +1214,6 @@ button.ControlServiceCard {
   border-right: 0;
 }
 
-.ControlMonitorInspector {
-  background: rgba(0, 0, 0, 0.12);
-
-  > span { color: #79d89e; font-size: 9px; }
-  > h3 { margin: 4px 0 16px; color: white; font-size: 16px; }
-  dl { margin: 0; }
-  dl > div { margin-bottom: 12px; }
-  dt { color: rgba(255, 255, 255, 0.34); font-size: 8px; }
-  dd { margin: 4px 0 0; color: rgba(255, 255, 255, 0.72); font-size: 9px; line-height: 1.5; }
-}
-
 .ControlMonitorUnavailable {
   display: flex;
   min-height: 180px;
@@ -1236,61 +1228,28 @@ button.ControlServiceCard {
   span { max-width: 540px; margin-top: 8px; color: rgba(255, 255, 255, 0.4); font-size: 9px; line-height: 1.6; }
 }
 
-.ControlRuntimeAlerts {
-  margin-top: 8px;
-  border-left: 3px solid #e7a640;
-  background: rgba(231, 166, 64, 0.06);
-  padding: 9px 11px;
-
-  > strong { color: #e8bd79; font-size: 10px; }
-  ul { margin: 6px 0 0; padding: 0; list-style: none; }
-  li { display: flex; gap: 8px; margin-top: 4px; font-size: 9px; }
-  span { flex: 0 0 auto; color: rgba(255, 255, 255, 0.34); }
-  small { color: rgba(255, 255, 255, 0.68); font-size: inherit; }
-}
-
-.ControlRuntimeAlertsTop {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  box-sizing: border-box;
-  width: 100%;
-  margin: 0;
-  border-bottom: 1px solid rgba(231, 166, 64, 0.18);
-  padding-left: 16px;
-
-  > div { min-width: 0; }
-  > div > strong { color: #e8bd79; font-size: 10px; }
-  button {
-    display: grid;
-    flex: 0 0 22px;
-    width: 22px;
-    height: 22px;
-    place-items: center;
-    border: 0;
-    border-radius: 3px;
-    outline: 0;
-    background: transparent;
-    color: rgba(255, 230, 190, 0.62);
-    cursor: pointer;
-    font-size: 16px;
-
-    &:hover,
-    &:focus-visible { background: rgba(231, 166, 64, 0.15); color: #ffe3b4; }
-  }
-}
-
 .ControlCameraGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(260px, 1fr));
   gap: 8px;
 }
 
+.ControlRelatedDeviceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 8px;
+}
+
+.ControlRelatedDeviceGroup {
+  min-width: 0;
+
+  .ControlCameraGrid { grid-template-columns: 1fr; }
+}
+
 .ControlSubsectionHeading {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   margin: 16px 0 8px;
   color: rgba(255, 255, 255, 0.52);
 
@@ -1299,7 +1258,8 @@ button.ControlServiceCard {
     font-weight: 600;
   }
 
-  span {
+  span,
+  .ControlDeviceCountButton {
     display: grid;
     place-items: center;
     min-width: 23px;
@@ -1307,6 +1267,17 @@ button.ControlServiceCard {
     border-radius: 2px;
     background: rgba(255, 255, 255, 0.07);
     font-size: 9px;
+  }
+
+  .ControlDeviceCountButton {
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 0 6px;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.14);
+    }
   }
 }
 
@@ -1318,7 +1289,7 @@ button.ControlServiceCard {
   display: flex;
   align-items: center;
   box-sizing: border-box;
-  min-height: 84px;
+  min-height: 92px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 3px;
   background: $darkThemeSecondColor;
@@ -1328,17 +1299,13 @@ button.ControlServiceCard {
   text-align: left;
   cursor: pointer;
 
-  &:hover:not(:disabled),
+  &:hover,
   &:focus-visible {
     border-color: rgba(0, 154, 255, 0.65);
     background: rgba(0, 154, 255, 0.08);
     outline: none;
   }
 
-  &:disabled {
-    cursor: default;
-    opacity: 0.55;
-  }
 }
 
 .ControlCameraError {
@@ -1358,6 +1325,12 @@ button.ControlServiceCard {
   background: rgba(0, 0, 0, 0.13);
   color: rgba(255, 255, 255, 0.5);
   font-size: 18px;
+
+  img {
+    width: 26px;
+    height: 26px;
+    object-fit: contain;
+  }
 }
 
 .ControlCameraIdentity {
@@ -1422,6 +1395,22 @@ button.ControlServiceCard {
   font-size: 10px;
 }
 
+.ControlEmptyBlock { min-height: 92px; }
+
+.ControlRelatedDeviceAdd {
+  width: 100%;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    border-color: rgba(0, 154, 255, 0.65);
+    color: rgba(255, 255, 255, 0.72);
+    outline: none;
+  }
+}
+
 .ControlCenterMessage {
   position: absolute;
   inset: 0;
@@ -1463,7 +1452,7 @@ button.ControlServiceCard {
 
 @media (max-width: 1100px) {
   .ControlServiceGrid { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
-  .ControlRuntimeServiceGrid { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+  .ControlRelatedDeviceGrid { grid-template-columns: 1fr; }
   .ControlCameraGrid { grid-template-columns: 1fr; }
 }
 
@@ -1479,11 +1468,9 @@ button.ControlServiceCard {
   .ControlMonitorPerformance { display: block; min-height: 0; flex-basis: auto; }
   .ControlMonitorResourceList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; border-right: 0; }
   .ControlMonitorMetricDetail { min-height: 300px; }
-  .ControlMonitorBody { display: block; overflow: auto; }
   .ControlMonitorActivity { display: block; overflow: auto; }
   .ControlMonitorTaskHistory { border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
   .ControlMonitorConversationHistory { min-height: 420px; overflow: visible; }
-  .ControlMonitorProcesses,
-  .ControlMonitorInspector { overflow: visible; }
+  .ControlMonitorProcesses { overflow: visible; }
   .ControlMonitorProcesses { border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
 }

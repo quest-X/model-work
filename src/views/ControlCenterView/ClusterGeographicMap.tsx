@@ -1,23 +1,21 @@
 import React, {useMemo, useRef, useState} from 'react';
-import {geoIdentity, geoMercator, geoNaturalEarth1, geoPath} from 'd3-geo';
+import {geoMercator, geoNaturalEarth1, geoPath} from 'd3-geo';
 import type {Feature, FeatureCollection, Geometry} from 'geojson';
 import {feature} from 'topojson-client';
 import type {GeometryCollection, Topology} from 'topojson-specification';
 import chinaAtlas from 'cn-atlas/cn-atlas.json';
 import worldAtlas from 'world-atlas/countries-110m.json';
-import shanghaiDistrictAtlas from '../../assets/maps/shanghai-districts.json';
 import {
     ComputeClusterNode,
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
 } from '../../services/ComputeClusterService';
 
-type MapLevel = 'world' | 'china' | 'province' | 'district';
+type MapLevel = 'world' | 'china' | 'province';
 type MapTransform = {x: number; y: number; scale: number};
 type WorldProperties = {name: string};
 type ProvinceProperties = {'地名': string; name: string; id: string};
-type DistrictProperties = {adcode: number; name: string};
-type MapFeature = Feature<Geometry, WorldProperties | ProvinceProperties | DistrictProperties>;
+type MapFeature = Feature<Geometry, WorldProperties | ProvinceProperties>;
 
 interface ClusterGeographicMapProps {
     graph: ComputeResourceGraph | null;
@@ -45,9 +43,6 @@ const prefectureFeatures = feature<ProvinceProperties>(
     chinaTopology,
     chinaTopology.objects.prefectures,
 ).features;
-// District boundary source: https://geo.datav.aliyun.com/areas_v3/bound/310000_full.json
-const shanghaiDistrictFeatures = (shanghaiDistrictAtlas as unknown as FeatureCollection<Geometry, DistrictProperties>).features;
-
 const normalizedRegion = (value: string | null | undefined): string => (value || '')
     .trim()
     .toLocaleLowerCase()
@@ -70,6 +65,12 @@ const provinceMatches = (featureValue: Feature<Geometry, ProvinceProperties>, va
         .map(normalizedRegion);
     return values.some(value => candidates.includes(normalizedRegion(value)));
 };
+
+const prefectureMatches = (
+    featureValue: Feature<Geometry, ProvinceProperties>,
+    node: ComputeClusterNode,
+): boolean => provinceMatches(featureValue, [node.labels?.city, node.labels?.city_name]
+    .filter((value): value is string => Boolean(value)));
 
 // Geographic gestures, drill-down, and cluster overlays intentionally share one local state owner.
 // eslint-disable-next-line complexity
@@ -100,9 +101,7 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
         ? worldFeatures
         : level === 'china'
             ? provinceFeatures
-            : level === 'district'
-                ? shanghaiDistrictFeatures
-                : prefectureFeatures.filter(item => item.properties.id.slice(0, 2) === selectedProvince?.properties.id.slice(0, 2));
+            : prefectureFeatures.filter(item => item.properties.id.slice(0, 2) === selectedProvince?.properties.id.slice(0, 2));
     const collection = useMemo<FeatureCollection<Geometry>>(() => ({
         type: 'FeatureCollection',
         features: activeFeatures,
@@ -110,9 +109,7 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
     const projection = useMemo(() => {
         const next = level === 'world'
             ? geoNaturalEarth1()
-            : level === 'district'
-                ? geoIdentity().reflectY(true)
-                : geoMercator();
+            : geoMercator();
         return next.fitExtent([[24, 22], [WIDTH - 24, HEIGHT - 22]], collection);
     }, [collection, level]);
     const path = useMemo(() => geoPath(projection), [projection]);
@@ -127,7 +124,26 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
     const selectedRegion = selectedProvince
         ? regionStats.find(region => region.feature.properties.id === selectedProvince.properties.id)
         : undefined;
-
+    const prefectureStats = useMemo(() => prefectureFeatures
+        .filter(item => item.properties.id.slice(0, 2) === selectedProvince?.properties.id.slice(0, 2))
+        .map(prefecture => ({
+            feature: prefecture,
+            name: zh ? prefecture.properties['地名'] : prefecture.properties.name,
+            nodes: selectedRegion?.nodes.filter(node =>
+                prefecture.properties.id === selectedProvince?.properties.id
+                || prefectureMatches(prefecture, node),
+            ) || [],
+        })), [selectedProvince, selectedRegion, zh]);
+    const hoveredPrefectureStats = level === 'province'
+        ? prefectureStats.find(prefecture => prefecture.name === hoveredName)
+        : undefined;
+    const selectedProvinceLabel = selectedProvince
+        ? (zh ? selectedProvince.properties['地名'] : selectedProvince.properties.name)
+        : '';
+    const cityLocation = selectedRegion
+        ? Array.from(new Set(selectedRegion.nodes.map(node => node.labels?.city_name)
+            .filter((value): value is string => Boolean(value)))).join(' · ')
+        : '';
     const changeLevel = (next: MapLevel) => {
         setLevel(next);
         if (next === 'world' || next === 'china') setSelectedProvince(null);
@@ -137,7 +153,7 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
     const openProvince = (selected: MapFeature) => {
         const province = selected as Feature<Geometry, ProvinceProperties>;
         setSelectedProvince(province);
-        setLevel(province.properties.id === '310000' ? 'district' : 'province');
+        setLevel('province');
         setTransform(IDENTITY);
         setHoveredName('');
     };
@@ -182,18 +198,16 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
                     ? (zh ? '全球节点地图' : 'Global node map')
                     : level === 'china'
                         ? (zh ? '中国节点地图' : 'China node map')
-                        : `${zh ? selectedProvince?.properties['地名'] : selectedProvince?.properties.name}${level === 'district'
-                            ? (zh ? '区级地图' : ' district map')
-                            : (zh ? '地级地图' : ' prefecture map')}`}</h3>
+                        : `${selectedProvinceLabel}${zh && selectedProvinceLabel.endsWith('市') ? '地图' : zh ? '市级地图' : ' city map'}`}</h3>
                 <p>{zh
-                    ? '滚轮缩放、拖拽移动；点击省份进入地级地图，直辖市可继续到区级。'
-                    : 'Scroll to zoom and drag to pan. Provinces open prefectures; municipalities can open districts.'}</p>
+                    ? '滚轮缩放、拖拽移动；点击省份进入市级地图。'
+                    : 'Scroll to zoom and drag to pan. Click a province to open its city map.'}</p>
             </div>
             <div className='ComputeKnowledgeStats'>
                 <div><strong>{graph?.summary.regions || 0}</strong><span>{zh ? '地域' : 'regions'}</span></div>
                 <div><strong>{nodes.length}</strong><span>{zh ? '计算节点' : 'compute nodes'}</span></div>
-                <div className='online'><strong>{onlineCount}</strong><span>{zh ? '在线' : 'online'}</span></div>
-                <div className='offline'><strong>{nodes.length - onlineCount}</strong><span>{zh ? '离线' : 'offline'}</span></div>
+                <div className='online'><strong>{onlineCount}</strong><span>{zh ? '正常' : 'Normal'}</span></div>
+                <div className='offline'><strong>{nodes.length - onlineCount}</strong><span>{zh ? '故障' : 'Fault'}</span></div>
             </div>
         </div>
 
@@ -208,13 +222,13 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
                 </button>
                 {selectedProvince && <>
                     <span>/</span>
-                    <button type='button' className='active' aria-pressed='true' onClick={() => changeLevel(level === 'district' ? 'district' : 'province')}>
+                    <button type='button' className={level === 'province' ? 'active' : ''} aria-pressed={level === 'province'} onClick={() => changeLevel('province')}>
                         {zh ? selectedProvince.properties['地名'] : selectedProvince.properties.name}
                     </button>
                 </>}
             </div>
-            <span><i className='ControlGeoMapDot online'/>{zh ? '在线节点' : 'Online node'}</span>
-            <span><i className='ControlGeoMapDot offline'/>{zh ? '离线节点' : 'Offline node'}</span>
+            <span><i className='ControlGeoMapDot online'/>{zh ? '正常节点' : 'Normal node'}</span>
+            <span><i className='ControlGeoMapDot offline'/>{zh ? '故障节点' : 'Fault node'}</span>
             <small>{zh ? '边界数据仅用于节点位置展示' : 'Boundaries are for node location display only'}</small>
         </div>
 
@@ -224,17 +238,15 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
                     ? (zh ? '悬浮查看国家' : 'Hover a country')
                     : level === 'china'
                         ? (zh ? '悬浮查看省份' : 'Hover a province')
-                        : level === 'district'
-                            ? (zh ? '悬浮查看区' : 'Hover a district')
-                            : (zh ? '悬浮查看地级市' : 'Hover a prefecture'))}</strong>
-                <span>{hoveredStats
-                    ? `${hoveredStats.nodes.filter(node => node.online).length} / ${hoveredStats.nodes.length} ${zh ? '节点在线' : 'nodes online'}`
+                        : (zh ? '悬浮查看城市' : 'Hover a city'))}</strong>
+                <span>{hoveredPrefectureStats?.nodes.length
+                    ? `${hoveredPrefectureStats.nodes.filter(node => node.online).length} / ${hoveredPrefectureStats.nodes.length} ${zh ? '正常节点' : 'Normal nodes'}`
+                    : hoveredStats
+                    ? `${hoveredStats.nodes.filter(node => node.online).length} / ${hoveredStats.nodes.length} ${zh ? '正常节点' : 'Normal nodes'}`
                     : level === 'province' && selectedRegion
-                        ? `${selectedRegion.nodes.filter(node => node.online).length} / ${selectedRegion.nodes.length} ${zh ? '节点在线 · 城市位置待细化' : 'nodes online · city pending'}`
-                        : level === 'district' && selectedRegion
-                            ? `${selectedRegion.nodes.filter(node => node.online).length} / ${selectedRegion.nodes.length} ${zh ? '节点在线 · 区级位置待细化' : 'nodes online · district pending'}`
+                        ? `${selectedRegion.nodes.filter(node => node.online).length} / ${selectedRegion.nodes.length} ${zh ? `正常节点 · ${cityLocation || '城市位置待细化'}` : `Normal nodes · ${cityLocation || 'city pending'}`}`
                     : level === 'world' && hoveredName === (zh ? '中国' : 'China')
-                        ? `${chinaNodes.filter(node => node.online).length} / ${chinaNodes.length} ${zh ? '节点在线' : 'nodes online'}`
+                        ? `${chinaNodes.filter(node => node.online).length} / ${chinaNodes.length} ${zh ? '正常节点' : 'Normal nodes'}`
                         : (zh ? '点击放大' : 'Click to zoom')}</span>
             </div>
             <div className='ControlGeoMapZoom' role='group' aria-label={zh ? '地图缩放' : 'Map zoom'}>
@@ -251,9 +263,7 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
                     ? (zh ? '可交互全球节点地图' : 'Interactive global node map')
                     : level === 'china'
                         ? (zh ? '可交互中国省级节点地图' : 'Interactive China province node map')
-                        : level === 'district'
-                            ? (zh ? '可交互上海区级节点地图' : 'Interactive Shanghai district node map')
-                            : (zh ? '可交互中国地级节点地图' : 'Interactive China prefecture node map')}
+                        : (zh ? '可交互中国市级节点地图' : 'Interactive China city node map')}
                 onWheel={event => {
                     event.preventDefault();
                     const [x, y] = svgPoint(event.clientX, event.clientY);
@@ -295,14 +305,10 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
                     {activeFeatures.map((item, index) => {
                         const rawName = level === 'world'
                             ? (item.properties as WorldProperties).name
-                            : level === 'district'
-                                ? (item.properties as DistrictProperties).name
-                                : (item.properties as ProvinceProperties)['地名'];
+                            : (item.properties as ProvinceProperties)['地名'];
                         const name = level === 'world'
                             ? displayCountryName(rawName, zh)
-                            : level === 'district'
-                                ? rawName
-                                : zh ? rawName : (item.properties as ProvinceProperties).name;
+                            : zh ? rawName : (item.properties as ProvinceProperties).name;
                         return <path
                             key={`${rawName}-${index}`}
                             d={path(item) || undefined}
@@ -330,13 +336,15 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
                     >
                         <circle r='12'/><text y='3'>{region.nodes.length}</text>
                     </g>;
-                }) : selectedRegion?.nodes.length ? <g
-                    className={`ControlGeoMapMarker ${selectedRegion.nodes.every(node => node.online) ? '' : 'offline'}`}
-                    transform={markerTransform(selectedRegion.feature)}
+                }) : prefectureStats.filter(prefecture => prefecture.nodes.length).map(prefecture => <g
+                    key={prefecture.feature.properties.id}
+                    className={`ControlGeoMapMarker ${prefecture.nodes.every(node => node.online) ? '' : 'offline'}`}
+                    transform={markerTransform(prefecture.feature)}
+                    data-map-prefecture={prefecture.name}
                     aria-hidden='true'
                 >
-                    <circle r='12'/><text y='3'>{selectedRegion.nodes.length}</text>
-                </g> : null}
+                    <circle r='12'/><text y='3'>{prefecture.nodes.length}</text>
+                </g>)}
             </svg>
         </div>
     </section>;

@@ -14,6 +14,23 @@ export type AgentChatResponse = {
     degraded: boolean;
 };
 
+export type AgentTraceTask = {
+    id: string;
+    kind: string;
+    title: string;
+    status: 'draft' | 'ready' | 'queued' | 'running' | 'succeeded' | 'completed' | 'failed' | 'cancelled';
+    revision: number;
+    source_message: string | null;
+    result: Record<string, unknown> | null;
+    created_at: string;
+    updated_at: string;
+};
+
+export type AgentTraceTaskList = {
+    tasks: AgentTraceTask[];
+    total: number;
+};
+
 export type AgentConversation = {
     id: string;
     title: string | null;
@@ -57,14 +74,43 @@ export class AgentChatService {
         return request('/status');
     }
 
-    public static send(message: string, conversationId?: string): Promise<AgentChatResponse> {
+    public static send(message: string, conversationId?: string, taskId?: string): Promise<AgentChatResponse> {
         return request('/chat', {
             method: 'POST',
             body: JSON.stringify({
                 message,
                 ...(conversationId ? {conversation_id: conversationId} : {}),
+                ...(taskId ? {task_id: taskId} : {}),
             }),
         });
+    }
+
+    public static startTrace(message: string): Promise<AgentTraceTask> {
+        return request('/tasks', {
+            method: 'POST',
+            body: JSON.stringify({
+                kind: 'agent_request',
+                title: message.slice(0, 80),
+                status: 'running',
+                source_message: message,
+                spec: {},
+            }),
+        });
+    }
+
+    public static finishTrace(
+        task: AgentTraceTask,
+        status: 'succeeded' | 'failed',
+        result: Record<string, unknown>,
+    ): Promise<AgentTraceTask> {
+        return request(`/tasks/${encodeURIComponent(task.id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({expected_revision: task.revision, status, result}),
+        });
+    }
+
+    public static tasks(limit = 200): Promise<AgentTraceTaskList> {
+        return request(`/tasks?kind=agent_request&limit=${limit}`);
     }
 
     public static conversations(limit = 50): Promise<AgentConversation[]> {

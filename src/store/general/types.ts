@@ -14,6 +14,10 @@ export type ProjectData = {
 export type GeneralState = {
     windowSize: ISize;
     activePopupType: PopupWindowType;
+    // 打开弹窗时绑定的目标节点(如远程 model-work-node)；null 表示操作本机/后端所在网络。
+    activePopupNodeId: string | null;
+    activePopupNodeName: string | null;
+    activePopupNodeRemote: boolean;
     customCursorStyle: CustomCursorStyle;
     preventCustomCursor: boolean;
     imageDragMode: boolean;
@@ -48,6 +52,9 @@ interface UpdateActivePopupType {
     type: typeof Action.UPDATE_ACTIVE_POPUP_TYPE;
     payload: {
         activePopupType: PopupWindowType;
+        activePopupNodeId: string | null;
+        activePopupNodeName: string | null;
+        activePopupNodeRemote: boolean;
     }
 }
 

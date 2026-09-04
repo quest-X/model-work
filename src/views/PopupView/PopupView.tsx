@@ -32,15 +32,21 @@ import L2GRetrievalPopup from './L2GRetrievalPopup/L2GRetrievalPopup';
 import ModelInspectorPopup, {MODEL_INSPECTOR_ESCAPE_EVENT} from './ModelInspectorPopup/ModelInspectorPopup';
 import VisualSearchPopup from './VisualSearchPopup/VisualSearchPopup';
 import CameraConnectPopup from './CameraConnectPopup/CameraConnectPopup';
+import JetsonConnectPopup from './JetsonConnectPopup/JetsonConnectPopup';
 import ComputeClusterPopup from './ComputeClusterPopup/ComputeClusterPopup';
 import {clearDatasetActionSelections} from '../../services/DatasetActionSelection';
 
 
 interface IProps {
     activePopupType: PopupWindowType;
+    activePopupNodeId: string | null;
+    activePopupNodeName: string | null;
+    activePopupNodeRemote: boolean;
 }
 
-const PopupView: React.FC<IProps> = ({ activePopupType }) => {
+const PopupView: React.FC<IProps> = (
+    { activePopupType, activePopupNodeId, activePopupNodeName, activePopupNodeRemote },
+) => {
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -101,7 +107,16 @@ const PopupView: React.FC<IProps> = ({ activePopupType }) => {
         [PopupWindowType.L2G_RETRIEVAL]: () => <L2GRetrievalPopup />,
         [PopupWindowType.VISUAL_SEARCH]: () => <VisualSearchPopup />,
         [PopupWindowType.MODEL_INSPECTOR]: () => <ModelInspectorPopup />,
-        [PopupWindowType.CAMERA_CONNECT]: () => <CameraConnectPopup />,
+        [PopupWindowType.CAMERA_CONNECT]: () => <CameraConnectPopup
+            nodeId={activePopupNodeId}
+            nodeName={activePopupNodeName}
+            remote={activePopupNodeRemote}
+        />,
+        [PopupWindowType.JETSON_CONNECT]: () => <JetsonConnectPopup
+            nodeId={activePopupNodeId}
+            nodeName={activePopupNodeName}
+            remote={activePopupNodeRemote}
+        />,
         [PopupWindowType.COMPUTE_CLUSTER]: () => <ComputeClusterPopup />,
         [PopupWindowType.LOADER]: () => <ClipLoader size={50} color={CSSHelper.getLeadingColor()} loading={true} />,
     };
@@ -119,7 +134,10 @@ const PopupView: React.FC<IProps> = ({ activePopupType }) => {
 };
 
 const mapStateToProps = (state: AppState) => ({
-    activePopupType: state.general.activePopupType
+    activePopupType: state.general.activePopupType,
+    activePopupNodeId: state.general.activePopupNodeId,
+    activePopupNodeName: state.general.activePopupNodeName,
+    activePopupNodeRemote: state.general.activePopupNodeRemote,
 });
 
 export default connect(

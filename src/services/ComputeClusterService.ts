@@ -1,4 +1,10 @@
 import {getExtensionEngineBaseUrl} from '../utils/DefaultBackendUrl';
+import type {
+    CameraConnectionProfile,
+    CameraConnectResult,
+    CameraDiscoveryResponse,
+    CameraResource,
+} from './CameraResourceService';
 
 export type ComputeGpuResource = {
     index: number;
@@ -58,6 +64,7 @@ export type ComputeClusterNode = {
     node_id: string;
     installation_id: string;
     name: string;
+    role?: 'main' | 'node';
     agent_version: string;
     capabilities: string[];
     control_transport?: 'lan' | 'tailscale' | null;
@@ -66,6 +73,8 @@ export type ComputeClusterNode = {
         installed: boolean;
         online: boolean;
         ssh_available?: boolean;
+        lan_ssh_available?: boolean | null;
+        tailscale_ssh_available?: boolean | null;
         backend_state?: string | null;
         self_name?: string | null;
         addresses: string[];
@@ -81,6 +90,21 @@ export type ComputeClusterNode = {
     online: boolean;
     heartbeat_age_seconds: number;
     lan_scan_targets?: ComputeLanScanTarget[];
+    labels?: Record<string, string>;
+};
+
+export const computeSshAvailability = (node: ComputeClusterNode): {lan: boolean; tailscale: boolean} => {
+    const dependency = (id: ComputeNetworkDependency['dependency_id']) =>
+        node.network_dependencies.find(item => item.dependency_id === id)?.state;
+    const controlSshHealthy = node.network.ssh_available === true
+        && (!dependency('control_ssh') || dependency('control_ssh') === 'healthy');
+    return {
+        lan: node.network.lan_ssh_available
+            ?? Boolean(controlSshHealthy && node.control_transport === 'lan'),
+        tailscale: node.network.tailscale_ssh_available
+            ?? Boolean(controlSshHealthy && node.network.online
+                && (!dependency('tailscale') || dependency('tailscale') === 'healthy')),
+    };
 };
 
 export type ComputeRuntimeState = 'healthy' | 'degraded' | 'unavailable' | 'unknown';
@@ -186,9 +210,89 @@ export type ComputeClusterStatus = {
     nodes: {total: number; online: number; gpu_total: number; device_total: number};
 };
 
+export type ComputeGroupMembership = {
+    index: number;
+    group_id: string;
+    group_name: string | null;
+    owner_name: string | null;
+    relationship: 'owner' | 'member';
+    scope: 'central' | 'local';
+    joined_at: number;
+    credential_types: ('owner_identity' | 'owner_trust' | 'cluster_credential')[];
+};
+
+export type ComputeGroupMemberships = {
+    schema_version: 'group-memberships.v1';
+    group_count: number;
+    groups: ComputeGroupMembership[];
+};
+
+export type ComputeFilesystemOperation = 'filesystem.stat' | 'filesystem.list';
+
+export type ComputeFilesystemTarget = {
+    kind: 'path';
+    path: string;
+    source: {kind: 'known_folder'; id: 'public_desktop'};
+};
+
+export type ComputeFilesystemAuthorization = {
+    version: 1;
+    purpose: 'model-work-node.user-authorization.v1';
+    authorization_id: string;
+    user_id: string;
+    user_name: string;
+    user_public_key: string;
+    target_installation_id: string;
+    operation: ComputeFilesystemOperation;
+    target: ComputeFilesystemTarget;
+    parameters: {limit?: number};
+    nonce: string;
+    issued_at: number;
+    expires_at: number;
+    state: 'pending' | 'approved' | 'executing' | 'succeeded' | 'failed' | 'rejected' | 'expired';
+    error_code: string | null;
+    node_name?: string;
+};
+
+export type ComputeFilesystemEntry = {
+    name: string;
+    type: 'file' | 'directory' | 'symlink' | 'other';
+    size: number;
+    modified_at: number;
+};
+
+export type ComputeFilesystemResult = {
+    schema_version: 'filesystem.list-result.v1';
+    target: ComputeFilesystemTarget;
+    entries: ComputeFilesystemEntry[];
+    total: number;
+    truncated: boolean;
+} | {
+    schema_version: 'filesystem.stat-result.v1';
+    target: ComputeFilesystemTarget;
+    entry: ComputeFilesystemEntry;
+};
+
+export type ComputeFilesystemAuthorizationRequest = {
+    operation: ComputeFilesystemOperation;
+    target: {kind: 'known_folder'; id: 'public_desktop'};
+    parameters: {limit?: number};
+    user: {user_id: string; user_name: string; user_public_key: string};
+    ttl_seconds: number;
+};
+
+export type ComputeFilesystemDecision = {
+    authorization: ComputeFilesystemAuthorization & {state: 'succeeded'};
+    result: ComputeFilesystemResult;
+};
+
 export type ComputeTaskMode = 'online' | 'background';
 export type ComputeTaskState = 'queued' | 'running' | 'paused' | 'succeeded' | 'failed' | 'cancelled';
-export type ComputeTaskType = 'system.wait' | 'information.web_fetch' | 'network.lan_discovery' | 'network.peer_probe';
+export type ComputeTaskType = 'system.wait'
+    | 'information.web_fetch'
+    | 'network.lan_discovery'
+    | 'network.peer_probe'
+    | 'camera.connect';
 
 export type ComputeLanScanTarget = {
     interface: string;
@@ -238,6 +342,9 @@ export type ComputeLanAsset = {
     address: string;
     hostname: string;
     mac: string;
+    device_kind?: string;
+    display_name?: string;
+    device_model?: string;
     ports: {port: number; service: string}[];
     online: boolean;
     first_seen_at: number;
@@ -272,6 +379,14 @@ export type ComputeLanAssetsResponse = {
         changes: {new: number; changed: number; offline: number; unchanged: number};
     }[];
     assets: ComputeLanAsset[];
+};
+
+export type ComputeJetsonConnectResult = {
+    status: 'confirmation_required' | 'connected';
+    fingerprint: string;
+    device_model?: string | null;
+    architecture?: string | null;
+    asset?: ComputeLanAsset | null;
 };
 
 export type ComputeLanSchedule = {
@@ -375,7 +490,12 @@ export type ComputeTask = {
     control_request?: 'pause' | 'cancel' | null;
     checkpoint?: Record<string, unknown> | null;
     progress?: {completed?: number; total?: number; unit?: string; percent?: number} | null;
-    result?: {elapsed_seconds: number} | ComputeWebFetchResult | ComputeLanDiscoveryResult | ComputePeerProbeResult | null;
+    result?: {elapsed_seconds: number}
+        | ComputeWebFetchResult
+        | ComputeLanDiscoveryResult
+        | ComputePeerProbeResult
+        | CameraConnectResult
+        | null;
     error?: string | null;
     attempt: number;
     parameters: {seconds?: number; url?: string; cidr?: string; peer_id?: string};
@@ -503,6 +623,20 @@ const request = async <T>(path: string, signal?: AbortSignal, init: RequestInit 
     return response.json();
 };
 
+const requestBlob = async (path: string, payload: unknown, signal?: AbortSignal): Promise<Blob> => {
+    const response = await fetch(`${baseUrl()}${path}`, {
+        method: 'POST',
+        signal,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(typeof body?.detail === 'string' ? body.detail : `HTTP ${response.status}`);
+    }
+    return response.blob();
+};
+
 export class ComputeClusterService {
     public static status(signal?: AbortSignal): Promise<ComputeClusterStatus> {
         return request('/status', signal);
@@ -511,6 +645,10 @@ export class ComputeClusterService {
     public static async nodes(signal?: AbortSignal): Promise<ComputeClusterNode[]> {
         const response = await request<{nodes: ComputeClusterNode[]}>('/nodes', signal);
         return response.nodes;
+    }
+
+    public static groups(signal?: AbortSignal): Promise<ComputeGroupMemberships> {
+        return request('/groups', signal);
     }
 
     public static runtime(nodeId: string, signal?: AbortSignal): Promise<ComputeRuntimeSnapshot> {
@@ -533,8 +671,51 @@ export class ComputeClusterService {
         );
     }
 
-    public static tasks(signal?: AbortSignal): Promise<ComputeTasksResponse> {
-        return request('/tasks', signal);
+    public static createFilesystemAuthorization(
+        nodeId: string,
+        input: ComputeFilesystemAuthorizationRequest,
+        signal?: AbortSignal,
+    ): Promise<ComputeFilesystemAuthorization & {state: 'pending'; node_name: string}> {
+        return request(`/nodes/${encodeURIComponent(nodeId)}/filesystem/authorizations`, signal, {
+            method: 'POST', body: JSON.stringify(input),
+        });
+    }
+
+    public static approveFilesystemAuthorization(
+        authorizationId: string,
+        signature: string,
+        signal?: AbortSignal,
+    ): Promise<ComputeFilesystemDecision> {
+        return request(
+            `/filesystem/authorizations/${encodeURIComponent(authorizationId)}/approve`,
+            signal,
+            {method: 'POST', body: JSON.stringify({signature})},
+        );
+    }
+
+    public static rejectFilesystemAuthorization(
+        authorizationId: string,
+        signal?: AbortSignal,
+    ): Promise<ComputeFilesystemAuthorization & {state: 'rejected'}> {
+        return request(
+            `/filesystem/authorizations/${encodeURIComponent(authorizationId)}/reject`,
+            signal,
+            {method: 'POST', body: '{}'},
+        );
+    }
+
+    public static tasks(signal?: AbortSignal, limit?: number): Promise<ComputeTasksResponse> {
+        return request(limit ? `/tasks?limit=${limit}` : '/tasks', signal);
+    }
+
+    public static taskStatus(
+        task: Pick<ComputeTask, 'node_id' | 'task_id'>,
+        signal?: AbortSignal,
+    ): Promise<ComputeTask> {
+        return request(
+            `/tasks/${encodeURIComponent(task.node_id)}/${encodeURIComponent(task.task_id)}`,
+            signal,
+        );
     }
 
     public static scheduler(signal?: AbortSignal): Promise<ComputeSchedulerResponse> {
@@ -553,6 +734,107 @@ export class ComputeClusterService {
         return request('/lan-assets', signal);
     }
 
+    public static connectJetson(
+        assetId: string,
+        credentials: {username: string; password: string; expected_fingerprint?: string},
+        signal?: AbortSignal,
+    ): Promise<ComputeJetsonConnectResult> {
+        return request(`/lan-assets/${encodeURIComponent(assetId)}/jetson`, signal, {
+            method: 'POST', body: JSON.stringify(credentials),
+        });
+    }
+
+    public static connectCamera(
+        nodeId: string,
+        credentials: CameraConnectionProfile,
+        signal?: AbortSignal,
+    ): Promise<CameraConnectResult> {
+        return request(`/nodes/${encodeURIComponent(nodeId)}/cameras/connect`, signal, {
+            method: 'POST', body: JSON.stringify(credentials),
+        });
+    }
+
+    public static discoverCameras(
+        nodeId: string,
+        timeoutSeconds = 0.35,
+        signal?: AbortSignal,
+    ): Promise<CameraDiscoveryResponse> {
+        return request(`/nodes/${encodeURIComponent(nodeId)}/cameras/discovery`, signal, {
+            method: 'POST', body: JSON.stringify({timeout_seconds: timeoutSeconds}),
+        });
+    }
+
+    public static snapshotCamera(
+        nodeId: string,
+        payload: CameraConnectionProfile & {channel_id: string},
+        signal?: AbortSignal,
+    ): Promise<Blob> {
+        return requestBlob(
+            `/nodes/${encodeURIComponent(nodeId)}/cameras/snapshot`, payload, signal,
+        );
+    }
+
+    public static createCameraResource(
+        nodeId: string,
+        payload: CameraConnectionProfile & {name: string; channel_id: string},
+        signal?: AbortSignal,
+    ): Promise<CameraResource> {
+        return request(`/nodes/${encodeURIComponent(nodeId)}/cameras/resources`, signal, {
+            method: 'POST', body: JSON.stringify(payload),
+        });
+    }
+
+    public static async scanLan(
+        nodeId: string,
+        signal?: AbortSignal,
+        onProgress?: (percent: number, completed?: number, total?: number) => void,
+    ): Promise<ComputeLanDiscoveryResult> {
+        const targets = await this.lanScanTargets(signal);
+        const cidr = targets.nodes.find(entry => entry.node_id === nodeId)?.targets[0]?.cidr;
+        if (!cidr) throw new Error('Selected node has no scannable LAN segment');
+        const submitted = await this.submitTask({
+            node_id: nodeId,
+            task_type: 'network.lan_discovery',
+            mode: 'background',
+            cidr,
+            lease_seconds: 60,
+        }, signal);
+        try {
+            const deadline = Date.now() + 90000;
+            while (Date.now() < deadline) {
+                let current: ComputeTask;
+                try {
+                    // eslint-disable-next-line no-await-in-loop
+                    current = await this.taskStatus(submitted, signal);
+                } catch (reason) {
+                    if (signal?.aborted) throw reason;
+                    // eslint-disable-next-line no-await-in-loop
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    continue;
+                }
+                if (typeof current?.progress?.percent === 'number') {
+                    onProgress?.(
+                        Math.round(Math.max(0, Math.min(100, current.progress.percent))),
+                        current.progress.completed,
+                        current.progress.total,
+                    );
+                }
+                if (current?.state === 'succeeded' && current.result && 'hosts' in current.result) {
+                    return current.result;
+                }
+                if (current?.state === 'failed' || current?.state === 'cancelled') {
+                    throw new Error(current.error || 'LAN scan failed');
+                }
+                // eslint-disable-next-line no-await-in-loop
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            throw new Error('LAN scan timed out');
+        } catch (reason) {
+            if (signal?.aborted) await this.controlTask(submitted, 'cancel').catch(() => undefined);
+            throw reason;
+        }
+    }
+
     public static lanSchedules(signal?: AbortSignal): Promise<ComputeLanSchedulesResponse> {
         return request('/lan-schedules', signal);
     }
@@ -561,9 +843,13 @@ export class ComputeClusterService {
         return request('/terminal-targets', signal);
     }
 
-    public static startTerminal(nodeId: string, signal?: AbortSignal): Promise<ComputeTerminalSession> {
+    public static startTerminal(
+        nodeId: string,
+        transport?: 'lan' | 'tailscale',
+        signal?: AbortSignal,
+    ): Promise<ComputeTerminalSession> {
         return request('/terminals', signal, {
-            method: 'POST', body: JSON.stringify({node_id: nodeId}),
+            method: 'POST', body: JSON.stringify({node_id: nodeId, ...(transport ? {transport} : {})}),
         });
     }
 

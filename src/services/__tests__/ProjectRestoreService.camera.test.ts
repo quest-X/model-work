@@ -65,4 +65,19 @@ describe('ProjectRestoreService camera durability', () => {
         expect(ImageRepository.setActiveFileId).toHaveBeenCalledWith('camera-resource-1');
         expect(ImageRepository.saveFileCache).toHaveBeenCalledWith('camera-resource-1', []);
     });
+
+    it('presents a camera-only snapshot as interrupted project data', async () => {
+        jest.spyOn(IndexedDBManager, 'getProjectMeta').mockResolvedValue({
+            imageCount: 0,
+            validImageCount: 0,
+            labelCount: 0,
+            isVideoProject: false,
+            hasRecoverableProject: true,
+            lastModified: 10,
+        });
+
+        await expect(ProjectRestoreService.checkForStoredData()).resolves.toEqual(
+            expect.objectContaining({hasProject: true}),
+        );
+    });
 });

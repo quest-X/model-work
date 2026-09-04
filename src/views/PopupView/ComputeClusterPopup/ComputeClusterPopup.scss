@@ -885,7 +885,7 @@
 .ComputeLanAssetList { display: grid; gap: 1px; background: rgba(255, 255, 255, .05); }
 .ComputeLanAssetList article {
   display: grid;
-  grid-template-columns: auto minmax(190px, 1fr) minmax(160px, .8fr) minmax(190px, 1fr);
+  grid-template-columns: auto minmax(160px, 1fr) minmax(140px, .8fr) minmax(160px, 1fr);
   align-items: center;
   gap: 12px;
   background: rgba(26, 27, 29, .96);
@@ -1331,7 +1331,10 @@
   .ComputeResourceRequestForm,
   .ComputeTaskCard { grid-template-columns: 1fr; }
   .ComputeLanAssetStats { grid-template-columns: repeat(4, auto auto); }
-  .ComputeLanAssetList article { grid-template-columns: auto 1fr; }
+  .ComputeLanAssetList article {
+    grid-template-columns: auto 1fr;
+    > button { grid-column: 2; justify-self: start; }
+  }
   .ComputeLanScheduleCreate { justify-content: flex-start; }
   .ComputeLanScheduleList article { grid-template-columns: auto 1fr; }
   .ComputeTaskActions { justify-content: flex-start; }

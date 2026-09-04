@@ -47,67 +47,9 @@
   line-height: 1.55;
 }
 
-.CameraSavedPanel {
-  --camera-status-column-width: 84px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  border: 1px solid rgba(92, 201, 128, 0.22);
-  border-radius: 7px;
-  background: rgba(92, 201, 128, 0.045);
-  padding: 12px 14px;
-}
-
-.CameraSavedHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-
-  > div {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 3px;
-
-    strong {
-      color: rgba(255, 255, 255, 0.88);
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    span {
-      color: rgba(255, 255, 255, 0.5);
-      font-size: 10px;
-      line-height: 1.45;
-    }
-  }
-}
-
-.CameraSavedCount {
-  display: inline-flex;
-  min-width: 24px;
-  height: 24px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 12px;
-  background: rgba(92, 201, 128, 0.14);
-  color: #72dca0;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.CameraSavedResults {
-  max-height: 116px;
-}
-
-.CameraSavedRow:disabled {
-  cursor: wait;
-  opacity: 0.64;
-}
-
 .CameraDiscoveryPanel {
   --camera-status-column-width: 84px;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 9px;
@@ -146,7 +88,7 @@
     width: var(--camera-status-column-width);
     height: 32px;
     flex: 0 0 auto;
-    border: 1px solid rgba(0, 158, 253, 0.52);
+    border: 0;
     border-radius: 4px;
     background: rgba(0, 158, 253, 0.16);
     padding: 0;
@@ -158,10 +100,58 @@
       background: rgba(0, 158, 253, 0.25);
     }
 
+    &.danger {
+      background: rgba(255, 106, 106, 0.14);
+      color: #ffb0b0;
+
+      &:hover:not(:disabled) {
+        background: rgba(255, 106, 106, 0.24);
+      }
+    }
+
     &:disabled {
       cursor: default;
       opacity: 0.62;
     }
+  }
+}
+
+.JetsonScanProgress {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  left: -1px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 7px 7px 0 0;
+
+  &::before {
+    position: absolute;
+    width: 6%;
+    height: 100%;
+    background: #5cc980;
+    content: '';
+  }
+
+  progress {
+    display: block;
+    width: 100%;
+    height: 3px;
+    border: 0;
+    appearance: none;
+    background: transparent;
+  }
+
+  progress::-webkit-progress-bar {
+    background: transparent;
+  }
+
+  progress::-webkit-progress-value {
+    background: #5cc980;
+  }
+
+  progress::-moz-progress-bar {
+    background: #5cc980;
   }
 }
 
@@ -345,6 +335,19 @@
       height: 14px;
     }
   }
+}
+
+.JetsonConnectForm {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  label.wide { grid-column: span 1; }
+}
+
+.CameraCredentials {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 120px repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .CameraBanner {

@@ -7,6 +7,8 @@ import {connect} from 'react-redux';
 import classNames from 'classnames';
 import TopNavigationBar from './TopNavigationBar/TopNavigationBar';
 import ControlCenterView from '../ControlCenterView/ControlCenterView';
+import AgentSideChat from '../Common/AgentSideChat/AgentSideChat';
+import AgentChatTrigger from '../Common/AgentSideChat/AgentChatTrigger';
 
 interface IProps {
     activePopupType: PopupWindowType;
@@ -36,6 +38,8 @@ const EditorView: React.FC<IProps> = ({activePopupType}) => {
             {platformMode === 'control'
                 ? <ControlCenterView onCameraOpened={() => setPlatformMode('annotation')}/>
                 : <EditorContainer/>}
+            <AgentChatTrigger/>
+            <AgentSideChat/>
         </div>
     );
 };

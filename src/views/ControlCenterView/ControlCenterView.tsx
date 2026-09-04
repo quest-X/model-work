@@ -2,17 +2,18 @@ import React, {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import {connect} from 'react-redux';
 import {Language} from '../../data/LanguageConfig';
 import {Direction} from '../../data/enums/Direction';
+import {PopupWindowType} from '../../data/enums/PopupWindowType';
+import {updateActivePopupType} from '../../store/general/actionCreators';
 import {
     ComputeClusterNode,
+    ComputeGroupMembership,
+    ComputeLanAsset,
     ComputeManagedDevice,
     ComputeNetworkDependency,
     ComputeResourceGraph,
-    ComputeRuntimeEvent,
     ComputeRuntimeInventory,
-    ComputeRuntimeService,
-    ComputeRuntimeSnapshot,
-    ComputeTask,
     ComputeClusterService,
+    computeSshAvailability,
 } from '../../services/ComputeClusterService';
 import {
     AgentChatService,
@@ -24,7 +25,9 @@ import {AppState} from '../../store';
 import {ImageData} from '../../store/labels/types';
 import {SideNavigationBar} from '../EditorView/SideNavigationBar/SideNavigationBar';
 import {VerticalEditorButton} from '../EditorView/VerticalEditorButton/VerticalEditorButton';
+import {markdownMessage, splitTaskIdLine} from '../Common/AgentSideChat/AgentSideChat';
 import {ComputeClusterPopup} from '../PopupView/ComputeClusterPopup/ComputeClusterPopup';
+import {DeviceManagementPopup} from '../PopupView/DeviceManagementPopup/DeviceManagementPopup';
 import {ComputeTerminalPanel} from '../PopupView/ComputeClusterPopup/ComputeTerminalPanel';
 import {ResourceKnowledgeGraph} from '../PopupView/ComputeClusterPopup/ResourceKnowledgeGraph';
 import '../EditorView/EditorContainer/EditorContainer.scss';
@@ -39,21 +42,34 @@ interface IProps {
     language: Language;
     imagesData?: ImageData[];
     onCameraOpened?: () => void;
+    updateActivePopupTypeAction?: (
+        activePopupType: PopupWindowType,
+        activePopupNodeId?: string | null,
+        activePopupNodeName?: string | null,
+        activePopupNodeRemote?: boolean,
+    ) => void;
 }
 
-type Tone = 'healthy' | 'warning' | 'offline' | 'unknown';
+type Tone = 'healthy' | 'offline';
 type SidePanel = 'machines' | 'features';
 type Workspace = 'node' | 'network' | 'terminal' | 'groups';
 type MachineIconKind = 'jetson' | 'windows' | 'linux' | 'macos' | 'computer';
 type NodeGrouping = 'none' | 'region' | 'platform';
 type NodeOrdering = 'status' | 'activity' | 'name';
-type NodeVisibility = 'all' | 'online' | 'offline';
+type NodeVisibility = 'all' | 'normal' | 'fault';
 type OverviewView = 'map' | 'graph';
-type MonitorView = 'performance' | 'processes' | 'startup' | 'services' | 'tasks' | 'conversations';
+type MonitorView = 'performance' | 'processes' | 'startup' | 'tasks' | 'conversations';
 type ProcessSortKey = 'name' | 'pid' | 'cpu' | 'memory' | 'state';
 type StartupSortKey = 'name' | 'identifier' | 'state' | 'startType';
 type TaskSortKey = 'task' | 'device' | 'state' | 'updated';
 type SortDirection = 'asc' | 'desc';
+type TaskHistoryItem = {
+    taskId: string;
+    taskType: string;
+    device: string;
+    state: string;
+    updatedAt: number;
+};
 type ResourceMetricId = 'cpu' | 'memory' | 'gpu' | 'disk' | 'network';
 type ResourceSample = {
     nodeId: string;
@@ -201,35 +217,9 @@ const lastSeen = (seconds: number, zh: boolean): string => {
     return zh ? `${hours} 小时前` : `${hours}h ago`;
 };
 
-const runtimeDuration = (seconds: number | null, zh: boolean): string => {
-    if (seconds === null || !Number.isFinite(seconds)) return zh ? '未知' : 'Unknown';
-    const minutes = Math.floor(Math.max(0, seconds) / 60);
-    if (minutes < 1) return zh ? '不足 1 分钟' : '< 1 minute';
-    if (minutes < 60) return zh ? `${minutes} 分钟` : `${minutes}m`;
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-    return days > 0
-        ? (zh ? `${days} 天 ${hours % 24} 小时` : `${days}d ${hours % 24}h`)
-        : (zh ? `${hours} 小时 ${minutes % 60} 分钟` : `${hours}h ${minutes % 60}m`);
-};
-
 const runtimeTime = (timestamp: number, zh: boolean): string => timestamp
     ? new Date(timestamp * 1000).toLocaleString(zh ? 'zh-CN' : 'en-US')
     : (zh ? '未知' : 'Unknown');
-
-const runtimeTone = (state: ComputeRuntimeService['state']): Tone => {
-    if (state === 'healthy') return 'healthy';
-    if (state === 'degraded') return 'warning';
-    if (state === 'unavailable') return 'offline';
-    return 'unknown';
-};
-
-const runtimeStateLabel = (state: ComputeRuntimeService['state'], zh: boolean): string => ({
-    healthy: zh ? '正常' : 'Healthy',
-    degraded: zh ? '降级' : 'Degraded',
-    unavailable: zh ? '不可用' : 'Unavailable',
-    unknown: zh ? '未知' : 'Unknown',
-})[state];
 
 const processStateLabel = (
     state: ComputeRuntimeInventory['processes'][number]['state'],
@@ -245,19 +235,28 @@ const processStateLabel = (
 const startupStateLabel = (
     state: ComputeRuntimeInventory['startup_services'][number]['state'],
     zh: boolean,
-): string => ({
-    running: zh ? '已启用' : 'Enabled',
-    stopped: zh ? '已禁用' : 'Disabled',
-    paused: zh ? '已暂停' : 'Paused',
-    pending: zh ? '处理中' : 'Pending',
-    unknown: zh ? '未知' : 'Unknown',
-})[state];
+): string => state === 'running'
+    ? (zh ? '正常' : 'Normal')
+    : (zh ? '故障' : 'Fault');
+
+const isNodeService = (service: ComputeRuntimeInventory['startup_services'][number]): boolean =>
+    service.name === 'ModelWorkNodeAgent' || service.display_name === 'Model Work Node Agent';
+
+const startupServiceName = (
+    service: ComputeRuntimeInventory['startup_services'][number],
+    zh: boolean,
+): string => isNodeService(service) ? (zh ? '节点服务' : 'Node service') : service.display_name;
+
+const startupServiceIdentifier = (
+    service: ComputeRuntimeInventory['startup_services'][number],
+): string => isNodeService(service) ? 'node-service' : service.name;
 
 const taskStateLabel = (state: string, zh: boolean): string => ({
     queued: zh ? '排队' : 'Queued',
     running: zh ? '运行中' : 'Running',
     paused: zh ? '已暂停' : 'Paused',
     succeeded: zh ? '成功' : 'Succeeded',
+    completed: zh ? '成功' : 'Completed',
     failed: zh ? '失败' : 'Failed',
     cancelled: zh ? '已取消' : 'Cancelled',
 })[state] || state;
@@ -267,6 +266,7 @@ const taskTypeLabel = (type: string, zh: boolean): string => ({
     'information.web_fetch': zh ? '网页读取' : 'Web fetch',
     'network.lan_discovery': zh ? '局域网发现' : 'LAN discovery',
     'network.peer_probe': zh ? '网络探测' : 'Network probe',
+    agent_request: zh ? 'Agent 请求' : 'Agent request',
 })[type] || type;
 
 const conversationMessage = (content: string): string => {
@@ -305,25 +305,33 @@ const dependencyTone = (state: ComputeNetworkDependency['state']): Tone => state
     : 'offline';
 
 const dependencyLabel = (state: ComputeNetworkDependency['state'], zh: boolean): string => state === 'healthy'
-    ? zh ? '正常' : 'Healthy'
+    ? zh ? '正常' : 'Normal'
     : zh ? '故障' : 'Fault';
 
-const cameraTone = (status: ComputeManagedDevice['status']): Tone => {
-    if (status === 'online') return 'healthy';
-    if (status === 'registered') return 'warning';
-    return 'offline';
+const machineTone = (node: ComputeClusterNode): Tone => {
+    if (!node.online) return 'offline';
+    const ssh = computeSshAvailability(node);
+    const hasFault = (!ssh.lan && !ssh.tailscale)
+        || node.device_inventory.state === 'unavailable'
+        || node.device_inventory.devices.some(device => device.status === 'offline' || device.status === 'unavailable');
+    return hasFault ? 'offline' : 'healthy';
 };
 
+const machineStateLabel = (tone: Tone, zh: boolean): string => tone === 'healthy'
+    ? zh ? '正常' : 'Normal'
+    : zh ? '故障' : 'Fault';
+
+const cameraTone = (status: ComputeManagedDevice['status']): Tone => status === 'online' ? 'healthy' : 'offline';
+
 const cameraLabel = (status: ComputeManagedDevice['status'], zh: boolean): string => ({
-    registered: zh ? '已登记 · 运行状态未上报' : 'Registered · runtime not reported',
-    online: zh ? '在线' : 'Online',
-    offline: zh ? '离线' : 'Offline',
-    unavailable: zh ? '不可用' : 'Unavailable',
+    registered: zh ? '故障' : 'Fault',
+    online: zh ? '正常' : 'Normal',
+    offline: zh ? '故障' : 'Fault',
+    unavailable: zh ? '故障' : 'Fault',
 })[status];
 
-const NODE_TAG_LIMIT = 8;
+const NODE_TAG_LIMIT = 1;
 const NODE_TAG_MAX_LENGTH = 32;
-const RUNTIME_ALERT_WINDOW_SECONDS = 24 * 60 * 60;
 const nodeTagsKey = (nodeId: string): string => `opensight.control-center.node-tags.${nodeId}`;
 
 const loadNodeTags = (nodeId: string): string[] => {
@@ -350,38 +358,45 @@ const saveNodeTags = (nodeId: string, tags: string[]): void => {
 
 // Loading, empty, stale, and selected-node states share one small dashboard boundary.
 // eslint-disable-next-line complexity
-export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], onCameraOpened}) => {
+export const ControlCenterView: React.FC<IProps> = ({
+    language,
+    imagesData = [],
+    onCameraOpened,
+    updateActivePopupTypeAction,
+}) => {
     const zh = language === Language.CHINESE;
     const [sidePanel, setSidePanel] = useState<SidePanel | null>('machines');
     const [workspace, setWorkspace] = useState<Workspace>('node');
+    const [terminalAutoConnect, setTerminalAutoConnect] = useState(false);
+    const [terminalTransport, setTerminalTransport] = useState<'lan' | 'tailscale'>();
     const [nodes, setNodes] = useState<ComputeClusterNode[]>([]);
+    const [groupMemberships, setGroupMemberships] = useState<ComputeGroupMembership[]>([]);
+    const [lanAssets, setLanAssets] = useState<ComputeLanAsset[]>([]);
     const [resourceGraph, setResourceGraph] = useState<ComputeResourceGraph | null>(null);
     const [selectedNodeId, setSelectedNodeId] = useState('');
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState('');
     const [graphError, setGraphError] = useState('');
-    const [runtimeSnapshot, setRuntimeSnapshot] = useState<ComputeRuntimeSnapshot | null>(null);
     const [runtimeInventory, setRuntimeInventory] = useState<ComputeRuntimeInventory | null>(null);
-    const [runtimeEventList, setRuntimeEventList] = useState<ComputeRuntimeEvent[]>([]);
-    const [runtimeError, setRuntimeError] = useState('');
     const [runtimeInventoryError, setRuntimeInventoryError] = useState('');
-    const [runtimeWarningDismissed, setRuntimeWarningDismissed] = useState(false);
-    const [dismissedRuntimeAlertKey, setDismissedRuntimeAlertKey] = useState('');
-    const [runtimeEventsError, setRuntimeEventsError] = useState('');
+    const [dismissedRefreshWarningKey, setDismissedRefreshWarningKey] = useState('');
     const [inspectedServiceId, setInspectedServiceId] = useState('');
     const [monitorMaximized, setMonitorMaximized] = useState(false);
     const [monitorView, setMonitorView] = useState<MonitorView>('performance');
+    const [deviceManagementTab, setDeviceManagementTab] = useState<'camera' | 'edge' | null>(null);
     const [processQuery, setProcessQuery] = useState('');
     const [processSort, setProcessSort] = useState<{key: ProcessSortKey; direction: SortDirection}>({
         key: 'memory',
         direction: 'desc',
     });
+    const [startupQuery, setStartupQuery] = useState('');
     const [startupSort, setStartupSort] = useState<{key: StartupSortKey; direction: SortDirection}>({
         key: 'name',
         direction: 'asc',
     });
-    const [taskHistory, setTaskHistory] = useState<ComputeTask[]>([]);
+    const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([]);
+    const [taskQuery, setTaskQuery] = useState('');
     const [taskSort, setTaskSort] = useState<{key: TaskSortKey; direction: SortDirection}>({
         key: 'updated',
         direction: 'desc',
@@ -389,6 +404,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
     const [taskHistoryLoading, setTaskHistoryLoading] = useState(false);
     const [taskHistoryError, setTaskHistoryError] = useState('');
     const [conversationHistory, setConversationHistory] = useState<AgentConversation[]>([]);
+    const [conversationQuery, setConversationQuery] = useState('');
     const [conversationMessages, setConversationMessages] = useState<AgentConversationMessage[]>([]);
     const [selectedConversationId, setSelectedConversationId] = useState('');
     const [conversationHistoryLoading, setConversationHistoryLoading] = useState(false);
@@ -408,51 +424,10 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
     const refreshInFlight = useRef(false);
     const overviewSelected = useRef(false);
     const selectedNodeIdRef = useRef('');
-    const runtimeRequest = useRef(0);
-    const runtimePendingNode = useRef('');
-    const runtimeAbort = useRef<AbortController | null>(null);
     const runtimeInventoryRequest = useRef(0);
     const runtimeInventoryPendingNode = useRef('');
     const runtimeInventoryAbort = useRef<AbortController | null>(null);
     const conversationRequest = useRef(0);
-
-    const loadRuntime = useCallback(async (nodeId: string) => {
-        if (runtimePendingNode.current === nodeId) return;
-        runtimeAbort.current?.abort();
-        const controller = new AbortController();
-        runtimeAbort.current = controller;
-        runtimePendingNode.current = nodeId;
-        const requestId = ++runtimeRequest.current;
-        const current = () => mounted.current
-            && requestId === runtimeRequest.current
-            && selectedNodeIdRef.current === nodeId;
-        try {
-            const snapshot = await ComputeClusterService.runtime(nodeId, controller.signal);
-            if (!current()) return;
-            setRuntimeSnapshot(snapshot);
-            setRuntimeError('');
-            setRuntimeWarningDismissed(false);
-
-            try {
-                const events = await ComputeClusterService.runtimeEvents(nodeId, 0, 50, controller.signal);
-                if (!current()) return;
-                setRuntimeEventList(events.events);
-                setRuntimeEventsError('');
-            } catch (reason) {
-                if (!current()) return;
-                setRuntimeEventsError(reason instanceof Error ? reason.message : String(reason));
-            }
-        } catch (reason) {
-            if (!current()) return;
-            setRuntimeError(reason instanceof Error ? reason.message : String(reason));
-            setRuntimeEventsError('');
-        } finally {
-            if (runtimeAbort.current === controller) {
-                runtimeAbort.current = null;
-                runtimePendingNode.current = '';
-            }
-        }
-    }, []);
 
     const loadRuntimeInventory = useCallback(async (nodeId: string) => {
         if (runtimeInventoryPendingNode.current === nodeId) return;
@@ -484,7 +459,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
         refreshInFlight.current = true;
         if (mounted.current) initial ? setLoading(true) : setRefreshing(true);
         try {
-            const [nextNodes, graphResult] = await Promise.all([
+            const [nextNodes, graphResult, assetResult, memberships] = await Promise.all([
                 ComputeClusterService.nodes(),
                 ComputeClusterService.resourceGraph().then(
                     value => ({value, error: ''}),
@@ -493,9 +468,19 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                         error: reason instanceof Error ? reason.message : String(reason),
                     }),
                 ),
+                ComputeClusterService.lanAssets().then(
+                    value => value.assets,
+                    () => [] as ComputeLanAsset[],
+                ),
+                ComputeClusterService.groups().then(
+                    value => value.groups,
+                    () => [] as ComputeGroupMembership[],
+                ),
             ]);
             if (!mounted.current) return;
             setNodes(nextNodes);
+            setLanAssets(assetResult);
+            setGroupMemberships(memberships);
             if (graphResult.value) setResourceGraph(graphResult.value);
             setGraphError(graphResult.error);
             setSelectedNodeId(current => overviewSelected.current
@@ -505,6 +490,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     : nextNodes.find(node => node.online)?.node_id || nextNodes[0]?.node_id || '');
             setQueriedAt(new Date());
             setError('');
+            if (!graphResult.error) setDismissedRefreshWarningKey('');
         } catch (reason) {
             if (mounted.current) setError(reason instanceof Error ? reason.message : String(reason));
         } finally {
@@ -522,7 +508,6 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
         const timer = window.setInterval(() => void refresh(), 15000);
         return () => {
             mounted.current = false;
-            runtimeAbort.current?.abort();
             runtimeInventoryAbort.current?.abort();
             window.clearInterval(timer);
         };
@@ -541,7 +526,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
             const label = (zh ? entity.region_name : entity.region_id) || entity.region_name || entity.region_id;
             if (regionId && label) regionLabels.set(regionId, regionDisplayName(label, zh));
         });
-        return new Map(entities
+        const nodeRegionNames = new Map(entities
             .filter(entity => entity.kind === 'compute_node' && entity.node_id)
             .map(entity => {
                 const regionId = entity.region_id || entity.region_name || '';
@@ -552,10 +537,22 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     || (zh ? '未分配地域' : 'Unassigned');
                 return [entity.node_id as string, regionDisplayName(label, zh)] as [string, string];
             }));
-    }, [resourceGraph, zh]);
+        return new Map(nodes.map(node => [
+            node.node_id,
+            regionDisplayName(node.labels?.region_name
+                || nodeRegionNames.get(node.node_id)
+                || node.labels?.region
+                || '', zh)
+                || (zh ? '未分配地域' : 'Unassigned'),
+        ]));
+    }, [nodes, resourceGraph, zh]);
     const organizedNodes = useMemo(() => {
-        const visible = nodes.filter(node => nodeVisibility === 'all'
-            || (nodeVisibility === 'online' ? node.online : !node.online));
+        const visible = nodes.filter(node => {
+            if (nodeVisibility === 'all') return true;
+            const tone = machineTone(node);
+            if (nodeVisibility === 'normal') return tone === 'healthy';
+            return tone !== 'healthy';
+        });
         visible.sort((left, right) => {
             if (nodeOrdering === 'activity') {
                 return left.heartbeat_age_seconds - right.heartbeat_age_seconds || left.name.localeCompare(right.name);
@@ -578,43 +575,40 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
         return Array.from(groups.entries()).sort(([left], [right]) => left.localeCompare(right));
     }, [nodeGrouping, nodeOrdering, nodeRegions, nodes, nodeVisibility, zh]);
     const selectedNode = nodes.find(node => node.node_id === selectedNodeId) || null;
-    const runtimeCapable = Boolean(
-        selectedNode?.online && selectedNode.capabilities.includes('runtime.read.v1'),
-    );
     const runtimeInventoryCapable = Boolean(
         selectedNode?.online && selectedNode.capabilities.includes('runtime.inventory.v1'),
     );
     const currentGroup = resourceGraph?.entities.find(entity => entity.kind === 'compute_group') || null;
-    const currentGroupTone: Tone = currentGroup?.state === 'available'
-        ? 'healthy'
-        : currentGroup?.state === 'degraded'
-            ? 'warning'
-            : currentGroup ? 'offline' : 'unknown';
-    const onlineCount = nodes.filter(node => node.online).length;
+    const visibleGroups: ComputeGroupMembership[] = groupMemberships.length
+        ? groupMemberships
+        : currentGroup ? [{
+            index: 1,
+            group_id: resourceGraph?.group_id || currentGroup.entity_id,
+            group_name: currentGroup.label,
+            owner_name: null,
+            relationship: 'member',
+            scope: 'local',
+            joined_at: 0,
+            credential_types: [],
+        }] : [];
+    const currentGroupTone: Tone = currentGroup?.state === 'available' ? 'healthy' : 'offline';
+    const normalCount = nodes.filter(node => machineTone(node) === 'healthy').length;
     const terminalAvailable = Boolean(selectedNode?.online && selectedNode.network.ssh_available);
-    const lastRuntimeCheck = runtimeSnapshot?.services.reduce(
-        (latest, service) => Math.max(latest, service.health.checked_at),
-        0,
-    ) || 0;
-    const runtimeAlerts = runtimeEventList
-        .filter(event => event.level !== 'info'
-            && event.created_at >= (runtimeSnapshot?.captured_at || 0) - RUNTIME_ALERT_WINDOW_SECONDS)
-        .slice(-3);
-    const runtimeAlertKey = `${selectedNodeId}:${runtimeAlerts[runtimeAlerts.length - 1]?.cursor || ''}`;
+    const toolbarTone: Tone | null = workspace === 'groups'
+        ? visibleGroups.length ? currentGroupTone : null
+        : workspace === 'network'
+            ? (error ? 'offline' : 'healthy')
+            : workspace === 'terminal'
+                ? (terminalAvailable ? 'healthy' : 'offline')
+                : selectedNode
+                    ? machineTone(selectedNode)
+                    : nodes.length ? (normalCount ? 'healthy' : 'offline') : null;
+    const refreshWarningKey = error ? `nodes:${error}` : graphError ? `graph:${graphError}` : '';
 
     useEffect(() => {
         const nodeChanged = selectedNodeIdRef.current !== selectedNodeId;
         selectedNodeIdRef.current = selectedNodeId;
-        if (nodeChanged || !runtimeCapable) {
-            runtimeAbort.current?.abort();
-            runtimeAbort.current = null;
-            runtimePendingNode.current = '';
-            runtimeRequest.current += 1;
-            setRuntimeSnapshot(null);
-            setRuntimeEventList([]);
-            setRuntimeError('');
-            setRuntimeWarningDismissed(false);
-            setRuntimeEventsError('');
+        if (nodeChanged) {
             setInspectedServiceId('');
             setMonitorView('performance');
         }
@@ -626,13 +620,10 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
             setRuntimeInventory(null);
             setRuntimeInventoryError('');
         }
-        if (runtimeCapable) {
-            void loadRuntime(selectedNodeId);
-        }
         if (runtimeInventoryCapable) {
             void loadRuntimeInventory(selectedNodeId);
         }
-    }, [loadRuntime, loadRuntimeInventory, selectedNode, selectedNodeId]);
+    }, [loadRuntimeInventory, selectedNode, selectedNodeId]);
 
     useEffect(() => {
         if (!selectedNode) return;
@@ -651,7 +642,6 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
     useEffect(() => {
         if (!inspectedServiceId || !selectedNodeId) return undefined;
         const timer = window.setInterval(() => {
-            if (runtimeCapable) void loadRuntime(selectedNodeId);
             if (runtimeInventoryCapable) void loadRuntimeInventory(selectedNodeId);
             void refresh();
         }, 5000);
@@ -665,10 +655,8 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
         };
     }, [
         inspectedServiceId,
-        loadRuntime,
         loadRuntimeInventory,
         refresh,
-        runtimeCapable,
         runtimeInventoryCapable,
         selectedNodeId,
     ]);
@@ -679,9 +667,27 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
         const loadTasks = async (showLoading = false) => {
             if (showLoading) setTaskHistoryLoading(true);
             try {
-                const response = await ComputeClusterService.tasks();
+                const [response, agentResponse] = await Promise.all([
+                    ComputeClusterService.tasks(undefined, 200),
+                    AgentChatService.tasks(200),
+                ]);
                 if (!active || !mounted.current) return;
-                setTaskHistory(response.tasks.slice(0, 50));
+                setTaskHistory([
+                    ...response.tasks.map(task => ({
+                        taskId: task.task_id,
+                        taskType: task.task_type,
+                        device: task.node_name,
+                        state: task.state,
+                        updatedAt: task.updated_at,
+                    })),
+                    ...agentResponse.tasks.map(task => ({
+                        taskId: task.id,
+                        taskType: task.kind,
+                        device: 'OpenSight Agent',
+                        state: task.status,
+                        updatedAt: Date.parse(task.updated_at) / 1000,
+                    })),
+                ]);
                 setTaskHistoryError('');
             } catch (reason) {
                 if (active && mounted.current) setTaskHistoryError(reason instanceof Error ? reason.message : String(reason));
@@ -726,15 +732,13 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
         };
     }, [inspectedServiceId, monitorView]);
 
-    const normalizedProcessQuery = processQuery.trim().toLocaleLowerCase();
     const sortedProcesses = useMemo(() => (runtimeInventory?.processes || []).filter(process => {
-        if (!normalizedProcessQuery) return true;
-        return [process.name, String(process.pid), processStateLabel(process.state, zh)]
-            .some(value => value.toLocaleLowerCase().includes(normalizedProcessQuery));
+        const query = processQuery.trim().toLocaleLowerCase();
+        return !query || [process.name, String(process.pid), processStateLabel(process.state, zh)]
+            .some(value => value.toLocaleLowerCase().includes(query));
     }).sort((left, right) => {
         if (processSort.key === 'cpu' && (left.cpu_percent === null || right.cpu_percent === null)) {
-            if (left.cpu_percent === right.cpu_percent) return left.pid - right.pid;
-            return left.cpu_percent === null ? 1 : -1;
+            return left.cpu_percent === null ? (right.cpu_percent === null ? left.pid - right.pid : 1) : -1;
         }
         const comparison = processSort.key === 'name'
             ? left.name.localeCompare(right.name)
@@ -742,11 +746,11 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                 ? left.pid - right.pid
                 : processSort.key === 'cpu'
                     ? (left.cpu_percent || 0) - (right.cpu_percent || 0)
-                    : processSort.key === 'memory'
-                        ? left.memory_bytes - right.memory_bytes
-                        : left.state.localeCompare(right.state);
+                : processSort.key === 'memory'
+                    ? left.memory_bytes - right.memory_bytes
+                    : left.state.localeCompare(right.state);
         return (processSort.direction === 'asc' ? comparison : -comparison) || left.pid - right.pid;
-    }), [normalizedProcessQuery, processSort, runtimeInventory, zh]);
+    }), [processQuery, processSort, runtimeInventory, zh]);
 
     const sortProcesses = (key: ProcessSortKey) => {
         setProcessSort(current => current.key === key
@@ -754,16 +758,23 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
             : {key, direction: key === 'name' ? 'asc' : 'desc'});
     };
 
-    const sortedStartupServices = useMemo(() => [...(runtimeInventory?.startup_services || [])].sort((left, right) => {
+    const sortedStartupServices = useMemo(() => (runtimeInventory?.startup_services || []).filter(service => {
+        const query = startupQuery.trim().toLocaleLowerCase();
+        return !query || [
+            startupServiceName(service, zh), startupServiceIdentifier(service),
+            service.display_name, service.name, startupStateLabel(service.state, zh), zh ? '自动' : 'Automatic',
+        ]
+            .some(value => value.toLocaleLowerCase().includes(query));
+    }).sort((left, right) => {
         const comparison = startupSort.key === 'name'
-            ? left.display_name.localeCompare(right.display_name)
+            ? startupServiceName(left, zh).localeCompare(startupServiceName(right, zh))
             : startupSort.key === 'identifier'
-                ? left.name.localeCompare(right.name)
+                ? startupServiceIdentifier(left).localeCompare(startupServiceIdentifier(right))
                 : startupSort.key === 'state'
                     ? left.state.localeCompare(right.state)
                     : left.start_type.localeCompare(right.start_type);
         return (startupSort.direction === 'asc' ? comparison : -comparison) || left.name.localeCompare(right.name);
-    }), [runtimeInventory, startupSort]);
+    }), [runtimeInventory, startupQuery, startupSort, zh]);
 
     const sortStartupServices = (key: StartupSortKey) => {
         setStartupSort(current => current.key === key
@@ -771,23 +782,42 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
             : {key, direction: 'asc'});
     };
 
-    const sortedTaskHistory = useMemo(() => [...taskHistory].sort((left, right) => {
+    const sortedTaskHistory = useMemo(() => taskHistory.filter(task => {
+        const query = taskQuery.trim().toLocaleLowerCase();
+        if (!query) return true;
+        return [
+            task.taskId,
+            task.taskType,
+            taskTypeLabel(task.taskType, zh),
+            task.device,
+            task.state,
+            taskStateLabel(task.state, zh),
+        ].some(value => value.toLocaleLowerCase().includes(query));
+    }).sort((left, right) => {
         const comparison = taskSort.key === 'updated'
-            ? left.updated_at - right.updated_at
+            ? left.updatedAt - right.updatedAt
             : taskSort.key === 'task'
-                ? left.task_type.localeCompare(right.task_type)
+                ? left.taskType.localeCompare(right.taskType)
                 : taskSort.key === 'device'
-                    ? left.node_name.localeCompare(right.node_name)
+                    ? left.device.localeCompare(right.device)
                     : left.state.localeCompare(right.state);
         return (taskSort.direction === 'asc' ? comparison : -comparison)
-            || right.updated_at - left.updated_at;
-    }), [taskHistory, taskSort]);
+            || right.updatedAt - left.updatedAt;
+    }), [taskHistory, taskQuery, taskSort, zh]);
 
     const sortTasks = (key: TaskSortKey) => {
         setTaskSort(current => current.key === key
             ? {key, direction: current.direction === 'asc' ? 'desc' : 'asc'}
             : {key, direction: key === 'updated' ? 'desc' : 'asc'});
     };
+
+    const filteredConversationHistory = useMemo(() => {
+        const query = conversationQuery.trim().toLocaleLowerCase();
+        return conversationHistory.filter(conversation => !query || [
+            conversation.title || '',
+            conversation.id,
+        ].some(value => value.toLocaleLowerCase().includes(query)));
+    }, [conversationHistory, conversationQuery]);
 
     const selectConversation = async (conversationId: string) => {
         const requestId = ++conversationRequest.current;
@@ -812,8 +842,8 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
 
     const addNodeTag = (nodeId: string) => {
         const tag = tagDraft.trim();
-        if (!tag || tag.length > NODE_TAG_MAX_LENGTH || nodeTags.includes(tag) || nodeTags.length >= NODE_TAG_LIMIT) return;
-        const next = [...nodeTags, tag];
+        if (!tag || tag.length > NODE_TAG_MAX_LENGTH || nodeTags.includes(tag)) return;
+        const next = [tag];
         setNodeTags(next);
         saveNodeTags(nodeId, next);
         setTagDraft('');
@@ -826,7 +856,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
     };
 
     const openCamera = async (node: ComputeClusterNode, camera: ComputeManagedDevice) => {
-        if (!node.online || openingCameraId) return;
+        if (!node.online || camera.status !== 'online' || openingCameraId) return;
         setOpeningCameraId(camera.device_id);
         setCameraError('');
         try {
@@ -856,7 +886,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                 value={nodeOrdering}
                 onChange={event => setNodeOrdering(event.target.value as NodeOrdering)}
             >
-                <option value='status'>{zh ? '在线优先' : 'Online first'}</option>
+                <option value='status'>{zh ? '正常优先' : 'Normal first'}</option>
                 <option value='activity'>{zh ? '最近活跃' : 'Recent first'}</option>
                 <option value='name'>{zh ? '按名称' : 'By name'}</option>
             </select>
@@ -866,8 +896,8 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                 onChange={event => setNodeVisibility(event.target.value as NodeVisibility)}
             >
                 <option value='all'>{zh ? '所有状态' : 'All states'}</option>
-                <option value='online'>{zh ? '仅在线' : 'Online only'}</option>
-                <option value='offline'>{zh ? '仅离线' : 'Offline only'}</option>
+                <option value='normal'>{zh ? '仅正常' : 'Normal only'}</option>
+                <option value='fault'>{zh ? '仅故障' : 'Fault only'}</option>
             </select>
         </div>
         <div className='ControlMachineList'>
@@ -885,8 +915,8 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     <strong>{zh ? '总览' : 'Overview'}</strong>
                     <small>{zh ? '地图 / 图谱' : 'Map / graph'}</small>
                 </span>
-                <span className={`ControlMachineState ${onlineCount ? 'healthy' : 'offline'}`}>
-                    {onlineCount} / {nodes.length}
+                <span className={`ControlMachineState ${normalCount ? 'healthy' : 'offline'}`}>
+                    {normalCount} / {nodes.length}
                 </span>
             </button>
             {organizedNodes.map(([group, groupNodes]) => <React.Fragment key={group || 'all'}>
@@ -894,26 +924,29 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     <strong>{group}</strong>
                     <span>{groupNodes.length}</span>
                 </div>}
-                {groupNodes.map(node => <button
-                    type='button'
-                    key={node.node_id}
-                    className={`ControlMachineItem ${node.node_id === selectedNodeId ? 'selected' : ''}`}
-                    aria-pressed={node.node_id === selectedNodeId}
-                    onClick={() => {
-                        overviewSelected.current = false;
-                        setSelectedNodeId(node.node_id);
-                        setWorkspace('node');
-                    }}
-                >
-                    <MachinePlatformIcon node={node}/>
-                    <span className='ControlMachineIdentity'>
-                        <strong>{node.name}</strong>
-                        <small>{zh ? '活跃于 ' : 'Active '}{lastSeen(node.heartbeat_age_seconds, zh)}</small>
-                    </span>
-                    <span className={`ControlMachineState ${node.online ? 'healthy' : 'offline'}`}>
-                        {node.online ? (zh ? '在线' : 'Online') : (zh ? '离线' : 'Offline')}
-                    </span>
-                </button>)}
+                {groupNodes.map(node => {
+                    const tone = machineTone(node);
+                    return <button
+                        type='button'
+                        key={node.node_id}
+                        className={`ControlMachineItem ${node.node_id === selectedNodeId ? 'selected' : ''}`}
+                        aria-pressed={node.node_id === selectedNodeId}
+                        onClick={() => {
+                            overviewSelected.current = false;
+                            setSelectedNodeId(node.node_id);
+                            setWorkspace('node');
+                        }}
+                    >
+                        <MachinePlatformIcon node={node}/>
+                        <span className='ControlMachineIdentity'>
+                            <strong>{node.name}</strong>
+                            <small>{zh ? '活跃于 ' : 'Active '}{lastSeen(node.heartbeat_age_seconds, zh)}</small>
+                        </span>
+                        <span className={`ControlMachineState ${tone}`}>
+                            {machineStateLabel(tone, zh)}
+                        </span>
+                    </button>;
+                })}
             </React.Fragment>)}
             {!loading && organizedNodes.every(([, groupNodes]) => groupNodes.length === 0) && <p className='ControlMachineEmpty'>
                 {nodes.length === 0
@@ -938,7 +971,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     <small>{zh ? '查看本机所在计算群' : 'View this installation’s groups'}</small>
                 </span>
                 <span className={`ControlMachineState ${currentGroup ? 'healthy' : 'offline'}`}>
-                    {currentGroup ? (zh ? '1 个群' : '1 group') : (zh ? '不可用' : 'Unavailable')}
+                    {visibleGroups.length} {zh ? '个群' : visibleGroups.length === 1 ? 'group' : 'groups'}
                 </span>
             </button>
             <button
@@ -953,14 +986,18 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     <small>{zh ? '资产台账 · 扫描计划' : 'Inventory · scan schedules'}</small>
                 </span>
                 <span className={`ControlMachineState ${error ? 'offline' : 'healthy'}`}>
-                    {error ? (zh ? '不可用' : 'Unavailable') : (zh ? '可查看' : 'Ready')}
+                    {error ? (zh ? '故障' : 'Fault') : (zh ? '正常' : 'Normal')}
                 </span>
             </button>
             <button
                 type='button'
                 className={`ControlMachineItem ${workspace === 'terminal' ? 'selected' : ''}`}
                 aria-pressed={workspace === 'terminal'}
-                onClick={() => setWorkspace('terminal')}
+                onClick={() => {
+                    setTerminalAutoConnect(false);
+                    setTerminalTransport(undefined);
+                    setWorkspace('terminal');
+                }}
             >
                 <span className='ControlMachineIcon terminal' aria-hidden='true'>&gt;_</span>
                 <span className='ControlMachineIdentity'>
@@ -968,7 +1005,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     <small>{zh ? '受控 SSH · 输入指令' : 'Controlled SSH · command input'}</small>
                 </span>
                 <span className={`ControlMachineState ${terminalAvailable ? 'healthy' : 'offline'}`}>
-                    {terminalAvailable ? (zh ? '可连接' : 'Ready') : (zh ? '不可用' : 'Unavailable')}
+                    {terminalAvailable ? (zh ? '正常' : 'Normal') : (zh ? '故障' : 'Fault')}
                 </span>
             </button>
         </div>
@@ -1004,33 +1041,21 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
 
     // eslint-disable-next-line complexity
     const renderResourceMonitorCard = () => {
-        const runtimeUnhealthy = Boolean(runtimeSnapshot
-            && (runtimeSnapshot.summary.degraded > 0 || runtimeSnapshot.summary.unavailable > 0));
-        const monitorTone = runtimeSnapshot
-            ? runtimeUnhealthy ? 'warning' : 'healthy'
-            : selectedNode?.online ? 'healthy' : 'offline';
-        const monitorStatus = runtimeSnapshot
-            ? runtimeUnhealthy
-                ? (zh ? '部分异常' : 'Partially unavailable')
-                : (zh ? '实时状态' : 'Live status')
-            : selectedNode?.online
-                ? (zh ? '心跳正常' : 'Heartbeat current')
-                : (zh ? '心跳中断' : 'Heartbeat lost');
+        const monitorTone = selectedNode?.online ? 'healthy' : 'offline';
+        const monitorStatus = selectedNode?.online
+            ? (zh ? '正常' : 'Normal')
+            : (zh ? '故障' : 'Fault');
         return <button
             type='button'
             className='ControlServiceCard ControlRuntimeService'
             aria-label={zh ? '打开资源监视器' : 'Open resource monitor'}
-            onClick={() => setInspectedServiceId(runtimeSnapshot?.services[0]?.service_id || 'node-runtime')}
+            onClick={() => setInspectedServiceId('node-runtime')}
         >
             <span className={`ControlStatusDot ${monitorTone}`} aria-hidden='true'/>
             <span className='ControlRuntimeIdentity'>
                 <span>{monitorStatus}</span>
                 <strong>{zh ? '资源监视器' : 'Resource monitor'}</strong>
-                <small>{runtimeSnapshot
-                    ? zh ? 'CPU · 内存 · GPU · 磁盘' : 'CPU · Memory · GPU · Disk'
-                    : selectedNode?.online
-                        ? zh ? '计算群资源心跳有效' : 'Compute-cluster resource heartbeat is current'
-                        : zh ? '计算群资源心跳已中断' : 'Compute-cluster resource heartbeat is stale'}</small>
+                <small>CPU · MEM · GPU · DISK · NETWORK</small>
             </span>
             <span className='ControlServiceOpen' aria-hidden='true'>›</span>
         </button>;
@@ -1040,29 +1065,46 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
     const renderNode = (node: ComputeClusterNode) => {
         // Dependency health belongs to the latest node snapshot. Once that
         // snapshot expires, an old green state is no longer current evidence.
-        const tailscaleState = node.online ? dependency(node, 'tailscale') : 'unknown';
-        const controlState = node.online ? dependency(node, 'control_ssh') : 'unknown';
-        const lanState = !node.online || !node.control_transport
-            ? 'unknown'
-            : node.control_transport === 'lan' ? controlState : 'unavailable';
+        const ssh = computeSshAvailability(node);
+        const lanState = node.online && ssh.lan
+            ? 'healthy' : 'unavailable';
+        const tailscaleState = node.online && ssh.tailscale
+            ? 'healthy' : 'unavailable';
         const cameras = node.device_inventory.devices.filter(device => device.kind === 'camera');
+        const edgeDevices = lanAssets.filter(asset =>
+            asset.node_id === node.node_id && asset.device_kind === 'edge_compute'
+        );
+        const remoteLan = node.control_transport === 'tailscale';
         const hardwareModel = node.resources.hardware_model?.trim();
+        const locationTag = (nodeRegions.get(node.node_id) || '').split(' / ')[0];
+        const storedWorkArea = nodeTags[0] || '';
+        const geographicTags = new Set([
+            locationTag,
+            regionDisplayName(node.labels?.region_name || node.labels?.region || '', zh),
+            node.labels?.city_name || '',
+            node.labels?.district_name || '',
+        ].filter(Boolean));
+        const customWorkArea = geographicTags.has(regionDisplayName(storedWorkArea, zh)) ? '' : storedWorkArea;
+        const workAreaTag = customWorkArea || node.labels?.site_name?.trim() || '';
         return <>
             <header className='ControlNodeHeader'>
                 <div>
                     <h1>{node.name}</h1>
-                    <p>{zh ? '最后检查' : 'Last check'} {runtimeTime(lastRuntimeCheck, zh)} · {zh ? '最近心跳' : 'Last heartbeat'} {lastSeen(node.heartbeat_age_seconds, zh)}</p>
+                    <p>{zh ? '最后检查' : 'Last check'} {runtimeTime(node.resources.captured_at, zh)} · {zh ? '最近心跳' : 'Last heartbeat'} {lastSeen(node.heartbeat_age_seconds, zh)}</p>
                     <div className='ControlNodeTags' aria-label={zh ? '节点标签' : 'Node tags'}>
-                        {nodeTags.map(tag => <span className='ControlNodeTag' key={tag}>
-                            {tag}
-                            <button
+                        {locationTag && <span className='ControlNodeTag location'>
+                            {zh ? `地域(${locationTag})` : `Region (${locationTag})`}
+                        </span>}
+                        {workAreaTag && <span className={`ControlNodeTag work-area${customWorkArea ? '' : ' static'}`}>
+                            {zh ? `作业区(${workAreaTag})` : `Work area (${workAreaTag})`}
+                            {customWorkArea && <button
                                 type='button'
-                                aria-label={zh ? `删除标签 ${tag}` : `Remove tag ${tag}`}
-                                title={zh ? '删除标签' : 'Remove tag'}
-                                onClick={() => removeNodeTag(node.node_id, tag)}
-                            >×</button>
-                        </span>)}
-                        {nodeTags.length < NODE_TAG_LIMIT && <form
+                                aria-label={zh ? `清除作业区 ${workAreaTag}` : `Clear work area ${workAreaTag}`}
+                                title={zh ? '清除作业区' : 'Clear work area'}
+                                onClick={() => removeNodeTag(node.node_id, customWorkArea)}
+                            >×</button>}
+                        </span>}
+                        {!workAreaTag && <form
                             className='ControlNodeTagForm'
                             onSubmit={event => {
                                 event.preventDefault();
@@ -1072,15 +1114,15 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                             <input
                                 value={tagDraft}
                                 maxLength={NODE_TAG_MAX_LENGTH}
-                                aria-label={zh ? '新标签' : 'New tag'}
-                                placeholder={zh ? '新增标签' : 'Add tag'}
+                                aria-label={zh ? '自定义作业区' : 'Custom work area'}
+                                placeholder={zh ? '作业区' : 'Work area'}
                                 onChange={event => setTagDraft(event.target.value)}
                             />
                             <button
                                 type='submit'
                                 disabled={!tagDraft.trim() || nodeTags.includes(tagDraft.trim())}
-                                aria-label={zh ? '添加标签' : 'Add tag'}
-                                title={zh ? '添加标签' : 'Add tag'}
+                                aria-label={zh ? '添加作业区' : 'Add work area'}
+                                title={zh ? '添加作业区' : 'Add work area'}
                             >+</button>
                         </form>}
                     </div>
@@ -1100,7 +1142,7 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     <div><span>{zh ? '设备型号' : 'Device model'}</span><strong title={hardwareModel}>{hardwareModel || (zh ? '未上报' : 'Not reported')}</strong><small>{hardwareModel ? (zh ? '节点上报' : 'reported by node') : (zh ? '等待节点上报' : 'waiting for node report')}</small></div>
                     <div><span>{zh ? '操作系统' : 'Operating system'}</span><strong>{node.resources.platform || '—'}</strong><small>{zh ? '设备系统' : 'device platform'}</small></div>
                     <div><span>{zh ? '处理器架构' : 'Processor architecture'}</span><strong>{node.resources.architecture || '—'}</strong><small>{zh ? '节点架构' : 'node architecture'}</small></div>
-                    <div><span>{zh ? '节点程序版本' : 'Agent version'}</span><strong>{node.agent_version || '—'}</strong><small>{zh ? '计算群节点程序' : 'compute-cluster node software'}</small></div>
+                    <div><span>{zh ? '节点服务版本' : 'Node service version'}</span><strong>{node.agent_version && node.agent_version !== 'unknown' ? node.agent_version : '—'}</strong><small>{zh ? '计算群节点服务' : 'compute-cluster node service'}</small></div>
                 </div>
                 <div className='ControlSubsectionHeading'>
                     <strong>{zh ? '计算资源' : 'Compute resources'}</strong>
@@ -1123,16 +1165,24 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     {renderServiceCard(
                         dependencyLabel(lanState, zh),
                         zh ? 'SSH 局域网' : 'LAN SSH',
-                        zh ? '仅当前 Client 通过局域网 SSH 连接时显示正常' : 'Healthy only while the Client uses a LAN SSH connection',
+                        zh ? '仅使用局域网地址建立 SSH 连接' : 'Uses only the LAN address for SSH',
                         dependencyTone(lanState),
-                        () => setWorkspace('terminal'),
+                        () => {
+                            setTerminalAutoConnect(true);
+                            setTerminalTransport('lan');
+                            setWorkspace('terminal');
+                        },
                     )}
                     {renderServiceCard(
                         dependencyLabel(tailscaleState, zh),
                         zh ? 'Tailscale 远程' : 'Remote Tailscale',
-                        zh ? '由节点 Tailscale 连接状态上报' : 'Reported by the node Tailscale connection status',
+                        zh ? '仅使用 Tailscale 地址建立 SSH 连接' : 'Uses only the Tailscale address for SSH',
                         dependencyTone(tailscaleState),
-                        () => setWorkspace('terminal'),
+                        () => {
+                            setTerminalAutoConnect(true);
+                            setTerminalTransport('tailscale');
+                            setWorkspace('terminal');
+                        },
                     )}
                 </div>
             </section>
@@ -1140,69 +1190,161 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
             <section className='ControlSection'>
                 <div className='ControlSectionHeading'>
                     <div>
-                        <h2>{zh ? '运行服务' : 'Running services'}</h2>
+                        <h2>{zh ? '资源监控' : 'Resource monitoring'}</h2>
                     </div>
-                    {runtimeSnapshot && <span>{runtimeSnapshot.summary.healthy} / {runtimeSnapshot.summary.total}</span>}
                 </div>
-                {runtimeSnapshot
-                    ? <div className='ControlRuntimeServiceGrid'>
-                        {renderResourceMonitorCard()}
-                    </div>
-                    : <div className='ControlServiceGrid'>{renderResourceMonitorCard()}</div>}
+                <div className='ControlServiceGrid'>{renderResourceMonitorCard()}</div>
             </section>
 
             <section className='ControlSection'>
                 <div className='ControlSectionHeading'>
                     <div>
                         <h2>{zh ? '相关设备' : 'Related devices'}</h2>
+                        <button
+                            type='button'
+                            className='ControlSectionCountButton'
+                            aria-label={zh
+                            ? `${cameras.length + edgeDevices.length} 个相关设备`
+                            : `${cameras.length + edgeDevices.length} related devices`
+                            }
+                            title={zh ? '打开设备管理' : 'Open device management'}
+                            onClick={() => setDeviceManagementTab(
+                                cameras.length === 0 && edgeDevices.length > 0 ? 'edge' : 'camera',
+                            )}
+                        >{cameras.length + edgeDevices.length}</button>
                     </div>
                 </div>
-                <div className='ControlSubsectionHeading'>
-                    <strong>{zh ? '摄像头' : 'Cameras'}</strong>
-                    <span>{cameras.length}</span>
-                </div>
-                <div className='ControlCameraGrid'>
-                    {cameras.map(camera => <button
-                        type='button'
-                        className='ControlCameraCard'
-                        key={camera.device_id}
-                        disabled={!node.online || Boolean(openingCameraId)}
-                        aria-label={zh ? `打开${camera.name}实时画面` : `Open live view for ${camera.name}`}
-                        onClick={() => void openCamera(node, camera)}
-                    >
-                        <div className='ControlCameraIcon' aria-hidden='true'>◉</div>
-                        <div className='ControlCameraIdentity'>
-                            <strong>{camera.name}</strong>
-                            <small>{camera.model || camera.device_id}</small>
-                            <span className={cameraTone(camera.status)}><i/> {openingCameraId === camera.device_id ? (zh ? '正在打开…' : 'Opening…') : cameraLabel(camera.status, zh)}</span>
+                <div className='ControlRelatedDeviceGrid'>
+                    <div className='ControlRelatedDeviceGroup'>
+                        <div className='ControlSubsectionHeading'>
+                            <strong>{zh ? '摄像头' : 'Cameras'}</strong>
+                            {cameras.length > 0 && <button
+                                type='button'
+                                className='ControlDeviceCountButton'
+                                aria-label={zh ? '添加局域网摄像头' : 'Add LAN camera'}
+                                onClick={() => updateActivePopupTypeAction?.(
+                                    PopupWindowType.CAMERA_CONNECT,
+                                    node.node_id,
+                                    node.name,
+                                    remoteLan,
+                                )}
+                            >＋</button>}
                         </div>
-                        <div className='ControlCameraChannels'>
-                            <strong>{camera.channels}</strong>
-                            <small>{zh ? '通道' : camera.channels === 1 ? 'channel' : 'channels'}</small>
+                        <div className='ControlCameraGrid'>
+                            {cameras.map(camera => <button
+                                type='button'
+                                className='ControlCameraCard'
+                                key={camera.device_id}
+                                disabled={!node.online || camera.status !== 'online' || Boolean(openingCameraId)}
+                                aria-label={zh ? `打开${camera.name}实时画面` : `Open live view for ${camera.name}`}
+                                onClick={() => void openCamera(node, camera)}
+                            >
+                                <div className='ControlCameraIcon' aria-hidden='true'>◉</div>
+                                <div className='ControlCameraIdentity'>
+                                    <strong>{camera.name}</strong>
+                                    <small>{camera.model || camera.device_id}</small>
+                                    <span className={cameraTone(camera.status)}><i/> {openingCameraId === camera.device_id ? (zh ? '正在打开…' : 'Opening…') : cameraLabel(camera.status, zh)}</span>
+                                </div>
+                                <div className='ControlCameraChannels'>
+                                    <strong>{camera.channels}</strong>
+                                    <small>{zh ? '通道' : camera.channels === 1 ? 'channel' : 'channels'}</small>
+                                </div>
+                            </button>)}
+                            {cameras.length === 0 && <button
+                                type='button'
+                                className='ControlEmptyBlock ControlRelatedDeviceAdd'
+                                aria-label={zh ? '发现并添加局域网摄像头' : 'Discover and add LAN cameras'}
+                                title={node.online
+                                    ? (zh ? '打开拓展引擎的连接相机' : 'Open extension-engine camera connection')
+                                    : (zh ? '节点故障，恢复正常后才能扫描局域网' : 'The node must return to normal before scanning its LAN')}
+                                disabled={!node.online}
+                                onClick={() => updateActivePopupTypeAction?.(
+                                    PopupWindowType.CAMERA_CONNECT,
+                                    node.node_id,
+                                    node.name,
+                                    remoteLan,
+                                )}
+                            >{zh ? '＋ 连接局域网相机' : '+ Connect LAN camera'}</button>}
                         </div>
-                    </button>)}
-                    {cameras.length === 0 && <div className='ControlEmptyBlock'>
-                        {node.device_inventory.state === 'ready'
-                            ? (zh ? '该机器没有上报已登记摄像头' : 'This machine reported no registered cameras')
-                            : node.device_inventory.state === 'disabled'
-                                ? (zh ? '摄像头注册功能未启用' : 'Camera registry is disabled')
-                                : (zh ? '无法读取摄像头注册信息' : 'Camera registry is unavailable')}
-                    </div>}
+                        {cameraError && <div className='ControlCameraError' role='status'>{cameraError}</div>}
+                    </div>
+                    <div className='ControlRelatedDeviceGroup'>
+                        <div className='ControlSubsectionHeading'>
+                            <strong>{zh ? '边缘计算设备' : 'Edge computing devices'}</strong>
+                            {edgeDevices.length > 0 && <button
+                                type='button'
+                                className='ControlDeviceCountButton'
+                                aria-label={zh ? '添加设备' : 'Add device'}
+                                title={zh ? '添加设备' : 'Add device'}
+                                onClick={() => updateActivePopupTypeAction?.(
+                                    PopupWindowType.JETSON_CONNECT,
+                                    node.node_id,
+                                    node.name,
+                                    remoteLan,
+                                )}
+                            >＋</button>}
+                        </div>
+                        <div className='ControlCameraGrid'>
+                            {edgeDevices.map(device => <div className='ControlCameraCard' key={device.asset_id}>
+                                <div className='ControlCameraIcon' aria-hidden='true'>
+                                    {device.device_model?.toLowerCase().includes('jetson')
+                                        ? <img src='/ico/jetson-agx-orin.png' alt='Jetson'/>
+                                        : '◆'}
+                                </div>
+                                <div className='ControlCameraIdentity'>
+                                    <strong>{device.display_name || device.hostname || device.address}</strong>
+                                    <small>{device.device_model || device.address} · {device.address}</small>
+                                    <span className={device.online ? 'healthy' : 'offline'}>
+                                        <i/> {device.online ? (zh ? '正常' : 'Normal') : (zh ? '故障' : 'Fault')}
+                                    </span>
+                                </div>
+                            </div>)}
+                            {edgeDevices.length === 0 && <button
+                                type='button'
+                                className='ControlEmptyBlock ControlRelatedDeviceAdd'
+                                aria-label={zh ? '发现并添加局域网边缘计算设备' : 'Discover and add LAN edge devices'}
+                                onClick={() => updateActivePopupTypeAction?.(
+                                    PopupWindowType.JETSON_CONNECT,
+                                    node.node_id,
+                                    node.name,
+                                    remoteLan,
+                                )}
+                            >{zh ? '＋ 连接 NVIDIA Jetson' : '+ Connect NVIDIA Jetson'}</button>}
+                        </div>
+                    </div>
                 </div>
-                {cameraError && <div className='ControlCameraError' role='status'>{cameraError}</div>}
             </section>
+
+            {deviceManagementTab && <DeviceManagementPopup
+                language={language}
+                node={node}
+                cameras={cameras}
+                edgeDevices={edgeDevices}
+                initialTab={deviceManagementTab}
+                onClose={() => setDeviceManagementTab(null)}
+                onAddCamera={() => {
+                    setDeviceManagementTab(null);
+                    updateActivePopupTypeAction?.(
+                        PopupWindowType.CAMERA_CONNECT,
+                        node.node_id,
+                        node.name,
+                        remoteLan,
+                    );
+                }}
+                onDiscoverEdge={() => {
+                    setDeviceManagementTab(null);
+                    updateActivePopupTypeAction?.(
+                        PopupWindowType.JETSON_CONNECT,
+                        node.node_id,
+                        node.name,
+                        remoteLan,
+                    );
+                }}
+                onCamerasChanged={() => void refresh()}
+            />}
         </>;
     };
 
-    const managedServices = runtimeSnapshot?.services.filter(service => service.kind === 'service') || [];
-    const taskExecutor = runtimeSnapshot?.services.find(service => service.service_id === 'task-executor') || null;
-    const inspectedService = managedServices.find(
-        service => service.service_id === inspectedServiceId,
-    ) || managedServices[0] || null;
-    const inspectedEvents = runtimeEventList.filter(
-        event => event.service_id === inspectedService?.service_id
-            || (inspectedService?.service_id === 'node-agent' && event.service_id === 'task-executor'),
-    ).slice(-20).reverse();
     const memoryUsed = selectedNode?.resources.memory_total_bytes && selectedNode.resources.memory_available_bytes !== null
         ? selectedNode.resources.memory_total_bytes - selectedNode.resources.memory_available_bytes
         : null;
@@ -1224,10 +1366,8 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
     const controlNetworkState = selectedNode?.online ? dependency(selectedNode, 'control_ssh') : 'unknown';
     const remoteNetworkState = selectedNode?.online ? dependency(selectedNode, 'tailscale') : 'unknown';
     const networkValue = controlNetworkState === 'healthy' && remoteNetworkState === 'healthy'
-        ? (zh ? '正常' : 'Healthy')
-        : controlNetworkState === 'unavailable' && remoteNetworkState === 'unavailable'
-            ? (zh ? '不可用' : 'Unavailable')
-            : (zh ? '降级' : 'Degraded');
+        ? (zh ? '正常' : 'Normal')
+        : (zh ? '故障' : 'Fault');
     const selectedResourceHistory = resourceHistory.filter(sample => sample.nodeId === selectedNode?.node_id);
     const resourceMetrics: {
         id: ResourceMetricId;
@@ -1311,12 +1451,6 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
         scaleLabel: zh ? '蓝色下载 · 红色上传' : 'Blue receive · red send',
     }];
     const activeMetric = resourceMetrics.find(metric => metric.id === activeMetricId) || resourceMetrics[0];
-    const inspectedProcessState = inspectedService?.process?.state === 'running'
-        ? (zh ? '运行中' : 'Running')
-        : inspectedService?.process?.state === 'stopped'
-            ? (zh ? '已停止' : 'Stopped')
-            : (zh ? '未知' : 'Unknown');
-
     return <div className='EditorContainer ControlCenterView'>
         <SideNavigationBar
             direction={Direction.LEFT}
@@ -1339,39 +1473,13 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     style={{top: '167px'}}
                 />
                 <div className='VersionWatermark'>v2.8.2</div>
-                <button
-                    type='button'
-                    className='AgentChatButtonBottom'
-                    aria-label={zh ? '在侧边栏询问 Agent' : 'Ask Agent in side chat'}
-                    title={zh ? '在侧边栏询问 Agent' : 'Ask Agent in side chat'}
-                    onClick={() => window.dispatchEvent(new Event('opensight:toggle-agent-chat'))}
-                >
-                    <img
-                        draggable={false}
-                        alt=''
-                        src='/ico/robot.png'
-                        style={{
-                            width: 14,
-                            height: 14,
-                            filter: 'brightness(0) invert(48%) sepia(98%) saturate(1500%) hue-rotate(192deg) brightness(1.05)',
-                        }}
-                    />
-                </button>
             </>}
             renderContent={sidePanel === 'features' ? renderFeatureList : renderMachineList}
         />
         <main className='EditorWrapper ControlCenterWorkspace'>
             <div className='EditorTopNavigationBar ControlTopNavigationBar'>
                 <div className='ControlToolbarGroup'>
-                    <span className={`ControlStatusDot ${workspace === 'groups'
-                        ? currentGroupTone
-                        : workspace === 'network'
-                        ? (error ? 'offline' : 'healthy')
-                        : workspace === 'terminal'
-                            ? (terminalAvailable ? 'healthy' : 'offline')
-                            : selectedNode
-                                ? (selectedNode.online ? 'healthy' : 'offline')
-                                : nodes.length ? (onlineCount ? 'healthy' : 'offline') : 'unknown'}`} aria-hidden='true'/>
+                    {toolbarTone && <span className={`ControlStatusDot ${toolbarTone}`} aria-hidden='true'/>}
                     <strong>{workspace === 'groups'
                         ? (zh ? '群查询' : 'Groups')
                         : workspace === 'network'
@@ -1392,8 +1500,8 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                 <div className='ControlToolbarGroup right'>
                     {queriedAt && <small>{zh ? '查询于' : 'Checked'} {queriedAt.toLocaleTimeString(zh ? 'zh-CN' : 'en-US')}</small>}
                     <span>{workspace === 'groups'
-                        ? (currentGroup ? (zh ? '1 个群' : '1 group') : (zh ? '0 个群' : '0 groups'))
-                        : `${onlineCount} / ${nodes.length} ${zh ? '在线' : 'online'}`}</span>
+                        ? `${visibleGroups.length} ${zh ? '个群' : visibleGroups.length === 1 ? 'group' : 'groups'}`
+                        : `${normalCount} / ${nodes.length} ${zh ? '正常' : 'normal'}`}</span>
                     {workspace === 'node' && !selectedNode
                         ? <div className='ControlOverviewViewSwitch' role='group' aria-label={zh ? '总览视角' : 'Overview view'}>
                             <button
@@ -1431,18 +1539,20 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     <section className='ControlSection ControlSectionFirst'>
                         <div className='ControlSectionHeading'>
                             <h2>{zh ? '已加入的群' : 'Joined groups'}</h2>
-                            <span>{currentGroup ? 1 : 0}</span>
+                            <span>{visibleGroups.length}</span>
                         </div>
-                        {currentGroup
+                        {visibleGroups.length
                             ? <div className='ControlServiceGrid' aria-label={zh ? '当前群列表' : 'Current groups'}>
-                                <article className='ControlServiceCard'>
+                                {visibleGroups.map(group => <article className='ControlServiceCard' key={group.group_id}>
                                     <span className={`ControlStatusDot ${currentGroupTone}`} aria-hidden='true'/>
                                     <div>
-                                        <span>{zh ? '序号 1' : 'Index 1'}</span>
-                                        <strong>{currentGroup.label}</strong>
-                                        <small>{resourceGraph?.group_id}</small>
+                                        <span>{zh ? `序号 ${group.index}` : `Index ${group.index}`} · {group.scope === 'central'
+                                            ? (zh ? '中央群' : 'Central')
+                                            : (zh ? '本地群' : 'Local')}</span>
+                                        <strong>{group.group_name || group.group_id}</strong>
+                                        <small>{group.group_id}</small>
                                     </div>
-                                </article>
+                                </article>)}
                             </div>
                             : <div className='ControlEmptyBlock'>{graphError || (zh ? '当前没有可查询的群' : 'No queryable groups')}</div>}
                     </section>
@@ -1461,6 +1571,8 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                         key={selectedNodeId || 'terminal'}
                         zh={zh}
                         preferredNodeId={selectedNodeId}
+                        preferredTransport={terminalTransport}
+                        autoConnect={terminalAutoConnect}
                     />
                 </div>}
                 {workspace === 'node' && loading && nodes.length === 0 && <div className='ControlCenterMessage'>
@@ -1473,13 +1585,19 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     <button type='button' onClick={() => void refresh()}>{zh ? '重试' : 'Retry'}</button>
                 </div>}
                 {workspace === 'node' && !loading && !selectedNode && nodes.length > 0 && <div className='ControlNodeContent'>
-                    {(error || graphError) && <div className='ControlRefreshWarning' role='status'>
-                        {error
-                            ? (zh ? '本次刷新失败，正在显示上一次数据：' : 'Refresh failed; showing the last snapshot: ')
-                            : overviewView === 'map'
-                                ? (zh ? '地域数据刷新失败，正在显示上一次数据：' : 'Region data refresh failed; showing the last snapshot: ')
-                                : (zh ? '图谱刷新失败，正在显示上一次数据：' : 'Graph refresh failed; showing the last snapshot: ')}
-                        {error || graphError}
+                    {(error || graphError) && dismissedRefreshWarningKey !== refreshWarningKey && <div className='ControlRefreshWarning' role='status'>
+                        <span>{error
+                                ? (zh ? '本次刷新失败，正在显示上一次数据：' : 'Refresh failed; showing the last snapshot: ')
+                                : overviewView === 'map'
+                                    ? (zh ? '地域数据刷新失败，正在显示上一次数据：' : 'Region data refresh failed; showing the last snapshot: ')
+                                    : (zh ? '图谱刷新失败，正在显示上一次数据：' : 'Graph refresh failed; showing the last snapshot: ')}
+                            {error || graphError}</span>
+                        <button
+                            type='button'
+                            aria-label={zh ? '关闭刷新失败提示' : 'Dismiss refresh warning'}
+                            title={zh ? '关闭提示' : 'Dismiss warning'}
+                            onClick={() => setDismissedRefreshWarningKey(refreshWarningKey)}
+                        >×</button>
                     </div>}
                     {overviewView === 'map'
                         ? <React.Suspense fallback={<div className='ControlCenterMessage'>{zh ? '正在载入地图…' : 'Loading map…'}</div>}>
@@ -1499,37 +1617,15 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                             </div>}
                 </div>}
                 {workspace === 'node' && selectedNode && <>
-                    {runtimeSnapshot && runtimeAlerts.length > 0 && dismissedRuntimeAlertKey !== runtimeAlertKey && <div
-                        className='ControlRuntimeAlerts ControlRuntimeAlertsTop'
-                        aria-label={zh ? '最近异常' : 'Recent issues'}
-                    >
-                        <div>
-                            <strong>{zh ? '最近异常' : 'Recent issues'}</strong>
-                            <ul>{runtimeAlerts.map(event => <li key={event.cursor}>
-                                <span>{runtimeTime(event.created_at, zh)}</span>
-                                <small>{runtimeSnapshot.services.find(service => service.service_id === event.service_id)?.name || event.service_id} · {event.message}</small>
-                            </li>)}</ul>
-                        </div>
-                        <button
-                            type='button'
-                            aria-label={zh ? '关闭最近异常' : 'Dismiss recent issues'}
-                            title={zh ? '关闭提示' : 'Dismiss notice'}
-                            onClick={() => setDismissedRuntimeAlertKey(runtimeAlertKey)}
-                        >×</button>
-                    </div>}
-                    {runtimeError && !runtimeWarningDismissed && <div className='ControlRuntimeWarning' role='status'>
-                        <span><strong>{zh ? '运行详情暂不可用' : 'Runtime details unavailable'}</strong>
-                            {zh ? `：${runtimeError}` : `: ${runtimeError}`}</span>
-                        <button
-                            type='button'
-                            aria-label={zh ? '关闭运行详情提示' : 'Dismiss runtime details warning'}
-                            title={zh ? '关闭提示' : 'Dismiss warning'}
-                            onClick={() => setRuntimeWarningDismissed(true)}
-                        >×</button>
-                    </div>}
                     <div className='ControlNodeContent'>
-                        {error && <div className='ControlRefreshWarning' role='status'>
-                            {zh ? '本次刷新失败，正在显示上一次数据：' : 'Refresh failed; showing the last snapshot: '}{error}
+                        {error && dismissedRefreshWarningKey !== refreshWarningKey && <div className='ControlRefreshWarning' role='status'>
+                            <span>{zh ? '本次刷新失败，正在显示上一次数据：' : 'Refresh failed; showing the last snapshot: '}{error}</span>
+                            <button
+                                type='button'
+                                aria-label={zh ? '关闭刷新失败提示' : 'Dismiss refresh warning'}
+                                title={zh ? '关闭提示' : 'Dismiss warning'}
+                                onClick={() => setDismissedRefreshWarningKey(refreshWarningKey)}
+                            >×</button>
                         </div>}
                         {renderNode(selectedNode)}
                     </div>
@@ -1552,10 +1648,8 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                     <div>
                         <span>{zh ? '资源监视器' : 'Resource Monitor'}</span>
                         <h2>{selectedNode.name}</h2>
-                        <p>{runtimeCapable
-                            ? (zh ? '运行状态每 5 秒刷新' : 'Runtime refreshes every 5 seconds')
-                            : (zh ? '资源随节点心跳刷新' : 'Resources refresh with the node heartbeat')}
-                        {' · '}{runtimeTime(runtimeSnapshot?.captured_at || selectedNode.resources.captured_at, zh)}</p>
+                        <p>{zh ? '资源随节点心跳刷新' : 'Resources refresh with the node heartbeat'}
+                        {' · '}{runtimeTime(selectedNode.resources.captured_at, zh)}</p>
                     </div>
                     <div className='ComputeClusterHeaderActions'>
                         <button
@@ -1582,10 +1676,9 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                         {([
                             ['performance', zh ? '性能' : 'Performance'],
                             ['processes', zh ? '进程' : 'Processes'],
-                            ['startup', zh ? '启动应用' : 'Startup apps'],
-                            ['services', zh ? '服务' : 'Services'],
                             ['tasks', zh ? '任务' : 'Tasks'],
                             ['conversations', zh ? '对话' : 'Conversations'],
+                            ['startup', zh ? '启动应用' : 'Startup apps'],
                         ] as [MonitorView, string][]).map(([view, label]) => <button
                             type='button'
                             key={view}
@@ -1652,9 +1745,9 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                             className='ControlMonitorProcesses ControlMonitorInventory'
                             aria-label={zh ? '进程清单' : 'Process list'}
                         >
-                            <header className='ControlInventoryHeader'>
+                            <header className='ControlMonitorSearchHeader'>
                                 <h3>{zh ? '进程' : 'Processes'}</h3>
-                                <div>
+                                <div className='ControlMonitorSearchTools'>
                                     <input
                                         type='search'
                                         value={processQuery}
@@ -1710,7 +1803,19 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                             className='ControlMonitorProcesses ControlMonitorInventory'
                             aria-label={zh ? '启动应用清单' : 'Startup app list'}
                         >
-                            <h3>{zh ? `启动应用（${runtimeInventory.startup_services.length}）` : `Startup apps (${runtimeInventory.startup_services.length})`}</h3>
+                            <header className='ControlMonitorSearchHeader'>
+                                <h3>{zh ? '启动应用' : 'Startup apps'}</h3>
+                                <div className='ControlMonitorSearchTools'>
+                                    <input
+                                        type='search'
+                                        value={startupQuery}
+                                        aria-label={zh ? '搜索启动应用' : 'Search startup apps'}
+                                        placeholder={zh ? '搜索名称、标识、状态或类型' : 'Search name, identifier, status, or type'}
+                                        onChange={event => setStartupQuery(event.target.value)}
+                                    />
+                                    <span>{startupQuery.trim() ? `${sortedStartupServices.length}/${runtimeInventory.startup_services.length}` : runtimeInventory.startup_services.length}</span>
+                                </div>
+                            </header>
                             <table>
                                 <thead><tr>{([
                                     ['name', zh ? '名称' : 'Name'],
@@ -1731,8 +1836,8 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                                     </th>;
                                 })}</tr></thead>
                                 <tbody>{sortedStartupServices.map((service, index) => <tr key={`${service.name}-${index}`}>
-                                    <td>{service.display_name}</td>
-                                    <td>{service.name}</td>
+                                    <td>{startupServiceName(service, zh)}</td>
+                                    <td>{startupServiceIdentifier(service)}</td>
                                     <td>{startupStateLabel(service.state, zh)}</td>
                                     <td>{zh ? '自动' : 'Automatic'}</td>
                                 </tr>)}</tbody>
@@ -1752,15 +1857,26 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                             className='ControlMonitorTaskHistory ControlMonitorStandaloneHistory'
                             aria-label={zh ? '提交任务' : 'Submitted tasks'}
                         >
-                                <header>
-                                    <div><h3>{zh ? '提交任务' : 'Submitted tasks'}</h3><p>{zh ? '状态每 2 秒刷新' : 'Status refreshes every 2 seconds'}</p></div>
-                                    <span>{taskHistory.length}</span>
+                                <header className='ControlMonitorSearchHeader'>
+                                    <h3>{zh ? '提交任务' : 'Submitted tasks'}</h3>
+                                    <div className='ControlMonitorSearchTools'>
+                                        <input
+                                            type='search'
+                                            value={taskQuery}
+                                            aria-label={zh ? '搜索任务' : 'Search tasks'}
+                                            placeholder={zh ? '搜索任务编号、名称、设备或状态' : 'Search task ID, name, device, or status'}
+                                            onChange={event => setTaskQuery(event.target.value)}
+                                        />
+                                        <span>{taskQuery.trim() ? `${sortedTaskHistory.length}/${taskHistory.length}` : taskHistory.length}</span>
+                                    </div>
                                 </header>
                                 {taskHistoryError && <p className='ControlMonitorHistoryError' role='status'>{taskHistoryError}</p>}
                                 {taskHistoryLoading && taskHistory.length === 0 ? <div className='ControlMonitorUnavailable'>
                                     <strong>{zh ? '正在读取任务…' : 'Loading tasks…'}</strong>
                                 </div> : taskHistory.length === 0 ? <div className='ControlMonitorUnavailable'>
                                     <strong>{zh ? '暂无提交任务' : 'No submitted tasks'}</strong>
+                                </div> : sortedTaskHistory.length === 0 ? <div className='ControlMonitorUnavailable'>
+                                    <strong>{zh ? '未找到匹配任务' : 'No matching tasks'}</strong>
                                 </div> : <table>
                                     <thead><tr>{([
                                         ['task', zh ? '任务' : 'Task'],
@@ -1780,11 +1896,11 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                                             >{label}<span aria-hidden='true'>{active ? (taskSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button>
                                         </th>;
                                     })}</tr></thead>
-                                    <tbody>{sortedTaskHistory.map(task => <tr key={task.task_id}>
-                                        <td><strong>{taskTypeLabel(task.task_type, zh)}</strong><small>{task.task_id}</small></td>
-                                        <td>{task.node_name}</td>
+                                    <tbody>{sortedTaskHistory.map(task => <tr key={task.taskId}>
+                                        <td><strong>{taskTypeLabel(task.taskType, zh)}</strong><small>{task.taskId}</small></td>
+                                        <td>{task.device}</td>
                                         <td><span className={`ControlTaskHistoryState ${task.state}`}>{taskStateLabel(task.state, zh)}</span></td>
-                                        <td>{runtimeTime(task.updated_at, zh)}</td>
+                                        <td>{runtimeTime(task.updatedAt, zh)}</td>
                                     </tr>)}</tbody>
                                 </table>}
                         </section>}
@@ -1793,18 +1909,31 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                             className='ControlMonitorConversationHistory ControlMonitorStandaloneHistory'
                             aria-label={zh ? '过往对话' : 'Past conversations'}
                         >
-                                <header>
+                                <header className='ControlMonitorSearchHeader'>
                                     <h3>{zh ? '过往对话' : 'Past conversations'}</h3>
-                                    <span>{conversationHistory.length}</span>
+                                    <div className='ControlMonitorSearchTools'>
+                                        <input
+                                            type='search'
+                                            value={conversationQuery}
+                                            aria-label={zh ? '搜索对话' : 'Search conversations'}
+                                            placeholder={zh ? '搜索标题或会话 ID' : 'Search title or conversation ID'}
+                                            onChange={event => setConversationQuery(event.target.value)}
+                                        />
+                                        <span>{conversationQuery.trim()
+                                            ? `${filteredConversationHistory.length}/${conversationHistory.length}`
+                                            : conversationHistory.length}</span>
+                                    </div>
                                 </header>
                                 {conversationHistoryError && <p className='ControlMonitorHistoryError' role='status'>{conversationHistoryError}</p>}
                                 {conversationHistoryLoading && conversationHistory.length === 0 ? <div className='ControlMonitorUnavailable'>
                                     <strong>{zh ? '正在读取对话…' : 'Loading conversations…'}</strong>
                                 </div> : conversationHistory.length === 0 ? <div className='ControlMonitorUnavailable'>
                                     <strong>{zh ? '暂无对话记录' : 'No conversation history'}</strong>
+                                </div> : filteredConversationHistory.length === 0 ? <div className='ControlMonitorUnavailable'>
+                                    <strong>{zh ? '未找到匹配对话' : 'No matching conversations'}</strong>
                                 </div> : <div className='ControlConversationWorkspace'>
                                     <nav className='ControlConversationList' aria-label={zh ? '历史对话列表' : 'Conversation history list'}>
-                                        {conversationHistory.map(conversation => <button
+                                        {filteredConversationHistory.map(conversation => <button
                                             type='button'
                                             key={conversation.id}
                                             aria-current={selectedConversationId === conversation.id ? 'page' : undefined}
@@ -1815,75 +1944,28 @@ export const ControlCenterView: React.FC<IProps> = ({language, imagesData = [], 
                                         </button>)}
                                     </nav>
                                     <div className='ControlConversationMessages' aria-label={zh ? '对话记录' : 'Conversation messages'}>
-                                        {conversationMessages.length > 0 ? conversationMessages.map(message => <article
-                                            key={message.id}
-                                            className={message.role}
-                                        >
-                                            <span>{message.role === 'user' ? (zh ? '我' : 'Me') : message.role === 'assistant' ? 'Agent' : message.role}</span>
-                                            <p>{conversationMessage(message.content)}</p>
-                                        </article>) : <p>{zh ? '暂无消息' : 'No messages'}</p>}
+                                        {conversationMessages.length > 0 ? conversationMessages.map(message => {
+                                            const persistedTaskId = typeof message.metadata.task_id === 'string'
+                                                ? message.metadata.task_id
+                                                : undefined;
+                                            const {body, taskId} = splitTaskIdLine(
+                                                conversationMessage(message.content),
+                                                persistedTaskId,
+                                                message.role === 'assistant' ? message.id : undefined,
+                                                zh,
+                                            );
+                                            return <article key={message.id} className={message.role}>
+                                                <span>{message.role === 'user' ? (zh ? '我' : 'Me') : message.role === 'assistant' ? 'Agent' : message.role}</span>
+                                                <div className='ControlConversationMessageContent'>
+                                                    {message.role === 'assistant' ? markdownMessage(body) : body}
+                                                </div>
+                                                {taskId && <small className='ControlConversationTaskId'>{taskId}</small>}
+                                            </article>;
+                                        }) : <p>{zh ? '暂无消息' : 'No messages'}</p>}
                                     </div>
                                 </div>}
                         </section>}
 
-                        {monitorView === 'services' && (runtimeSnapshot && inspectedService ? <div className='ControlMonitorBody'>
-                            <section className='ControlMonitorProcesses'>
-                                <h3>{zh ? '受管服务' : 'Managed services'}</h3>
-                                <table>
-                                    <thead><tr>
-                                        <th>{zh ? '名称' : 'Name'}</th>
-                                        <th>{zh ? '状态' : 'Status'}</th>
-                                        <th>PID</th>
-                                        <th>{zh ? '运行时间' : 'Uptime'}</th>
-                                    </tr></thead>
-                                    <tbody>{managedServices.map(service => <tr
-                                        key={service.service_id}
-                                        className={service.service_id === inspectedService.service_id ? 'selected' : ''}
-                                    >
-                                        <td><button type='button' onClick={() => setInspectedServiceId(service.service_id)}>
-                                            <span className={`ControlStatusDot ${runtimeTone(service.state)}`} aria-hidden='true'/>{service.name}
-                                        </button></td>
-                                        <td>{runtimeStateLabel(service.state, zh)}</td>
-                                        <td>{service.process?.pid ?? '—'}</td>
-                                        <td>{runtimeDuration(service.uptime_seconds, zh)}</td>
-                                    </tr>)}</tbody>
-                                </table>
-                            </section>
-
-                            <aside className='ControlMonitorInspector'>
-                                <span>{runtimeStateLabel(inspectedService.state, zh)}</span>
-                                <h3>{inspectedService.name}</h3>
-                                <dl>
-                                    <div><dt>{zh ? '进程' : 'Process'}</dt><dd>PID {inspectedService.process?.pid ?? '—'} · {inspectedProcessState}</dd></div>
-                                    <div><dt>{zh ? '接口健康' : 'Endpoint health'}</dt><dd>{inspectedService.health.status_code === null ? 'HTTP —' : `HTTP ${inspectedService.health.status_code}`} · {inspectedService.health.latency_ms === null ? (zh ? '延迟未上报' : 'Latency not reported') : `${inspectedService.health.latency_ms} ms`}</dd></div>
-                                    <div><dt>{zh ? '版本' : 'Version'}</dt><dd>{inspectedService.version || '—'}</dd></div>
-                                    <div><dt>{zh ? '任务执行器' : 'Task executor'}</dt><dd>{taskExecutor ? runtimeStateLabel(taskExecutor.state, zh) : (zh ? '未上报' : 'Not reported')}</dd></div>
-                                    <div><dt>{zh ? '任务计数' : 'Task counts'}</dt><dd>{Object.entries(taskExecutor?.task_counts || inspectedService.task_counts || {}).map(([state, count]) => `${taskStateLabel(state, zh)} ${count}`).join(' · ') || (zh ? '未上报' : 'Not reported')}</dd></div>
-                                </dl>
-                                <div className='ControlRuntimeEvents'>
-                                    <strong>{zh ? '最近事件' : 'Recent events'}</strong>
-                                    {runtimeEventsError
-                                        ? <p role='status'>{zh ? `服务日志暂不可用：${runtimeEventsError}` : `Service log unavailable: ${runtimeEventsError}`}</p>
-                                        : inspectedEvents.length > 0
-                                            ? <ul>{inspectedEvents.map(event => <li className={event.level} key={event.cursor}>
-                                                <span>{runtimeTime(event.created_at, zh)} · {event.event_type}</span>
-                                                <small>{event.message}</small>
-                                            </li>)}</ul>
-                                            : <p>{zh ? '暂无结构化事件' : 'No structured events'}</p>}
-                                </div>
-                            </aside>
-                        </div> : <div className='ControlMonitorUnavailable'>
-                            <strong>{runtimeError
-                                ? (zh ? '受管服务暂不可用' : 'Managed services are unavailable')
-                                : runtimeCapable
-                                    ? runtimeSnapshot
-                                        ? (zh ? '节点未上报受管服务' : 'The node reported no managed services')
-                                        : (zh ? '正在读取受管服务…' : 'Loading managed services…')
-                                    : (zh ? '节点版本暂不支持受管服务详情' : 'This node does not support managed service details yet')}</strong>
-                            <span>{runtimeError || (!runtimeCapable
-                                ? (zh ? '升级节点程序后可查看服务、PID 和事件。' : 'Upgrade the node software to view services, PIDs, and events.')
-                                : '')}</span>
-                        </div>)}
                     </div>
                 </div>
             </section>
@@ -1896,4 +1978,6 @@ const mapStateToProps = (state: AppState) => ({
     imagesData: state.labels.imagesData,
 });
 
-export default connect(mapStateToProps)(ControlCenterView);
+export default connect(mapStateToProps, {
+    updateActivePopupTypeAction: updateActivePopupType,
+})(ControlCenterView);

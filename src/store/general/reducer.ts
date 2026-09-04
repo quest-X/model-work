@@ -8,6 +8,9 @@ import {Language} from '../../data/LanguageConfig';
 const initialState: GeneralState = {
     windowSize: null,
     activePopupType: null,
+    activePopupNodeId: null,
+    activePopupNodeName: null,
+    activePopupNodeRemote: false,
     customCursorStyle: CustomCursorStyle.DEFAULT,
     activeContext: null,
     preventCustomCursor: false,
@@ -45,10 +48,18 @@ export function generalReducer(
             }
         }
         case Action.UPDATE_ACTIVE_POPUP_TYPE: {
-            if (state.activePopupType === action.payload.activePopupType) return state;
+            if (
+                state.activePopupType === action.payload.activePopupType
+                && state.activePopupNodeId === action.payload.activePopupNodeId
+                && state.activePopupNodeName === action.payload.activePopupNodeName
+                && state.activePopupNodeRemote === action.payload.activePopupNodeRemote
+            ) return state;
             return {
                 ...state,
-                activePopupType: action.payload.activePopupType
+                activePopupType: action.payload.activePopupType,
+                activePopupNodeId: action.payload.activePopupNodeId,
+                activePopupNodeName: action.payload.activePopupNodeName,
+                activePopupNodeRemote: action.payload.activePopupNodeRemote,
             }
         }
         case Action.UPDATE_CUSTOM_CURSOR_STYLE: {

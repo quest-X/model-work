@@ -9,36 +9,34 @@ import {
 interface ComputeTerminalPanelProps {
     zh: boolean;
     preferredNodeId?: string;
+    preferredTransport?: 'lan' | 'tailscale';
+    autoConnect?: boolean;
 }
 
 const targetReason = (target: ComputeTerminalTarget, zh: boolean): string => {
-    if (target.reason === 'node_offline') return zh ? '节点离线' : 'Node offline';
-    if (target.reason === 'ssh_unavailable') return zh ? 'SSH 未就绪' : 'SSH unavailable';
-    return zh ? '可连接' : 'Ready';
+    return target.available ? (zh ? '正常' : 'Normal') : (zh ? '故障' : 'Fault');
 };
 
 const terminalStateLabel = (session: ComputeTerminalSession | null, zh: boolean): string => {
-    if (!session) return zh ? '未连接' : 'Disconnected';
-    if (session.state === 'failed') return zh ? '连接失败' : 'Failed';
-    if (session.state === 'closed') return zh ? '已断开' : 'Closed';
-    const state = session.state === 'running'
-        ? (zh ? '已连接' : 'Connected')
-        : (zh ? '连接中' : 'Connecting');
-    if (session.transport === 'lan') return `${zh ? '局域网 SSH' : 'LAN SSH'} · ${state}`;
-    if (session.transport === 'tailscale') return `Tailscale · ${state}`;
+    const state = session?.state === 'running' ? (zh ? '正常' : 'Normal') : (zh ? '故障' : 'Fault');
+    if (session?.transport === 'lan') return `${zh ? '局域网 SSH' : 'LAN SSH'} · ${state}`;
+    if (session?.transport === 'tailscale') return `Tailscale · ${state}`;
     return state;
 };
 
 const terminalTransportClass = (session: ComputeTerminalSession | null): string => {
     if (session?.transport === 'lan') return 'lan';
     if (session?.transport) return 'remote';
-    return 'unknown';
+    return '';
 };
 
 // The terminal surface intentionally owns one bounded connection lifecycle.
 // eslint-disable-next-line complexity
-export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh, preferredNodeId}) => {
+export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({
+    zh, preferredNodeId, preferredTransport, autoConnect = false,
+}) => {
     const [targets, setTargets] = useState<ComputeTerminalTarget[]>([]);
+    const [targetsReady, setTargetsReady] = useState(false);
     const [selectedNode, setSelectedNode] = useState('');
     const [session, setSession] = useState<ComputeTerminalSession | null>(null);
     const [output, setOutput] = useState('');
@@ -48,6 +46,7 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh, p
     const cursorRef = useRef(0);
     const sessionIdRef = useRef('');
     const outputRef = useRef<HTMLPreElement | null>(null);
+    const autoConnectStartedRef = useRef(false);
 
     const refreshTargets = useCallback(async (signal?: AbortSignal) => {
         try {
@@ -65,6 +64,7 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh, p
                 setOutput(restored.output);
                 setSession(restored);
             }
+            setTargetsReady(true);
             setError('');
         } catch (reason) {
             if ((reason as {name?: string})?.name !== 'AbortError') {
@@ -121,7 +121,9 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh, p
         if (!selectedNode || busy) return;
         setBusy(true);
         try {
-            const next = await ComputeClusterService.startTerminal(selectedNode);
+            const next = preferredTransport
+                ? await ComputeClusterService.startTerminal(selectedNode, preferredTransport)
+                : await ComputeClusterService.startTerminal(selectedNode);
             cursorRef.current = next.cursor;
             sessionIdRef.current = next.session_id;
             setOutput(next.output || '');
@@ -132,7 +134,13 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh, p
         } finally {
             setBusy(false);
         }
-    }, [busy, selectedNode]);
+    }, [busy, preferredTransport, selectedNode]);
+
+    useEffect(() => {
+        if (!autoConnect || autoConnectStartedRef.current || !targetsReady || !selectedNode || session) return;
+        autoConnectStartedRef.current = true;
+        void connect();
+    }, [autoConnect, connect, selectedNode, session, targetsReady]);
 
     const send = useCallback(async (event: FormEvent) => {
         event.preventDefault();
@@ -169,13 +177,12 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh, p
     return <section className='ComputeTerminalPanel'>
         <div className='ComputeTerminalHeading'>
             <div>
-                <span>{zh ? '阶段 8 · 受控 SSH' : 'Phase 8 · Controlled SSH'}</span>
                 <h3>{zh ? '节点终端连接' : 'Node terminal connection'}</h3>
                 <p>{zh
                     ? '连接目标与认证材料由 Mac Client 保管，不通过网页配置或接口返回；终端输出按原样展示。'
                     : 'The Mac Client owns destinations and credentials; they are never configured or returned by the web API, while terminal output is shown verbatim.'}</p>
             </div>
-            <div className={`ComputeTerminalState ${session?.state || 'idle'} ${terminalTransportClass(session)}`}>
+            <div className={`ComputeTerminalState ${session?.state === 'running' ? 'running' : 'failed'} ${terminalTransportClass(session)}`}>
                 <i/><strong>{terminalStateLabel(session, zh)}</strong>
             </div>
         </div>
@@ -199,8 +206,8 @@ export const ComputeTerminalPanel: React.FC<ComputeTerminalPanelProps> = ({zh, p
 
         {error && <div className='ComputeTerminalError' role='alert'>{error}</div>}
         <pre className='ComputeTerminalScreen' ref={outputRef} aria-label={zh ? '终端输出' : 'Terminal output'}>{output || (zh
-            ? '选择在线节点并连接。山东节点离线时不可选，恢复在线后会自动变为可连接。'
-            : 'Choose an online node. Offline nodes become available automatically after reconnecting.')}</pre>
+            ? '选择正常节点并连接。故障节点不可选，恢复正常后会自动变为可连接。'
+            : 'Choose a normal node. Fault nodes become available after returning to normal.')}</pre>
         <form className='ComputeTerminalInput' onSubmit={event => void send(event)}>
             <span aria-hidden='true'>$</span>
             <input

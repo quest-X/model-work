@@ -116,6 +116,7 @@ describe('TopNavigationBar compute-cluster entry', () => {
 
         fireEvent.click(screen.getByText('拓展引擎'));
         await waitFor(() => expect(screen.getByText('计算群')).toBeInTheDocument());
+        expect(screen.getByText('透视').closest('.DropDownMenuContentOption')).toHaveClass('divider');
         fireEvent.click(screen.getByText('计算群'));
 
         expect(updatePopup).toHaveBeenCalledWith(PopupWindowType.COMPUTE_CLUSTER);
@@ -142,6 +143,7 @@ describe('TopNavigationBar extension tool entries', () => {
         />);
 
         fireEvent.click(screen.getByText('拓展引擎'));
+        expect(screen.getByText('透视').closest('.DropDownMenuContentOption')).not.toHaveClass('divider');
         fireEvent.click(screen.getByText('视觉检索'));
         expect(updatePopup).toHaveBeenLastCalledWith(PopupWindowType.L2G_RETRIEVAL);
 

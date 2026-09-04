@@ -184,7 +184,7 @@ const agentLabel = (
 };
 
 const availabilityLabel = (available: boolean, zh: boolean): string =>
-    available ? (zh ? '可用' : 'Available') : (zh ? '不可用' : 'Unavailable');
+    available ? (zh ? '正常' : 'Normal') : (zh ? '故障' : 'Fault');
 
 const sensorKindLabel = (entity: ComputeResourceGraphEntity, zh: boolean): string => {
     const classification = deviceClass(entity);
@@ -195,13 +195,8 @@ const sensorKindLabel = (entity: ComputeResourceGraphEntity, zh: boolean): strin
 };
 
 const deviceStatusLabel = (status: string | null | undefined, zh: boolean): string => {
-    const labels: Record<string, [string, string]> = {
-        registered: ['已注册', 'Registered'],
-        online: ['在线', 'Online'],
-        offline: ['离线', 'Offline'],
-        unavailable: ['不可用', 'Unavailable'],
-    };
-    return (labels[status || ''] || [status || '未知', status || 'Unknown'])[zh ? 0 : 1];
+    const healthy = ['online', 'available', 'healthy'].includes(status || '');
+    return availabilityLabel(healthy, zh);
 };
 
 // The operations canvas intentionally keeps all bilingual visual and hover states in one component.
@@ -286,15 +281,15 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                 <span>{zh ? '地域拓扑 · 悬浮查看 / 双击固定' : 'Regional topology · Hover / double-click to pin'}</span>
                 <h3>{zh ? '计算群地域 Graph' : 'Compute cluster regional graph'}</h3>
                 <p>{zh
-                    ? '计算群按地域归组计算节点，节点再连接传感器；SSH、公网、Tailscale 和 agents 收进节点就近信息卡。'
-                    : 'The cluster groups compute nodes by region, then connects their sensors. SSH, public egress, Tailscale, and agents appear beside each node.'}</p>
+                    ? '计算群按地域归组计算节点，节点再连接传感器；SSH、公网、Tailscale 和任务执行器收进节点就近信息卡。'
+                    : 'The cluster groups compute nodes by region, then connects their sensors. SSH, public egress, Tailscale, and task workers appear beside each node.'}</p>
             </div>
             <div className='ComputeKnowledgeStats'>
                 <div><strong>{topology.regions.length}</strong><span>{zh ? '地域' : 'regions'}</span></div>
                 <div><strong>{graphNodes.length}</strong><span>{zh ? '计算节点' : 'compute nodes'}</span></div>
-                <div className='online'><strong>{graph.summary.online_nodes}</strong><span>{zh ? '在线' : 'online'}</span></div>
-                <div className='offline'><strong>{offlineNodes}</strong><span>{zh ? '离线' : 'offline'}</span></div>
-                <div><strong>{sshReachableNodes}</strong><span>{zh ? 'SSH 可连接' : 'SSH reachable'}</span></div>
+                <div className='online'><strong>{graph.summary.online_nodes}</strong><span>{zh ? '正常' : 'Normal'}</span></div>
+                <div className='offline'><strong>{offlineNodes}</strong><span>{zh ? '故障' : 'Fault'}</span></div>
+                <div><strong>{sshReachableNodes}</strong><span>{zh ? 'SSH 正常' : 'SSH Normal'}</span></div>
                 <div><strong>{sensors.length}</strong><span>{zh ? '传感器' : 'sensors'}</span></div>
             </div>
         </div>
@@ -324,7 +319,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                 >
                     <span>{zh ? '地域' : 'Region'}</span>
                     <strong>{zh ? region.regionName : region.regionId}</strong>
-                    <small>{region.onlineMemberCount}/{region.memberCount} {zh ? '节点在线' : 'nodes online'}</small>
+                    <small>{region.onlineMemberCount}/{region.memberCount} {zh ? '正常节点' : 'Normal nodes'}</small>
                 </div>)}
                 <svg className='ComputeGraphEdges' viewBox='0 0 1000 440' preserveAspectRatio='none' data-testid='resource-node-link-graph' aria-hidden='true'>
                     {visibleRelations.map(relation => {
@@ -429,8 +424,8 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                                 : `Compute node ${codes.get(inspectedEntity.entity_id)} · Operations${pinnedEntityId === inspectedEntity.entity_id ? ' · Pinned (double-click node or click blank space to unpin)' : ''}`}</span>
                             <strong>{inspectedEntity.label}</strong>
                             <small className={node?.online ? 'online' : 'offline'}>{node?.online
-                                ? `${zh ? '在线 · 心跳' : 'Online · heartbeat'} ${heartbeatLabel(node.heartbeat_age_seconds, zh)}`
-                                : `${zh ? '离线 · 最后心跳' : 'Offline · last heartbeat'} ${heartbeatLabel(node?.heartbeat_age_seconds, zh)}`}</small>
+                                ? `${zh ? '正常 · 心跳' : 'Normal · heartbeat'} ${heartbeatLabel(node.heartbeat_age_seconds, zh)}`
+                                : `${zh ? '故障 · 最后心跳' : 'Fault · last heartbeat'} ${heartbeatLabel(node?.heartbeat_age_seconds, zh)}`}</small>
                             <div className='ComputeGraphHoverRoutes'>
                                 <div className={sshAvailable ? 'available' : 'unavailable'}>
                                     <span>{zh ? 'SSH 通路' : 'SSH route'}</span><strong>{availabilityLabel(sshAvailable, zh)}</strong>
@@ -446,9 +441,9 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                                 </div>
                             </div>
                             <div className='ComputeGraphHoverAgents'>
-                                <span>{zh ? '可调用 agents' : 'Callable agents'}</span>
+                                <span>{zh ? '可调用任务执行器' : 'Callable task workers'}</span>
                                 {agents.length ? <div>{agents.map(agent => <em key={agent.entity_id}>{codes.get(agent.entity_id)} · {agentLabel(agent, zh)}</em>)}</div>
-                                    : <small>{zh ? '暂无可调用 agent' : 'No callable agent'}</small>}
+                                    : <small>{zh ? '暂无可调用任务执行器' : 'No callable task worker'}</small>}
                             </div>
                         </>;
                     })() : <>

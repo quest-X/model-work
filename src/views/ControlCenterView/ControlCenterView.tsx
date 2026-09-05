@@ -13,6 +13,8 @@ import {
     ComputeResourceGraph,
     ComputeRuntimeInventory,
     ComputeClusterService,
+    cameraStreamingAvailable,
+    computeNodeNormal,
     computeSshAvailability,
 } from '../../services/ComputeClusterService';
 import {
@@ -20,14 +22,14 @@ import {
     AgentConversation,
     AgentConversationMessage,
 } from '../../services/AgentChatService';
-import {CameraResourceService} from '../../services/CameraResourceService';
 import {AppState} from '../../store';
-import {ImageData} from '../../store/labels/types';
 import {SideNavigationBar} from '../EditorView/SideNavigationBar/SideNavigationBar';
 import {VerticalEditorButton} from '../EditorView/VerticalEditorButton/VerticalEditorButton';
 import {markdownMessage, splitTaskIdLine} from '../Common/AgentSideChat/AgentSideChat';
 import {ComputeClusterPopup} from '../PopupView/ComputeClusterPopup/ComputeClusterPopup';
 import {DeviceManagementPopup} from '../PopupView/DeviceManagementPopup/DeviceManagementPopup';
+import {EdgeDeviceTerminalPopup} from '../PopupView/EdgeDeviceTerminalPopup/EdgeDeviceTerminalPopup';
+import {CameraLiveViewPopup} from '../PopupView/CameraLiveViewPopup/CameraLiveViewPopup';
 import {ComputeTerminalPanel} from '../PopupView/ComputeClusterPopup/ComputeTerminalPanel';
 import {ResourceKnowledgeGraph} from '../PopupView/ComputeClusterPopup/ResourceKnowledgeGraph';
 import '../EditorView/EditorContainer/EditorContainer.scss';
@@ -40,8 +42,6 @@ const ClusterGeographicMap = React.lazy(() => import('./ClusterGeographicMap')
 
 interface IProps {
     language: Language;
-    imagesData?: ImageData[];
-    onCameraOpened?: () => void;
     updateActivePopupTypeAction?: (
         activePopupType: PopupWindowType,
         activePopupNodeId?: string | null,
@@ -50,7 +50,11 @@ interface IProps {
     ) => void;
 }
 
-type Tone = 'healthy' | 'offline';
+type Tone = 'healthy' | 'warning' | 'offline';
+
+const toneLabel = (tone: Tone, zh: boolean): string => tone === 'healthy'
+    ? zh ? '正常' : 'Normal'
+    : zh ? '故障' : 'Fault';
 type SidePanel = 'machines' | 'features';
 type Workspace = 'node' | 'network' | 'terminal' | 'groups';
 type MachineIconKind = 'jetson' | 'windows' | 'linux' | 'macos' | 'computer';
@@ -235,9 +239,7 @@ const processStateLabel = (
 const startupStateLabel = (
     state: ComputeRuntimeInventory['startup_services'][number]['state'],
     zh: boolean,
-): string => state === 'running'
-    ? (zh ? '正常' : 'Normal')
-    : (zh ? '故障' : 'Fault');
+): string => toneLabel(state === 'running' ? 'healthy' : 'offline', zh);
 
 const isNodeService = (service: ComputeRuntimeInventory['startup_services'][number]): boolean =>
     service.name === 'ModelWorkNodeAgent' || service.display_name === 'Model Work Node Agent';
@@ -304,31 +306,36 @@ const dependencyTone = (state: ComputeNetworkDependency['state']): Tone => state
     ? 'healthy'
     : 'offline';
 
-const dependencyLabel = (state: ComputeNetworkDependency['state'], zh: boolean): string => state === 'healthy'
-    ? zh ? '正常' : 'Normal'
-    : zh ? '故障' : 'Fault';
+const dependencyLabel = (state: ComputeNetworkDependency['state'], zh: boolean): string =>
+    toneLabel(dependencyTone(state), zh);
 
 const machineTone = (node: ComputeClusterNode): Tone => {
     if (!node.online) return 'offline';
-    const ssh = computeSshAvailability(node);
-    const hasFault = (!ssh.lan && !ssh.tailscale)
-        || node.device_inventory.state === 'unavailable'
-        || node.device_inventory.devices.some(device => device.status === 'offline' || device.status === 'unavailable');
-    return hasFault ? 'offline' : 'healthy';
+    return computeNodeNormal(node) ? 'healthy' : 'warning';
 };
 
-const machineStateLabel = (tone: Tone, zh: boolean): string => tone === 'healthy'
-    ? zh ? '正常' : 'Normal'
-    : zh ? '故障' : 'Fault';
+const cameraTone = (status: ComputeManagedDevice['status']): Tone =>
+    status === 'registered' || status === 'online' ? 'healthy' : 'offline';
 
-const cameraTone = (status: ComputeManagedDevice['status']): Tone => status === 'online' ? 'healthy' : 'offline';
+const cameraLabel = (status: ComputeManagedDevice['status'], zh: boolean): string =>
+    toneLabel(cameraTone(status), zh);
 
-const cameraLabel = (status: ComputeManagedDevice['status'], zh: boolean): string => ({
-    registered: zh ? '故障' : 'Fault',
-    online: zh ? '正常' : 'Normal',
-    offline: zh ? '故障' : 'Fault',
-    unavailable: zh ? '故障' : 'Fault',
-})[status];
+const cameraStreamUnavailableTitle = (
+    node: ComputeClusterNode,
+    camera: ComputeManagedDevice,
+    zh: boolean,
+): string | undefined => {
+    if (!node.online) return zh
+        ? '节点当前故障，恢复正常后才能打开实时画面'
+        : 'The node must return to normal before live view can be opened';
+    if (cameraTone(camera.status) !== 'healthy') return zh
+        ? '相机当前故障，恢复正常后才能打开实时画面'
+        : 'The camera must return to normal before live view can be opened';
+    if (!cameraStreamingAvailable(camera)) return zh
+        ? '此相机不支持实时画面（需要 camera.stream.v1）'
+        : 'This camera does not support live view (camera.stream.v1 is required)';
+    return undefined;
+};
 
 const NODE_TAG_LIMIT = 1;
 const NODE_TAG_MAX_LENGTH = 32;
@@ -360,8 +367,6 @@ const saveNodeTags = (nodeId: string, tags: string[]): void => {
 // eslint-disable-next-line complexity
 export const ControlCenterView: React.FC<IProps> = ({
     language,
-    imagesData = [],
-    onCameraOpened,
     updateActivePopupTypeAction,
 }) => {
     const zh = language === Language.CHINESE;
@@ -385,6 +390,8 @@ export const ControlCenterView: React.FC<IProps> = ({
     const [monitorMaximized, setMonitorMaximized] = useState(false);
     const [monitorView, setMonitorView] = useState<MonitorView>('performance');
     const [deviceManagementTab, setDeviceManagementTab] = useState<'camera' | 'edge' | null>(null);
+    const [cameraViewerId, setCameraViewerId] = useState('');
+    const [edgeTerminalDeviceId, setEdgeTerminalDeviceId] = useState('');
     const [processQuery, setProcessQuery] = useState('');
     const [processSort, setProcessSort] = useState<{key: ProcessSortKey; direction: SortDirection}>({
         key: 'memory',
@@ -411,8 +418,6 @@ export const ControlCenterView: React.FC<IProps> = ({
     const [conversationHistoryError, setConversationHistoryError] = useState('');
     const [resourceHistory, setResourceHistory] = useState<ResourceSample[]>([]);
     const [activeMetricId, setActiveMetricId] = useState<ResourceMetricId>('memory');
-    const [cameraError, setCameraError] = useState('');
-    const [openingCameraId, setOpeningCameraId] = useState('');
     const [queriedAt, setQueriedAt] = useState<Date | null>(null);
     const [nodeTags, setNodeTags] = useState<string[]>([]);
     const [tagDraft, setTagDraft] = useState('');
@@ -513,6 +518,16 @@ export const ControlCenterView: React.FC<IProps> = ({
         };
     }, [refresh]);
 
+    useEffect(() => {
+        const refreshDevices = () => void refresh();
+        window.addEventListener('opensight:edge-device-updated', refreshDevices);
+        window.addEventListener('opensight:camera-resource-updated', refreshDevices);
+        return () => {
+            window.removeEventListener('opensight:edge-device-updated', refreshDevices);
+            window.removeEventListener('opensight:camera-resource-updated', refreshDevices);
+        };
+    }, [refresh]);
+
     useLayoutEffect(() => {
         setNodeTags(selectedNodeId ? loadNodeTags(selectedNodeId) : []);
         setTagDraft('');
@@ -593,6 +608,7 @@ export const ControlCenterView: React.FC<IProps> = ({
         }] : [];
     const currentGroupTone: Tone = currentGroup?.state === 'available' ? 'healthy' : 'offline';
     const normalCount = nodes.filter(node => machineTone(node) === 'healthy').length;
+    const allNodesNormal = nodes.length > 0 && normalCount === nodes.length;
     const terminalAvailable = Boolean(selectedNode?.online && selectedNode.network.ssh_available);
     const toolbarTone: Tone | null = workspace === 'groups'
         ? visibleGroups.length ? currentGroupTone : null
@@ -602,7 +618,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                 ? (terminalAvailable ? 'healthy' : 'offline')
                 : selectedNode
                     ? machineTone(selectedNode)
-                    : nodes.length ? (normalCount ? 'healthy' : 'offline') : null;
+                    : nodes.length ? (allNodesNormal ? 'healthy' : 'offline') : null;
     const refreshWarningKey = error ? `nodes:${error}` : graphError ? `graph:${graphError}` : '';
 
     useEffect(() => {
@@ -855,20 +871,6 @@ export const ControlCenterView: React.FC<IProps> = ({
         saveNodeTags(nodeId, next);
     };
 
-    const openCamera = async (node: ComputeClusterNode, camera: ComputeManagedDevice) => {
-        if (!node.online || camera.status !== 'online' || openingCameraId) return;
-        setOpeningCameraId(camera.device_id);
-        setCameraError('');
-        try {
-            await CameraResourceService.openCluster(node.node_id, node.name, camera, imagesData);
-            onCameraOpened?.();
-        } catch (reason) {
-            setCameraError(reason instanceof Error ? reason.message : String(reason));
-        } finally {
-            if (mounted.current) setOpeningCameraId('');
-        }
-    };
-
     // eslint-disable-next-line complexity
     const renderMachineList = () => <aside className='ControlMachinePanel' aria-label={zh ? '机器列表' : 'Machine list'}>
         <div className='ControlMachineOrganizer' aria-label={zh ? '节点整理' : 'Organize nodes'}>
@@ -915,7 +917,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                     <strong>{zh ? '总览' : 'Overview'}</strong>
                     <small>{zh ? '地图 / 图谱' : 'Map / graph'}</small>
                 </span>
-                <span className={`ControlMachineState ${normalCount ? 'healthy' : 'offline'}`}>
+                <span className={`ControlMachineState ${allNodesNormal ? 'healthy' : 'offline'}`}>
                     {normalCount} / {nodes.length}
                 </span>
             </button>
@@ -943,7 +945,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                             <small>{zh ? '活跃于 ' : 'Active '}{lastSeen(node.heartbeat_age_seconds, zh)}</small>
                         </span>
                         <span className={`ControlMachineState ${tone}`}>
-                            {machineStateLabel(tone, zh)}
+                            {toneLabel(tone, zh)}
                         </span>
                     </button>;
                 })}
@@ -986,7 +988,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                     <small>{zh ? '资产台账 · 扫描计划' : 'Inventory · scan schedules'}</small>
                 </span>
                 <span className={`ControlMachineState ${error ? 'offline' : 'healthy'}`}>
-                    {error ? (zh ? '故障' : 'Fault') : (zh ? '正常' : 'Normal')}
+                    {toneLabel(error ? 'offline' : 'healthy', zh)}
                 </span>
             </button>
             <button
@@ -1005,7 +1007,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                     <small>{zh ? '受控 SSH · 输入指令' : 'Controlled SSH · command input'}</small>
                 </span>
                 <span className={`ControlMachineState ${terminalAvailable ? 'healthy' : 'offline'}`}>
-                    {terminalAvailable ? (zh ? '正常' : 'Normal') : (zh ? '故障' : 'Fault')}
+                    {toneLabel(terminalAvailable ? 'healthy' : 'offline', zh)}
                 </span>
             </button>
         </div>
@@ -1042,9 +1044,7 @@ export const ControlCenterView: React.FC<IProps> = ({
     // eslint-disable-next-line complexity
     const renderResourceMonitorCard = () => {
         const monitorTone = selectedNode?.online ? 'healthy' : 'offline';
-        const monitorStatus = selectedNode?.online
-            ? (zh ? '正常' : 'Normal')
-            : (zh ? '故障' : 'Fault');
+        const monitorStatus = toneLabel(monitorTone, zh);
         return <button
             type='button'
             className='ControlServiceCard ControlRuntimeService'
@@ -1072,7 +1072,18 @@ export const ControlCenterView: React.FC<IProps> = ({
             ? 'healthy' : 'unavailable';
         const cameras = node.device_inventory.devices.filter(device => device.kind === 'camera');
         const edgeDevices = lanAssets.filter(asset =>
-            asset.node_id === node.node_id && asset.device_kind === 'edge_compute'
+            asset.node_id === node.node_id
+            && asset.device_kind === 'edge_compute'
+        );
+        const cameraConnectCapable = Boolean(
+            node.online && node.capabilities?.includes('task.camera.connect.v1'),
+        );
+        const cameraEntryCapable = Boolean(node.online && (
+            node.capabilities?.includes('task.camera.connect.v1')
+            || node.capabilities?.includes('task.camera.discover.v1')
+        ));
+        const jetsonConnectCapable = Boolean(
+            node.online && node.capabilities?.includes('control.jetson.connect.v1'),
         );
         const remoteLan = node.control_transport === 'tailscale';
         const hardwareModel = node.resources.hardware_model?.trim();
@@ -1222,6 +1233,12 @@ export const ControlCenterView: React.FC<IProps> = ({
                                 type='button'
                                 className='ControlDeviceCountButton'
                                 aria-label={zh ? '添加局域网摄像头' : 'Add LAN camera'}
+                                disabled={!cameraConnectCapable}
+                                title={!node.online
+                                    ? (zh ? '节点当前故障，恢复正常后才能连接相机' : 'The node must return to normal before a camera can be connected')
+                                    : !cameraConnectCapable
+                                        ? (zh ? '此节点不支持连接相机（需要 task.camera.connect.v1）' : 'This node cannot connect cameras (task.camera.connect.v1 is required)')
+                                        : (zh ? '连接局域网摄像头' : 'Connect a LAN camera')}
                                 onClick={() => updateActivePopupTypeAction?.(
                                     PopupWindowType.CAMERA_CONNECT,
                                     node.node_id,
@@ -1235,15 +1252,17 @@ export const ControlCenterView: React.FC<IProps> = ({
                                 type='button'
                                 className='ControlCameraCard'
                                 key={camera.device_id}
-                                disabled={!node.online || camera.status !== 'online' || Boolean(openingCameraId)}
+                                disabled={!node.online
+                                    || !cameraStreamingAvailable(camera)}
                                 aria-label={zh ? `打开${camera.name}实时画面` : `Open live view for ${camera.name}`}
-                                onClick={() => void openCamera(node, camera)}
+                                title={cameraStreamUnavailableTitle(node, camera, zh)}
+                                onClick={() => setCameraViewerId(camera.device_id)}
                             >
                                 <div className='ControlCameraIcon' aria-hidden='true'>◉</div>
                                 <div className='ControlCameraIdentity'>
                                     <strong>{camera.name}</strong>
                                     <small>{camera.model || camera.device_id}</small>
-                                    <span className={cameraTone(camera.status)}><i/> {openingCameraId === camera.device_id ? (zh ? '正在打开…' : 'Opening…') : cameraLabel(camera.status, zh)}</span>
+                                    <span className={cameraTone(camera.status)}><i/> {cameraLabel(camera.status, zh)}</span>
                                 </div>
                                 <div className='ControlCameraChannels'>
                                     <strong>{camera.channels}</strong>
@@ -1254,10 +1273,12 @@ export const ControlCenterView: React.FC<IProps> = ({
                                 type='button'
                                 className='ControlEmptyBlock ControlRelatedDeviceAdd'
                                 aria-label={zh ? '发现并添加局域网摄像头' : 'Discover and add LAN cameras'}
-                                title={node.online
-                                    ? (zh ? '打开拓展引擎的连接相机' : 'Open extension-engine camera connection')
-                                    : (zh ? '节点故障，恢复正常后才能扫描局域网' : 'The node must return to normal before scanning its LAN')}
-                                disabled={!node.online}
+                                title={!node.online
+                                    ? (zh ? '节点当前故障，恢复正常后才能发现或连接相机' : 'The node must return to normal before cameras can be discovered or connected')
+                                    : !cameraEntryCapable
+                                        ? (zh ? '此节点不支持发现或连接相机（需要 task.camera.discover.v1 或 task.camera.connect.v1）' : 'This node cannot discover or connect cameras (task.camera.discover.v1 or task.camera.connect.v1 is required)')
+                                        : (zh ? '打开拓展引擎的连接相机' : 'Open extension-engine camera connection')}
+                                disabled={!cameraEntryCapable}
                                 onClick={() => updateActivePopupTypeAction?.(
                                     PopupWindowType.CAMERA_CONNECT,
                                     node.node_id,
@@ -1266,7 +1287,6 @@ export const ControlCenterView: React.FC<IProps> = ({
                                 )}
                             >{zh ? '＋ 连接局域网相机' : '+ Connect LAN camera'}</button>}
                         </div>
-                        {cameraError && <div className='ControlCameraError' role='status'>{cameraError}</div>}
                     </div>
                     <div className='ControlRelatedDeviceGroup'>
                         <div className='ControlSubsectionHeading'>
@@ -1275,7 +1295,12 @@ export const ControlCenterView: React.FC<IProps> = ({
                                 type='button'
                                 className='ControlDeviceCountButton'
                                 aria-label={zh ? '添加设备' : 'Add device'}
-                                title={zh ? '添加设备' : 'Add device'}
+                                disabled={!jetsonConnectCapable}
+                                title={!node.online
+                                    ? (zh ? '节点当前故障，恢复正常后才能连接设备' : 'The node must return to normal before a device can be connected')
+                                    : !jetsonConnectCapable
+                                        ? (zh ? '此节点不支持 SSH 设备认证' : 'This node cannot authenticate SSH devices')
+                                        : (zh ? '添加设备' : 'Add device')}
                                 onClick={() => updateActivePopupTypeAction?.(
                                     PopupWindowType.JETSON_CONNECT,
                                     node.node_id,
@@ -1285,24 +1310,36 @@ export const ControlCenterView: React.FC<IProps> = ({
                             >＋</button>}
                         </div>
                         <div className='ControlCameraGrid'>
-                            {edgeDevices.map(device => <div className='ControlCameraCard' key={device.asset_id}>
+                            {edgeDevices.map(device => <button
+                                type='button'
+                                className='ControlCameraCard'
+                                key={device.asset_id}
+                                aria-label={zh
+                                    ? `打开${device.display_name || device.hostname || device.address}终端`
+                                    : `Open terminal for ${device.display_name || device.hostname || device.address}`}
+                                onClick={() => setEdgeTerminalDeviceId(device.asset_id)}
+                            >
                                 <div className='ControlCameraIcon' aria-hidden='true'>
-                                    {device.device_model?.toLowerCase().includes('jetson')
-                                        ? <img src='/ico/jetson-agx-orin.png' alt='Jetson'/>
-                                        : '◆'}
+                                    <img src='/ico/jetson-agx-orin.png' alt='Jetson'/>
                                 </div>
                                 <div className='ControlCameraIdentity'>
                                     <strong>{device.display_name || device.hostname || device.address}</strong>
                                     <small>{device.device_model || device.address} · {device.address}</small>
                                     <span className={device.online ? 'healthy' : 'offline'}>
-                                        <i/> {device.online ? (zh ? '正常' : 'Normal') : (zh ? '故障' : 'Fault')}
+                                        <i/> {toneLabel(device.online ? 'healthy' : 'offline', zh)}
                                     </span>
                                 </div>
-                            </div>)}
+                            </button>)}
                             {edgeDevices.length === 0 && <button
                                 type='button'
                                 className='ControlEmptyBlock ControlRelatedDeviceAdd'
                                 aria-label={zh ? '发现并添加局域网边缘计算设备' : 'Discover and add LAN edge devices'}
+                                disabled={!jetsonConnectCapable}
+                                title={!node.online
+                                    ? (zh ? '节点当前故障，恢复正常后才能连接设备' : 'The node must return to normal before a device can be connected')
+                                    : !jetsonConnectCapable
+                                        ? (zh ? '此节点不支持 SSH 设备认证' : 'This node cannot authenticate SSH devices')
+                                        : (zh ? '连接边缘计算设备' : 'Connect an edge device')}
                                 onClick={() => updateActivePopupTypeAction?.(
                                     PopupWindowType.JETSON_CONNECT,
                                     node.node_id,
@@ -1323,6 +1360,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                 initialTab={deviceManagementTab}
                 onClose={() => setDeviceManagementTab(null)}
                 onAddCamera={() => {
+                    if (!cameraConnectCapable) return;
                     setDeviceManagementTab(null);
                     updateActivePopupTypeAction?.(
                         PopupWindowType.CAMERA_CONNECT,
@@ -1332,6 +1370,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                     );
                 }}
                 onDiscoverEdge={() => {
+                    if (!jetsonConnectCapable) return;
                     setDeviceManagementTab(null);
                     updateActivePopupTypeAction?.(
                         PopupWindowType.JETSON_CONNECT,
@@ -1340,7 +1379,28 @@ export const ControlCenterView: React.FC<IProps> = ({
                         remoteLan,
                     );
                 }}
+                onOpenCamera={deviceId => {
+                    setDeviceManagementTab(null);
+                    setCameraViewerId(deviceId);
+                }}
+                onOpenEdgeDevice={assetId => {
+                    setDeviceManagementTab(null);
+                    setEdgeTerminalDeviceId(assetId);
+                }}
                 onCamerasChanged={() => void refresh()}
+            />}
+            {cameraViewerId && <CameraLiveViewPopup
+                language={language}
+                node={node}
+                cameras={cameras}
+                initialCameraId={cameraViewerId}
+                onClose={() => setCameraViewerId('')}
+            />}
+            {edgeTerminalDeviceId && <EdgeDeviceTerminalPopup
+                language={language}
+                devices={edgeDevices}
+                initialDeviceId={edgeTerminalDeviceId}
+                onClose={() => setEdgeTerminalDeviceId('')}
             />}
         </>;
     };
@@ -1975,7 +2035,6 @@ export const ControlCenterView: React.FC<IProps> = ({
 
 const mapStateToProps = (state: AppState) => ({
     language: state.general.language,
-    imagesData: state.labels.imagesData,
 });
 
 export default connect(mapStateToProps, {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import './App.scss';
-import EditorView from './views/EditorView/EditorView';
+import EditorView, {PlatformMode} from './views/EditorView/EditorView';
 import {ProjectType} from './data/enums/ProjectType';
 import {AppState} from './store';
 import {connect} from 'react-redux';
@@ -35,7 +35,7 @@ interface StoredDataInfo {
     isVideoProject?: boolean;
 }
 
-const App: React.FC<IProps> = (
+export const App: React.FC<IProps> = (
     {
         projectType,
         windowSize,
@@ -48,10 +48,19 @@ const App: React.FC<IProps> = (
     const [restoreError, setRestoreError] = useState<string | null>(null);
     const [restoreStatus, setRestoreStatus] = useState<string>('正在加载...');
     const [storageUnavailable, setStorageUnavailable] = useState(false);
+    const [platformMode, setPlatformMode] = useState<PlatformMode>('control');
 
     useEffect(() => {
         initializeApp();
     }, []);
+
+    useEffect(() => {
+        if (platformMode !== 'annotation'
+            || (!storedDataInfo?.hasProject && !storageUnavailable)) return;
+        AutoSaveService.suspend();
+        setShowRestorePrompt(true);
+        setIsRestoring(true);
+    }, [platformMode, storageUnavailable, storedDataInfo]);
 
     const initializeApp = async () => {
         try {
@@ -65,7 +74,7 @@ const App: React.FC<IProps> = (
                 setStoredDataInfo({hasSettings: false, hasProject: false, lastSaved: 0});
                 setStorageUnavailable(true);
                 setRestoreError('恢复数据库被其他旧标签页占用。请关闭旧标签页，然后重试；现有恢复数据不会被清除。');
-                setShowRestorePrompt(true);
+                setIsRestoring(false);
                 return;
             }
 
@@ -73,15 +82,13 @@ const App: React.FC<IProps> = (
             const dataInfo = await ProjectRestoreService.checkForStoredData();
             setStoredDataInfo(dataInfo);
 
-            // 恢复弹窗触发：v2.1.9 行为 — settings 或 project 任一存在就弹。
-            // v2.2.x 期间收紧到 hasProject-only 是为了不打扰，但用户偏好"积极地恢复"，
-            // 哪怕只有 settings 也想看到提示而不是被静默吞掉。
-            if (dataInfo.hasSettings || dataInfo.hasProject) {
-                setShowRestorePrompt(true);
-            } else {
-                AutoSaveService.resume();
-                setIsRestoring(false);
+            // 项目恢复只属于标注平台。控制中心保留待恢复快照但不弹窗；
+            // 仅有设置时静默恢复，避免把偏好数据误当成标注工作。
+            if (!dataInfo.hasProject && dataInfo.hasSettings) {
+                await ProjectRestoreService.restoreSettings();
             }
+            if (!dataInfo.hasProject) AutoSaveService.resume();
+            setIsRestoring(false);
         } catch (error) {
             console.error('应用初始化失败:', error);
             // A read failure is not evidence that no snapshot exists. Keep the
@@ -91,7 +98,7 @@ const App: React.FC<IProps> = (
             setStoredDataInfo({hasSettings: false, hasProject: false, lastSaved: 0});
             setStorageUnavailable(true);
             setRestoreError('暂时无法读取恢复数据库。现有恢复数据不会被覆盖，请重试。');
-            setShowRestorePrompt(true);
+            setIsRestoring(false);
         }
     };
 
@@ -128,6 +135,7 @@ const App: React.FC<IProps> = (
             }
 
             setRestoreStatus('恢复完成');
+            setStoredDataInfo(current => current ? {...current, hasProject: false} : current);
             setShowRestorePrompt(false);
 
             // 延迟确保 Redux 状态更新完成和组件准备就绪
@@ -153,6 +161,11 @@ const App: React.FC<IProps> = (
             // 在 clear 之后完成、把用户刚清掉的数据“复活”。
             await AutoSaveService.drain();
             await ProjectRestoreService.clearAllStoredData();
+            setStoredDataInfo(current => current ? {
+                ...current,
+                hasSettings: false,
+                hasProject: false,
+            } : current);
             setShowRestorePrompt(false);
             setIsRestoring(false);
             AutoSaveService.resume();
@@ -258,7 +271,10 @@ const App: React.FC<IProps> = (
         if (windowSize.height < Settings.EDITOR_MIN_HEIGHT || windowSize.width < Settings.EDITOR_MIN_WIDTH) {
             return <SizeItUpView/>;
         } else {
-            return <EditorView/>;
+            return <EditorView
+                platformMode={platformMode}
+                onPlatformSwitch={() => setPlatformMode(mode => mode === 'annotation' ? 'control' : 'annotation')}
+            />;
         }
     };
 

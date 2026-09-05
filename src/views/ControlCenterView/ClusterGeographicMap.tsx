@@ -9,10 +9,13 @@ import {
     ComputeClusterNode,
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
+    computeNodeNormal,
 } from '../../services/ComputeClusterService';
 
 type MapLevel = 'world' | 'china' | 'province';
 type MapTransform = {x: number; y: number; scale: number};
+type MapMarkerTone = 'healthy' | 'warning' | 'offline';
+type MapStatusCounts = Record<MapMarkerTone, number>;
 type WorldProperties = {name: string};
 type ProvinceProperties = {'地名': string; name: string; id: string};
 type MapFeature = Feature<Geometry, WorldProperties | ProvinceProperties>;
@@ -72,6 +75,14 @@ const prefectureMatches = (
 ): boolean => provinceMatches(featureValue, [node.labels?.city, node.labels?.city_name]
     .filter((value): value is string => Boolean(value)));
 
+const mapNodeTone = (node: ComputeClusterNode): MapMarkerTone =>
+    !node.online ? 'offline' : computeNodeNormal(node) ? 'healthy' : 'warning';
+
+const mapStatusCounts = (markerNodes: ComputeClusterNode[]): MapStatusCounts => markerNodes.reduce(
+    (counts, node) => ({...counts, [mapNodeTone(node)]: counts[mapNodeTone(node)] + 1}),
+    {healthy: 0, warning: 0, offline: 0},
+);
+
 // Geographic gestures, drill-down, and cluster overlays intentionally share one local state owner.
 // eslint-disable-next-line complexity
 export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph, nodes, zh}) => {
@@ -113,7 +124,26 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
         return next.fitExtent([[24, 22], [WIDTH - 24, HEIGHT - 22]], collection);
     }, [collection, level]);
     const path = useMemo(() => geoPath(projection), [projection]);
-    const onlineCount = nodes.filter(node => node.online).length;
+    const statusCounts = mapStatusCounts(nodes);
+    const markerNodeCount = (markerNodes: ComputeClusterNode[]): string => {
+        const parentIds = new Set(markerNodes.map(node => node.node_id));
+        const childCount = graph?.entities.filter(entity =>
+            entity.kind === 'managed_device'
+            && entity.device_kind === 'edge_compute'
+            && Boolean(entity.node_id && parentIds.has(entity.node_id))).length || 0;
+        return `${markerNodes.length}/${childCount}`;
+    };
+    const markerTone = (markerNodes: ComputeClusterNode[]): MapMarkerTone => {
+        const counts = mapStatusCounts(markerNodes);
+        return (['offline', 'warning', 'healthy'] as const)
+            .reduce((most, tone) => counts[tone] > counts[most] ? tone : most);
+    };
+    const markerStatusLabel = (markerNodes: ComputeClusterNode[]): string => {
+        const counts = mapStatusCounts(markerNodes);
+        return zh
+            ? `正常 ${counts.healthy} · 故障 ${counts.warning} · 异常 ${counts.offline}`
+            : `Normal ${counts.healthy} · Fault ${counts.warning} · Abnormal ${counts.offline}`;
+    };
     // ponytail: The graph currently exposes province-level regions only; add country/coordinates to the API before placing non-China nodes.
     const chinaNodes = useMemo(() => [...new Map(regionStats
         .flatMap(region => region.nodes)
@@ -180,6 +210,11 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
         else if (level === 'china') openProvince(selected);
         else zoomTo(selected);
     };
+    const selectMarker = (event: React.KeyboardEvent<SVGGElement>, selected: MapFeature, name: string) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        selectFeature(selected, name);
+    };
     const svgPoint = (clientX: number, clientY: number): [number, number] => {
         const rect = svgRef.current?.getBoundingClientRect();
         if (!rect?.width || !rect.height) return [WIDTH / 2, HEIGHT / 2];
@@ -205,9 +240,10 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
             </div>
             <div className='ComputeKnowledgeStats'>
                 <div><strong>{graph?.summary.regions || 0}</strong><span>{zh ? '地域' : 'regions'}</span></div>
-                <div><strong>{nodes.length}</strong><span>{zh ? '计算节点' : 'compute nodes'}</span></div>
-                <div className='online'><strong>{onlineCount}</strong><span>{zh ? '正常' : 'Normal'}</span></div>
-                <div className='offline'><strong>{nodes.length - onlineCount}</strong><span>{zh ? '故障' : 'Fault'}</span></div>
+                <div><strong>{nodes.length}</strong><span>{zh ? '主节点' : 'main nodes'}</span></div>
+                <div className='online'><strong>{statusCounts.healthy}</strong><span>{zh ? '正常' : 'Normal'}</span></div>
+                <div className='warning'><strong>{statusCounts.warning}</strong><span>{zh ? '故障' : 'Fault'}</span></div>
+                <div className='offline'><strong>{statusCounts.offline}</strong><span>{zh ? '异常' : 'Abnormal'}</span></div>
             </div>
         </div>
 
@@ -228,7 +264,8 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
                 </>}
             </div>
             <span><i className='ControlGeoMapDot online'/>{zh ? '正常节点' : 'Normal node'}</span>
-            <span><i className='ControlGeoMapDot offline'/>{zh ? '故障节点' : 'Fault node'}</span>
+            <span><i className='ControlGeoMapDot warning'/>{zh ? '故障节点' : 'Fault node'}</span>
+            <span><i className='ControlGeoMapDot offline'/>{zh ? '异常节点' : 'Abnormal node'}</span>
             <small>{zh ? '边界数据仅用于节点位置展示' : 'Boundaries are for node location display only'}</small>
         </div>
 
@@ -240,13 +277,13 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
                         ? (zh ? '悬浮查看省份' : 'Hover a province')
                         : (zh ? '悬浮查看城市' : 'Hover a city'))}</strong>
                 <span>{hoveredPrefectureStats?.nodes.length
-                    ? `${hoveredPrefectureStats.nodes.filter(node => node.online).length} / ${hoveredPrefectureStats.nodes.length} ${zh ? '正常节点' : 'Normal nodes'}`
+                    ? markerStatusLabel(hoveredPrefectureStats.nodes)
                     : hoveredStats
-                    ? `${hoveredStats.nodes.filter(node => node.online).length} / ${hoveredStats.nodes.length} ${zh ? '正常节点' : 'Normal nodes'}`
+                    ? markerStatusLabel(hoveredStats.nodes)
                     : level === 'province' && selectedRegion
-                        ? `${selectedRegion.nodes.filter(node => node.online).length} / ${selectedRegion.nodes.length} ${zh ? `正常节点 · ${cityLocation || '城市位置待细化'}` : `Normal nodes · ${cityLocation || 'city pending'}`}`
+                        ? `${markerStatusLabel(selectedRegion.nodes)} · ${cityLocation || (zh ? '城市位置待细化' : 'city pending')}`
                     : level === 'world' && hoveredName === (zh ? '中国' : 'China')
-                        ? `${chinaNodes.filter(node => node.online).length} / ${chinaNodes.length} ${zh ? '正常节点' : 'Normal nodes'}`
+                        ? markerStatusLabel(chinaNodes)
                         : (zh ? '点击放大' : 'Click to zoom')}</span>
             </div>
             <div className='ControlGeoMapZoom' role='group' aria-label={zh ? '地图缩放' : 'Map zoom'}>
@@ -323,27 +360,44 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
                 {level === 'world' ? (() => {
                     const china = worldFeatures.find(item => item.properties.name === 'China');
                     if (!china || !chinaNodes.length) return null;
-                    return <g className='ControlGeoMapMarker' transform={markerTransform(china)} aria-hidden='true'>
-                        <circle r='12'/><text y='3'>{chinaNodes.length}</text>
+                    return <g
+                        className={`ControlGeoMapMarker ${markerTone(chinaNodes)}`}
+                        transform={markerTransform(china)}
+                        role='button'
+                        tabIndex={0}
+                        aria-label={zh ? '进入中国下一级地图' : 'Open the China map'}
+                        data-map-marker='China'
+                        onClick={() => selectFeature(china, 'China')}
+                        onKeyDown={event => selectMarker(event, china, 'China')}
+                    >
+                        <circle r='12'/><text y='3'>{markerNodeCount(chinaNodes)}</text>
                     </g>;
                 })() : level === 'china' ? regionStats.filter(region => region.nodes.length).map(region => {
-                    const allOnline = region.nodes.every(node => node.online);
                     return <g
                         key={region.feature.properties.id}
-                        className={`ControlGeoMapMarker ${allOnline ? '' : 'offline'}`}
+                        className={`ControlGeoMapMarker ${markerTone(region.nodes)}`}
                         transform={markerTransform(region.feature)}
-                        aria-hidden='true'
+                        role='button'
+                        tabIndex={0}
+                        aria-label={zh ? `进入${region.name}下一级地图` : `Open ${region.name}`}
+                        data-map-marker={region.name}
+                        onClick={() => selectFeature(region.feature, region.feature.properties['地名'])}
+                        onKeyDown={event => selectMarker(event, region.feature, region.feature.properties['地名'])}
                     >
-                        <circle r='12'/><text y='3'>{region.nodes.length}</text>
+                        <circle r='12'/><text y='3'>{markerNodeCount(region.nodes)}</text>
                     </g>;
                 }) : prefectureStats.filter(prefecture => prefecture.nodes.length).map(prefecture => <g
                     key={prefecture.feature.properties.id}
-                    className={`ControlGeoMapMarker ${prefecture.nodes.every(node => node.online) ? '' : 'offline'}`}
+                    className={`ControlGeoMapMarker ${markerTone(prefecture.nodes)}`}
                     transform={markerTransform(prefecture.feature)}
                     data-map-prefecture={prefecture.name}
-                    aria-hidden='true'
+                    role='button'
+                    tabIndex={0}
+                    aria-label={zh ? `查看${prefecture.name}` : `View ${prefecture.name}`}
+                    onClick={() => selectFeature(prefecture.feature, prefecture.feature.properties['地名'])}
+                    onKeyDown={event => selectMarker(event, prefecture.feature, prefecture.feature.properties['地名'])}
                 >
-                    <circle r='12'/><text y='3'>{prefecture.nodes.length}</text>
+                    <circle r='12'/><text y='3'>{markerNodeCount(prefecture.nodes)}</text>
                 </g>)}
             </svg>
         </div>

@@ -346,6 +346,7 @@ span.ControlMachineIcon {
     background: #5fda9a;
     box-shadow: 0 0 7px rgba(95, 218, 154, 0.52);
 
+    &.warning { background: #e7a640; box-shadow: 0 0 7px rgba(231, 166, 64, 0.48); }
     &.offline { background: #e45c62; box-shadow: 0 0 7px rgba(228, 92, 98, 0.42); }
   }
 }
@@ -438,11 +439,13 @@ span.ControlMachineIcon {
 }
 
 .ControlGeoMapMarker {
-  pointer-events: none;
+  cursor: pointer;
+  outline: none;
+  pointer-events: auto;
 
   circle {
-    fill: rgba(31, 128, 82, 0.92);
-    stroke: #72e4aa;
+    fill: #47c77a;
+    stroke: #79d89e;
     stroke-width: 1.5;
     vector-effect: non-scaling-stroke;
     filter: drop-shadow(0 0 6px rgba(82, 222, 148, 0.8));
@@ -455,7 +458,19 @@ span.ControlMachineIcon {
     text-anchor: middle;
   }
 
-  &.offline circle { fill: rgba(141, 62, 65, 0.94); stroke: #ff8f94; }
+  &:focus-visible circle { stroke-width: 2.5; }
+
+  &.warning circle {
+    fill: #e7a640;
+    stroke: #f3c46e;
+    filter: drop-shadow(0 0 6px rgba(231, 166, 64, 0.8));
+  }
+
+  &.offline circle {
+    fill: #df6262;
+    stroke: #ef8b8b;
+    filter: drop-shadow(0 0 6px rgba(223, 98, 98, 0.8));
+  }
 }
 
 .ControlCenterBody {
@@ -478,6 +493,32 @@ span.ControlMachineIcon {
   width: 100%;
   min-width: 680px;
   padding: 20px 24px 36px;
+}
+
+.ControlNodeContent:has(> .ComputeKnowledgePanel) {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+
+  > .ComputeKnowledgePanel {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .ComputeGraphViewport,
+  .ControlGeoMapViewport {
+    display: flex;
+    flex: 1;
+  }
+
+  .ComputeGraphScene.operations-only,
+  .ControlGeoMapViewport > svg {
+    height: auto;
+    flex: 1;
+  }
+
+  .ComputeGraphScene.operations-only { min-height: 440px; }
 }
 
 .ControlRefreshWarning {

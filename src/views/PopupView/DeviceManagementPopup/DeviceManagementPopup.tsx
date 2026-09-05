@@ -1,11 +1,16 @@
 import React, {useState} from 'react';
 import {Language} from '../../../data/LanguageConfig';
-import {CameraResourceService} from '../../../services/CameraResourceService';
-import {ComputeClusterNode, ComputeLanAsset, ComputeManagedDevice} from '../../../services/ComputeClusterService';
+import {
+    ComputeClusterNode,
+    ComputeClusterService,
+    ComputeLanAsset,
+    ComputeManagedDevice,
+} from '../../../services/ComputeClusterService';
 import './DeviceManagementPopup.scss';
 
 type DeviceTab = 'camera' | 'edge';
-type DeviceStatusFilter = 'all' | 'normal' | 'fault';
+type DeviceTone = 'normal' | 'fault' | 'abnormal';
+type DeviceStatusFilter = 'all' | DeviceTone;
 
 interface IProps {
     language: Language;
@@ -16,10 +21,16 @@ interface IProps {
     onClose: () => void;
     onAddCamera: () => void;
     onDiscoverEdge: () => void;
+    onOpenCamera: (deviceId: string) => void;
+    onOpenEdgeDevice: (assetId: string) => void;
     onCamerasChanged: () => void;
 }
 
-const cameraNormal = (camera: ComputeManagedDevice): boolean => camera.status === 'online';
+const cameraTone = (camera: ComputeManagedDevice): DeviceTone =>
+    camera.status === 'registered' || camera.status === 'online'
+        ? 'normal'
+        : camera.status === 'offline' ? 'fault' : 'abnormal';
+const edgeTone = (device: ComputeLanAsset): DeviceTone => device.online ? 'normal' : 'abnormal';
 const valuesMatch = (query: string, values: (string | number | null | undefined)[]): boolean =>
     !query || values.some(value => String(value || '').toLocaleLowerCase().includes(query));
 
@@ -32,8 +43,9 @@ export const DeviceManagementPopup: React.FC<IProps> = (
         edgeDevices,
         initialTab,
         onClose,
-        onAddCamera,
         onDiscoverEdge,
+        onOpenCamera,
+        onOpenEdgeDevice,
         onCamerasChanged,
     },
 ) => {
@@ -41,6 +53,7 @@ export const DeviceManagementPopup: React.FC<IProps> = (
     const [tab, setTab] = useState<DeviceTab>(initialTab);
     const [query, setQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<DeviceStatusFilter>('all');
+    const [managing, setManaging] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [nameDraft, setNameDraft] = useState('');
     const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -49,8 +62,7 @@ export const DeviceManagementPopup: React.FC<IProps> = (
     const normalizedQuery = query.trim().toLocaleLowerCase();
 
     const filteredCameras = cameras.filter(camera => {
-        const normal = cameraNormal(camera);
-        return (statusFilter === 'all' || (statusFilter === 'normal') === normal)
+        return (statusFilter === 'all' || statusFilter === cameraTone(camera))
             && valuesMatch(normalizedQuery, [
                 camera.name,
                 camera.model,
@@ -60,7 +72,7 @@ export const DeviceManagementPopup: React.FC<IProps> = (
             ]);
     });
     const filteredEdgeDevices = edgeDevices.filter(device => {
-        return (statusFilter === 'all' || (statusFilter === 'normal') === device.online)
+        return (statusFilter === 'all' || statusFilter === edgeTone(device))
             && valuesMatch(normalizedQuery, [
                 device.display_name,
                 device.hostname,
@@ -71,18 +83,17 @@ export const DeviceManagementPopup: React.FC<IProps> = (
             ]);
     });
     const devices = tab === 'camera' ? cameras : edgeDevices;
-    const normalCount = tab === 'camera'
-        ? cameras.filter(cameraNormal).length
-        : edgeDevices.filter(device => device.online).length;
+    const tones = tab === 'camera' ? cameras.map(cameraTone) : edgeDevices.map(edgeTone);
+    const normalCount = tones.filter(tone => tone === 'normal').length;
+    const faultCount = tones.filter(tone => tone === 'fault').length;
+    const abnormalCount = tones.filter(tone => tone === 'abnormal').length;
     const visibleCount = tab === 'camera' ? filteredCameras.length : filteredEdgeDevices.length;
-    const resourceCount = tab === 'camera'
-        ? cameras.reduce((total, camera) => total + camera.channels, 0)
-        : edgeDevices.reduce((total, device) => total + device.ports.length, 0);
 
     const changeTab = (nextTab: DeviceTab) => {
         setTab(nextTab);
         setQuery('');
         setStatusFilter('all');
+        setManaging(false);
         setEditingId(null);
         setPendingDeleteId(null);
         setError('');
@@ -105,7 +116,7 @@ export const DeviceManagementPopup: React.FC<IProps> = (
         setBusyId(deviceId);
         setError('');
         try {
-            await CameraResourceService.update(deviceId, {name: nameDraft.trim()});
+            await ComputeClusterService.updateCameraResource(node.node_id, deviceId, nameDraft.trim());
             cancelEdit();
             onCamerasChanged();
         } catch (updateError) {
@@ -119,7 +130,7 @@ export const DeviceManagementPopup: React.FC<IProps> = (
         setBusyId(deviceId);
         setError('');
         try {
-            await CameraResourceService.delete(deviceId);
+            await ComputeClusterService.deleteCameraResource(node.node_id, deviceId);
             setPendingDeleteId(null);
             onCamerasChanged();
         } catch (deleteError) {
@@ -129,9 +140,9 @@ export const DeviceManagementPopup: React.FC<IProps> = (
         }
     };
 
-    const statusLabel = (normal: boolean): string => normal
+    const statusLabel = (tone: DeviceTone): string => tone === 'normal'
         ? (zh ? '正常' : 'Normal')
-        : (zh ? '故障' : 'Fault');
+        : tone === 'fault' ? (zh ? '故障' : 'Fault') : (zh ? '异常' : 'Abnormal');
     const lastSeen = (timestamp: number): string => timestamp
         ? new Date(timestamp * 1000).toLocaleString(zh ? 'zh-CN' : 'en-US')
         : '—';
@@ -190,7 +201,7 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                     <div className='DeviceManagementNodeState'>
                         <small>{zh ? '所属节点' : 'Assigned node'}</small>
                         <strong>{node.name}</strong>
-                        <span className={node.online ? 'normal' : 'fault'}><i/> {statusLabel(node.online)}</span>
+                        <span className={node.online ? 'normal' : 'abnormal'}><i/> {statusLabel(node.online ? 'normal' : 'abnormal')}</span>
                     </div>
                 </nav>
 
@@ -201,25 +212,29 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                             <h3>{tab === 'camera' ? (zh ? '摄像头设备' : 'Camera devices') : (zh ? '边缘计算设备' : 'Edge devices')}</h3>
                             <p>{tab === 'camera'
                                 ? (zh
-                                    ? '查看设备状态、通道与能力。远程资源需在所属节点更名或删除。'
-                                    : 'Review status, channels, and capabilities. Rename or delete remote resources on their owning node.')
+                                    ? '查看设备状态、通道与能力，并通过所属节点更名或删除。'
+                                    : 'Review status, channels, and capabilities, then rename or delete through the owning node.')
                                 : (zh ? '设备通过局域网发现自动同步，可在网络视图继续管理。' : 'Devices sync through LAN discovery and can be managed in the network view.')}</p>
                         </div>
                         <div className='DeviceManagementTitleActions'>
-                            <button type='button' onClick={onCamerasChanged}>{zh ? '刷新' : 'Refresh'}</button>
                             <button
                                 type='button'
-                                className='primary'
-                                onClick={tab === 'camera' ? onAddCamera : onDiscoverEdge}
-                            >{tab === 'camera' ? (zh ? '＋ 添加摄像头' : '+ Add camera') : (zh ? '＋ 发现设备' : '+ Discover devices')}</button>
+                                className={managing ? 'primary' : ''}
+                                aria-pressed={managing}
+                                onClick={() => {
+                                    setManaging(current => !current);
+                                    setEditingId(null);
+                                    setPendingDeleteId(null);
+                                }}
+                            >{managing ? (zh ? '完成' : 'Done') : (zh ? '管理' : 'Manage')}</button>
                         </div>
                     </div>
 
                     <div className='DeviceManagementSummary' aria-label={zh ? '设备统计' : 'Device summary'}>
-                        <div><span>{zh ? '设备总数' : 'Total'}</span><strong>{devices.length}</strong></div>
+                        <div><span>{zh ? '总数' : 'Total'}</span><strong>{devices.length}</strong></div>
                         <div><span>{zh ? '正常' : 'Normal'}</span><strong className='normal'>{normalCount}</strong></div>
-                        <div><span>{zh ? '故障' : 'Fault'}</span><strong className='fault'>{devices.length - normalCount}</strong></div>
-                        <div><span>{tab === 'camera' ? (zh ? '通道' : 'Channels') : (zh ? '开放服务' : 'Open services')}</span><strong>{resourceCount}</strong></div>
+                        <div><span>{zh ? '故障' : 'Fault'}</span><strong className='fault'>{faultCount}</strong></div>
+                        <div><span>{zh ? '异常' : 'Abnormal'}</span><strong className='abnormal'>{abnormalCount}</strong></div>
                     </div>
 
                     <div className='DeviceManagementTools'>
@@ -239,8 +254,8 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                             <option value='all'>{zh ? '所有状态' : 'All statuses'}</option>
                             <option value='normal'>{zh ? '仅正常' : 'Normal only'}</option>
                             <option value='fault'>{zh ? '仅故障' : 'Fault only'}</option>
+                            <option value='abnormal'>{zh ? '仅异常' : 'Abnormal only'}</option>
                         </select>
-                        <span>{zh ? `显示 ${visibleCount} / ${devices.length}` : `Showing ${visibleCount} / ${devices.length}`}</span>
                     </div>
 
                     {error && <div className='DeviceManagementError' role='status'>{error}</div>}
@@ -249,8 +264,20 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                         {tab === 'camera' && filteredCameras.map(
                             // eslint-disable-next-line complexity
                             camera => {
-                            const normal = cameraNormal(camera);
-                            return <article className='DeviceManagementRow' key={camera.device_id}>
+                            const tone = cameraTone(camera);
+                            return <article
+                                className={`DeviceManagementRow${managing ? '' : ' interactive'}`}
+                                key={camera.device_id}
+                                role={managing ? undefined : 'button'}
+                                tabIndex={managing ? undefined : 0}
+                                title={managing ? undefined : (zh ? '双击打开实时画面' : 'Double-click to open live view')}
+                                onDoubleClick={() => {
+                                    if (!managing) onOpenCamera(camera.device_id);
+                                }}
+                                onKeyDown={event => {
+                                    if (!managing && event.key === 'Enter') onOpenCamera(camera.device_id);
+                                }}
+                            >
                                 <div className='DeviceManagementIcon' aria-hidden='true'>CAM</div>
                                 <div className='DeviceManagementIdentity'>
                                     {editingId === camera.device_id
@@ -273,8 +300,8 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                                     <span><small>{zh ? '通道' : 'Channels'}</small><strong>{camera.channels}</strong></span>
                                     <span><small>{zh ? '能力' : 'Capabilities'}</small><strong>{camera.capabilities.length}</strong></span>
                                 </div>
-                                <span className={`DeviceManagementStatus ${normal ? 'normal' : 'fault'}`}><i/> {statusLabel(normal)}</span>
-                                <div className='DeviceManagementActions'>
+                                <span className={`DeviceManagementStatus ${tone}`}><i/> {statusLabel(tone)}</span>
+                                {managing && <div className='DeviceManagementActions'>
                                     {editingId === camera.device_id
                                         ? <>
                                             <button
@@ -298,15 +325,11 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                                             : <>
                                                 <button
                                                     type='button'
-                                                    disabled
-                                                    title={zh ? '远程资源需在所属节点编辑' : 'Edit this remote resource on its owning node'}
                                                     onClick={() => startEdit(camera)}
                                                 >{zh ? '编辑' : 'Edit'}</button>
                                                 <button
                                                     type='button'
                                                     className='danger'
-                                                    disabled
-                                                    title={zh ? '远程资源需在所属节点删除' : 'Delete this remote resource on its owning node'}
                                                     onClick={() => {
                                                         setError('');
                                                         setEditingId(null);
@@ -314,12 +337,24 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                                                     }}
                                                 >{zh ? '删除' : 'Delete'}</button>
                                             </>}
-                                </div>
+                                </div>}
                             </article>;
                             },
                         )}
 
-                        {tab === 'edge' && filteredEdgeDevices.map(device => <article className='DeviceManagementRow' key={device.asset_id}>
+                        {tab === 'edge' && filteredEdgeDevices.map(device => <article
+                            className={`DeviceManagementRow${managing ? '' : ' interactive'}`}
+                            key={device.asset_id}
+                            role={managing ? undefined : 'button'}
+                            tabIndex={managing ? undefined : 0}
+                            title={managing ? undefined : (zh ? '双击打开设备终端' : 'Double-click to open terminal')}
+                            onDoubleClick={() => {
+                                if (!managing) onOpenEdgeDevice(device.asset_id);
+                            }}
+                            onKeyDown={event => {
+                                if (!managing && event.key === 'Enter') onOpenEdgeDevice(device.asset_id);
+                            }}
+                        >
                             <div className='DeviceManagementIcon edge' aria-hidden='true'>EDGE</div>
                             <div className='DeviceManagementIdentity'>
                                 <strong>{device.display_name || device.hostname || device.address}</strong>
@@ -330,10 +365,10 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                                 <span><small>{zh ? '服务' : 'Services'}</small><strong>{device.ports.length}</strong></span>
                                 <span className='wide'><small>{zh ? '最后发现' : 'Last seen'}</small><strong>{lastSeen(device.last_seen_at)}</strong></span>
                             </div>
-                            <span className={`DeviceManagementStatus ${device.online ? 'normal' : 'fault'}`}><i/> {statusLabel(device.online)}</span>
-                            <div className='DeviceManagementActions'>
-                                <button type='button' onClick={onDiscoverEdge}>{zh ? '连接 Jetson' : 'Connect Jetson'}</button>
-                            </div>
+                            <span className={`DeviceManagementStatus ${edgeTone(device)}`}><i/> {statusLabel(edgeTone(device))}</span>
+                            {managing && <div className='DeviceManagementActions'>
+                                <button type='button' onClick={onDiscoverEdge}>{zh ? '连接设备' : 'Connect device'}</button>
+                            </div>}
                         </article>)}
 
                         {visibleCount === 0 && <div className='DeviceManagementEmpty'>
@@ -343,12 +378,8 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                             <span>{devices.length === 0
                                 ? (tab === 'camera'
                                     ? (zh ? '添加摄像头后，可在这里统一查看状态和维护名称。' : 'Add a camera to monitor status and maintain names here.')
-                                    : (zh ? '扫描当前局域网并通过 SSH 连接 NVIDIA Jetson。' : 'Scan the LAN and connect an NVIDIA Jetson over SSH.'))
+                                    : (zh ? '扫描当前局域网并通过 SSH 连接边缘计算设备。' : 'Scan the LAN and connect an edge device over SSH.'))
                                 : (zh ? '请调整搜索关键词或状态筛选。' : 'Change the search query or status filter.')}</span>
-                            {devices.length === 0 && <button
-                                type='button'
-                                onClick={tab === 'camera' ? onAddCamera : onDiscoverEdge}
-                            >{tab === 'camera' ? (zh ? '添加摄像头' : 'Add camera') : (zh ? '发现设备' : 'Discover devices')}</button>}
                         </div>}
                     </div>
                 </main>

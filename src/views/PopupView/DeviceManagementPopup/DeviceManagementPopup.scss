@@ -26,7 +26,7 @@
 
   button,
   input,
-  select { font: inherit; }
+  select { font-family: inherit; }
 
   button:focus-visible,
   input:focus,
@@ -84,6 +84,7 @@
   min-height: 0;
   flex-direction: column;
   gap: 7px;
+  overflow-y: auto;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   background: #17181a;
   padding: 14px 12px;
@@ -140,13 +141,38 @@
   span { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; }
   i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .normal { color: #68d58c; }
-  .fault { color: #ed7770; }
+  .fault { color: #e7a640; }
+  .abnormal { color: #ed7770; }
 }
 
 .DeviceManagementMain {
   min-width: 0;
   overflow-y: auto;
   padding: 18px 20px 22px;
+}
+
+.EdgeDeviceTerminalDialog {
+  .DeviceManagementMain { display: flex; min-height: 0; overflow: hidden; }
+  .ComputeTerminalPanel { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+  .ComputeTerminalHeading,
+  .ComputeTerminalToolbar,
+  .ComputeTerminalError,
+  .ComputeTerminalInput,
+  .ComputeTerminalBoundary { flex: 0 0 auto; }
+  .ComputeTerminalScreen { height: auto; min-height: 120px; flex: 1; }
+  .ComputeTerminalHeading p,
+  .ComputeTerminalState,
+  .ComputeTerminalToolbar label > span,
+  .ComputeTerminalError,
+  .ComputeTerminalInput button { font-size: 10px; }
+  .ComputeTerminalToolbar select,
+  .ComputeTerminalToolbar button { font-size: 11px; }
+  .ComputeTerminalBoundary { font-size: 9px; }
+}
+
+.CameraLiveViewMain {
+  overflow: hidden;
+  padding: 0;
 }
 
 .DeviceManagementTitle {
@@ -206,12 +232,13 @@
   span { color: rgba(255, 255, 255, 0.38); font-size: 9px; }
   strong { font-size: 18px; font-weight: 600; }
   .normal { color: #68d58c; }
-  .fault { color: #ed7770; }
+  .fault { color: #e7a640; }
+  .abnormal { color: #ed7770; }
 }
 
 .DeviceManagementTools {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) 128px auto;
+  grid-template-columns: minmax(160px, 1fr) 128px;
   align-items: center;
   gap: 8px;
   margin: 13px 0 10px;
@@ -230,7 +257,6 @@
   }
 
   input::placeholder { color: rgba(255, 255, 255, 0.3); }
-  > span { color: rgba(255, 255, 255, 0.34); font-size: 9px; white-space: nowrap; }
 }
 
 .DeviceManagementError {
@@ -261,6 +287,10 @@
   padding: 8px 10px;
 
   &:hover { border-color: rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.028); }
+  &.interactive { cursor: pointer; }
+  &.interactive:hover,
+  &.interactive:focus-visible { border-color: rgba(0, 158, 253, 0.62); background: rgba(0, 158, 253, 0.08); }
+  &.interactive:focus-visible { outline: 1px solid rgba(0, 158, 253, 0.7); outline-offset: 1px; }
 }
 
 .DeviceManagementIcon {
@@ -323,7 +353,8 @@
 
   i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   &.normal { color: #68d58c; }
-  &.fault { color: #ed7770; }
+  &.fault { color: #e7a640; }
+  &.abnormal { color: #ed7770; }
 }
 
 .DeviceManagementEmpty {
@@ -371,7 +402,6 @@
   .DeviceManagementTitle { flex-direction: column; }
   .DeviceManagementSummary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .DeviceManagementTools { grid-template-columns: 1fr 110px; }
-  .DeviceManagementTools > span { grid-column: 1 / -1; }
   .DeviceManagementRow { grid-template-columns: 38px minmax(0, 1fr) 60px; }
   .DeviceManagementActions { grid-column: 2 / -1; }
 }

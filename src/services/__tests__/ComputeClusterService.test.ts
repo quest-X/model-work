@@ -45,6 +45,7 @@ describe('ComputeClusterService LAN scan', () => {
         jest.spyOn(ComputeClusterService, 'lanScanTargets').mockResolvedValue(scanTargets);
         jest.spyOn(ComputeClusterService, 'submitTask').mockResolvedValue(task);
         jest.spyOn(ComputeClusterService, 'taskStatus').mockImplementation((_task, signal) => {
+            expect(ComputeClusterService.activeLanScan('node-1')).toEqual(task);
             if (signal?.aborted) return Promise.reject(signal.reason);
             return new Promise((_resolve, reject) => {
                 signal?.addEventListener('abort', () => reject(signal.reason));
@@ -59,6 +60,24 @@ describe('ComputeClusterService LAN scan', () => {
 
         await expect(scan).rejects.toMatchObject({name: 'AbortError'});
         expect(cancel).toHaveBeenCalledWith(task, 'cancel');
+        expect(ComputeClusterService.activeLanScan('node-1')).toBeNull();
+    });
+
+    it('does not cancel the task when a watcher detaches', async () => {
+        const controller = new AbortController();
+        jest.spyOn(ComputeClusterService, 'taskStatus').mockImplementation((_task, signal) => {
+            if (signal?.aborted) return Promise.reject(signal.reason);
+            return new Promise((_resolve, reject) => {
+                signal?.addEventListener('abort', () => reject(signal.reason));
+            });
+        });
+        const cancel = jest.spyOn(ComputeClusterService, 'controlTask').mockResolvedValue(task);
+
+        const scan = ComputeClusterService.watchLanScan(task, controller.signal);
+        controller.abort();
+
+        await expect(scan).rejects.toMatchObject({name: 'AbortError'});
+        expect(cancel).not.toHaveBeenCalled();
     });
 
     it('reports the real task progress', async () => {
@@ -140,6 +159,37 @@ describe('ComputeClusterService filesystem authorization', () => {
             3,
             expect.stringMatching(/\/filesystem\/authorizations\/authorization%2F1\/reject$/),
             expect.objectContaining({method: 'POST', body: '{}'}),
+        );
+    });
+});
+
+describe('ComputeClusterService remote camera management', () => {
+    const originalFetch = global.fetch;
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        jest.restoreAllMocks();
+    });
+
+    it('routes rename and delete through the owning node', async () => {
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({}),
+        } as Response);
+
+        await ComputeClusterService.updateCameraResource('node/1', 'camera/1', '新名称');
+        await ComputeClusterService.deleteCameraResource('node/1', 'camera/1');
+
+        const path = /\/nodes\/node%2F1\/cameras\/resources\/camera%2F1$/;
+        expect(global.fetch).toHaveBeenNthCalledWith(
+            1,
+            expect.stringMatching(path),
+            expect.objectContaining({method: 'PUT', body: JSON.stringify({name: '新名称'})}),
+        );
+        expect(global.fetch).toHaveBeenNthCalledWith(
+            2,
+            expect.stringMatching(path),
+            expect.objectContaining({method: 'DELETE'}),
         );
     });
 });

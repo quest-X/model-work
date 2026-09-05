@@ -7,7 +7,6 @@ import {
     ComputeClusterService,
     ComputeResourceGraph,
 } from '../../../services/ComputeClusterService';
-import {CameraResourceService} from '../../../services/CameraResourceService';
 import {AgentChatService} from '../../../services/AgentChatService';
 import {ControlCenterView} from '../ControlCenterView';
 
@@ -220,7 +219,7 @@ describe('ControlCenterView', () => {
         expect(screen.getByText('Tailscale 远程')).toBeInTheDocument();
         const cameraCard = screen.getByText('DS-2CD2686FWDA2-IZS')
             .closest('.ControlCameraCard') as HTMLElement;
-        expect(within(cameraCard).getByText('故障')).toBeInTheDocument();
+        expect(within(cameraCard).getByText('正常')).toBeInTheDocument();
         expect(screen.queryByText('摄像头注册表')).not.toBeInTheDocument();
         expect(screen.queryByText('运行详情暂不可用')).not.toBeInTheDocument();
         expect(ComputeClusterService.runtime).not.toHaveBeenCalled();
@@ -269,7 +268,7 @@ describe('ControlCenterView', () => {
         expect(screen.queryByText('图形处理器')).not.toBeInTheDocument();
     });
 
-    it('reports LAN and Tailscale SSH availability independently', async () => {
+    it('marks a node and overview faulty when either SSH path fails', async () => {
         const remoteNode = node('山东节点', true, false, null, 'Windows', 'tailscale');
         remoteNode.network.lan_ssh_available = false;
         remoteNode.network.tailscale_ssh_available = true;
@@ -282,6 +281,12 @@ describe('ControlCenterView', () => {
         expect(lan.querySelector('.ControlStatusDot')).toHaveClass('offline');
         expect(remote).toHaveTextContent('正常');
         expect(remote.querySelector('.ControlStatusDot')).toHaveClass('healthy');
+        const machineState = screen.getByRole('button', {name: /山东节点/})
+            .querySelector('.ControlMachineState');
+        expect(machineState).toHaveTextContent('故障');
+        expect(machineState).toHaveClass('warning');
+        expect(screen.getByRole('button', {name: /总览/}).querySelector('.ControlMachineState'))
+            .toHaveClass('offline');
     });
 
     it('does not guess a version when the node reports unknown', async () => {
@@ -295,7 +300,7 @@ describe('ControlCenterView', () => {
         expect(within(information).queryByText('unknown')).not.toBeInTheDocument();
     });
 
-    it('marks an online node abnormal until every machine-level fault is repaired', async () => {
+    it('marks an online node faulty until every machine-level fault is repaired', async () => {
         const faultyNode = node('异常节点', true);
         faultyNode.network.lan_ssh_available = false;
         faultyNode.network.tailscale_ssh_available = false;
@@ -316,7 +321,7 @@ describe('ControlCenterView', () => {
         const machineState = () => screen.getByRole('button', {name: /异常节点/})
             .querySelector('.ControlMachineState');
         await waitFor(() => expect(machineState()).toHaveTextContent('故障'));
-        expect(machineState()).toHaveClass('offline');
+        expect(machineState()).toHaveClass('warning');
 
         fireEvent.click(screen.getByRole('button', {name: '刷新机器状态'}));
         await waitFor(() => expect(nodes).toHaveBeenCalledTimes(2));
@@ -708,6 +713,7 @@ describe('ControlCenterView', () => {
         const districtFetch = jest.fn();
         Object.defineProperty(global, 'fetch', {configurable: true, writable: true, value: districtFetch});
         const onlineNode = node('在线节点', true);
+        onlineNode.network.lan_ssh_available = false;
         onlineNode.labels = {
             region: '310000',
             region_name: '上海市',
@@ -716,6 +722,9 @@ describe('ControlCenterView', () => {
             site: 'shanghai-baoshan-office',
             site_name: '办公室',
         };
+        const backupNode = node('上海备用节点', true);
+        backupNode.network.lan_ssh_available = false;
+        backupNode.labels = {...onlineNode.labels};
         const rizhaoNode = node('日照节点', false);
         rizhaoNode.labels = {
             region: '370000',
@@ -723,7 +732,11 @@ describe('ControlCenterView', () => {
             city: '371100',
             city_name: '日照市',
         };
-        const nodesRequest = jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([onlineNode, rizhaoNode]);
+        const nodesRequest = jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([
+            onlineNode,
+            backupNode,
+            rizhaoNode,
+        ]);
         const resourceGraph = graph(onlineNode);
         resourceGraph.entities.forEach(entity => {
             entity.region_id = '310000';
@@ -731,11 +744,25 @@ describe('ControlCenterView', () => {
         });
         resourceGraph.entities.push({
             ...resourceGraph.entities[1],
+            entity_id: `node:${backupNode.node_id}`,
+            label: backupNode.name,
+            node_id: backupNode.node_id,
+        }, {
+            ...resourceGraph.entities[1],
             entity_id: `node:${rizhaoNode.node_id}`,
             label: rizhaoNode.name,
             node_id: rizhaoNode.node_id,
             region_id: '370000',
             region_name: '山东省',
+        }, {
+            entity_id: 'device:edge-1',
+            kind: 'managed_device',
+            label: 'AIPACK-01',
+            state: 'available',
+            callable: false,
+            modes: [],
+            node_id: onlineNode.node_id,
+            device_kind: 'edge_compute',
         });
         jest.spyOn(ComputeClusterService, 'resourceGraph').mockResolvedValue(resourceGraph);
         const {container} = render(<ControlCenterView language={Language.CHINESE}/>);
@@ -752,6 +779,14 @@ describe('ControlCenterView', () => {
         expect(overview).toHaveAttribute('aria-pressed', 'true');
         expect(await screen.findByRole('region', {name: '计算群地理地图'})).toBeInTheDocument();
         expect(screen.getByText('边缘集群地图', {selector: 'strong'})).toBeInTheDocument();
+        const mapStats = screen.getByRole('region', {name: '计算群地理地图'})
+            .querySelector('.ComputeKnowledgeStats');
+        expect(mapStats).toHaveTextContent('3主节点');
+        expect(mapStats?.querySelector('.online')).toHaveTextContent('0正常');
+        expect(mapStats?.querySelector('.warning')).toHaveTextContent('2故障');
+        expect(mapStats?.querySelector('.offline')).toHaveTextContent('1异常');
+        expect(container.querySelector('.ControlGeoMapMarker')).toHaveTextContent('3/1');
+        expect(container.querySelector('.ControlGeoMapMarker')).toHaveClass('warning');
         expect(screen.queryByRole('heading', {name: '在线节点'})).not.toBeInTheDocument();
 
         const china = container.querySelector('[data-map-feature="China"]');
@@ -764,16 +799,20 @@ describe('ControlCenterView', () => {
         fireEvent.pointerDown(china as Element, {button: 0, pointerId: 1, clientX: 100, clientY: 100});
         fireEvent.pointerUp(china as Element, {button: 0, pointerId: 1, clientX: 100, clientY: 100});
         expect(setPointerCapture).not.toHaveBeenCalled();
-        fireEvent.click(china as Element);
+        fireEvent.click(screen.getByRole('button', {name: '进入中国下一级地图'}));
         expect(screen.getByText('中国节点地图')).toBeInTheDocument();
         const shandong = container.querySelector('[data-map-feature="山东省"]');
         expect(shandong).toBeInTheDocument();
-        fireEvent.click(shandong as Element);
+        expect(screen.getByRole('button', {name: '进入上海市下一级地图'})).toHaveClass('warning');
+        const shandongMarker = screen.getByRole('button', {name: '进入山东省下一级地图'});
+        expect(shandongMarker).toHaveClass('offline');
+        fireEvent.click(shandongMarker);
         expect(screen.getByText('山东省市级地图')).toBeInTheDocument();
-        expect(container.querySelector('[data-map-prefecture="日照市"]')).toHaveTextContent('1');
-        expect(screen.getByText('0 / 1 正常节点 · 日照市')).toBeInTheDocument();
+        expect(container.querySelector('[data-map-prefecture="日照市"]')).toHaveTextContent('1/0');
+        expect(screen.getByText('正常 0 · 故障 0 · 异常 1 · 日照市')).toBeInTheDocument();
         expect(screen.getByText('正常节点')).toBeInTheDocument();
         expect(screen.getByText('故障节点')).toBeInTheDocument();
+        expect(screen.getByText('异常节点')).toBeInTheDocument();
         expect(screen.queryByText('在线节点', {selector: '.ComputeKnowledgeLegend span'})).not.toBeInTheDocument();
         expect(screen.queryByText('离线节点', {selector: '.ComputeKnowledgeLegend span'})).not.toBeInTheDocument();
         const jinan = container.querySelector('[data-map-feature="济南市"]');
@@ -786,12 +825,12 @@ describe('ControlCenterView', () => {
         expect(shanghai).toBeInTheDocument();
         fireEvent.click(shanghai as Element);
         expect(screen.getByText('上海市地图')).toBeInTheDocument();
-        expect(container.querySelector('[data-map-prefecture="上海市"]')).toHaveTextContent('1');
+        expect(container.querySelector('[data-map-prefecture="上海市"]')).toHaveTextContent('2/1');
         expect(container.querySelector('[data-map-feature="浦东新区"]')).not.toBeInTheDocument();
 
         expect(screen.queryByRole('button', {name: '刷新机器状态'})).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', {name: '图谱'}));
-        expect(screen.getByRole('region', {name: '节点与传感器拓扑'})).toBeInTheDocument();
+        expect(screen.getByRole('region', {name: '主节点、边缘设备与摄像头拓扑'})).toBeInTheDocument();
         expect(screen.getByText('边缘集群图谱', {selector: 'strong'})).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', {name: '地图'}));
         expect(screen.getByRole('region', {name: '计算群地理地图'})).toBeInTheDocument();
@@ -876,49 +915,71 @@ describe('ControlCenterView', () => {
         expect(screen.queryByRole('button', {name: /Bravo/})).not.toBeInTheDocument();
     });
 
-    it('opens a camera in the existing annotation player', async () => {
+    it('opens a registered camera with devices on the left and live view on the right', async () => {
         const machine = node('在线节点', true, true);
-        machine.device_inventory.devices[0].status = 'online';
+        machine.device_inventory.devices[0].capabilities = ['camera.stream.v1'];
         jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([machine]);
-        const open = jest.spyOn(CameraResourceService, 'openCluster').mockResolvedValue();
-        const onCameraOpened = jest.fn();
-        render(
-            <ControlCenterView
-                language={Language.CHINESE}
-                imagesData={[]}
-                onCameraOpened={onCameraOpened}
-            />
-        );
+        render(<ControlCenterView language={Language.CHINESE}/>);
 
         fireEvent.click(await screen.findByRole('button', {name: '打开车间相机实时画面'}));
 
-        await waitFor(() => {
-            expect(open).toHaveBeenCalledWith(
-                '在线节点-id',
-                '在线节点',
-                expect.objectContaining({device_id: 'camera-1'}),
-                [],
-            );
-            expect(onCameraOpened).toHaveBeenCalledTimes(1);
-        });
+        const dialog = await screen.findByRole('dialog', {name: '相机实时画面'});
+        expect(within(dialog).getByText('左侧选择设备，右侧查看实时画面')).toBeInTheDocument();
+        expect(within(dialog).getByRole('tab', {name: /车间相机/})).toHaveAttribute('aria-selected', 'true');
+        expect(within(dialog).getByAltText('车间相机 实时画面')).toHaveAttribute(
+            'src',
+            expect.stringContaining('/nodes/%E5%9C%A8%E7%BA%BF%E8%8A%82%E7%82%B9-id/cameras/camera-1/mjpeg'),
+        );
+        fireEvent.click(within(dialog).getByRole('button', {name: '关闭相机实时画面'}));
+        expect(screen.queryByRole('dialog', {name: '相机实时画面'})).not.toBeInTheDocument();
+    });
+
+    it('refreshes the camera cards when a remote camera is saved', async () => {
+        const emptyNode = node('在线节点', true);
+        const cameraNode = node('在线节点', true, true);
+        cameraNode.device_inventory.devices[0].capabilities = ['camera.stream.v1'];
+        const nodes = jest.spyOn(ComputeClusterService, 'nodes')
+            .mockResolvedValueOnce([emptyNode])
+            .mockResolvedValue([cameraNode]);
+        render(<ControlCenterView language={Language.CHINESE}/>);
+
+        await screen.findByRole('heading', {name: '在线节点'});
+        expect(screen.queryByText('车间相机')).not.toBeInTheDocument();
+        fireEvent(window, new CustomEvent('opensight:camera-resource-updated'));
+
+        await waitFor(() => expect(nodes).toHaveBeenCalledTimes(2));
+        expect(await screen.findByText('车间相机')).toBeInTheDocument();
+    });
+
+    it('requires the camera stream capability without checking the node version', async () => {
+        const machine = node('旧版本节点', true, true);
+        machine.device_inventory.devices[0].status = 'online';
+        jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([machine]);
+        render(<ControlCenterView language={Language.CHINESE}/>);
+
+        const camera = await screen.findByRole('button', {name: '打开车间相机实时画面'});
+        expect(camera).toBeDisabled();
+        expect(camera).toHaveAttribute('title', '此相机不支持实时画面（需要 camera.stream.v1）');
+        fireEvent.click(camera);
+        expect(screen.queryByRole('dialog', {name: '相机实时画面'})).not.toBeInTheDocument();
     });
 
     it('keeps an offline camera hoverable but prevents opening it', async () => {
         const machine = node('在线节点', true, true);
         machine.device_inventory.devices[0].status = 'offline';
         jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([machine]);
-        const open = jest.spyOn(CameraResourceService, 'openCluster').mockResolvedValue();
         render(<ControlCenterView language={Language.CHINESE}/>);
 
         const camera = await screen.findByRole('button', {name: '打开车间相机实时画面'});
         expect(camera).toBeDisabled();
         fireEvent.click(camera);
-        expect(open).not.toHaveBeenCalled();
+        expect(screen.queryByRole('dialog', {name: '相机实时画面'})).not.toBeInTheDocument();
     });
 
     it('keeps camera addition available when a related device already exists', async () => {
         const remoteNode = node('远程节点', true, true);
         remoteNode.control_transport = 'tailscale';
+        remoteNode.capabilities.push('task.camera.connect.v1');
         jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([remoteNode]);
         const updateActivePopupTypeAction = jest.fn();
         render(<ControlCenterView
@@ -937,6 +998,46 @@ describe('ControlCenterView', () => {
         );
     });
 
+    it('disables camera connection when the node does not advertise it', async () => {
+        const machine = node('旧节点', true, true);
+        jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([machine]);
+        const updateActivePopupTypeAction = jest.fn();
+        render(<ControlCenterView
+            language={Language.CHINESE}
+            updateActivePopupTypeAction={updateActivePopupTypeAction}
+        />);
+
+        const button = await screen.findByRole('button', {name: '添加局域网摄像头'});
+        expect(button).toBeDisabled();
+        expect(button).toHaveAttribute('title', '此节点不支持连接相机（需要 task.camera.connect.v1）');
+        fireEvent.click(button);
+        expect(updateActivePopupTypeAction).not.toHaveBeenCalled();
+    });
+
+    it.each(['task.camera.discover.v1', 'task.camera.connect.v1'])(
+        'opens the empty camera entry when the node advertises %s',
+        async capability => {
+            const machine = node('兼容节点', true);
+            machine.capabilities.push(capability);
+            jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([machine]);
+            const updateActivePopupTypeAction = jest.fn();
+            render(<ControlCenterView
+                language={Language.CHINESE}
+                updateActivePopupTypeAction={updateActivePopupTypeAction}
+            />);
+
+            const button = await screen.findByRole('button', {name: '发现并添加局域网摄像头'});
+            expect(button).toBeEnabled();
+            fireEvent.click(button);
+            expect(updateActivePopupTypeAction).toHaveBeenCalledWith(
+                PopupWindowType.CAMERA_CONNECT,
+                '兼容节点-id',
+                '兼容节点',
+                false,
+            );
+        },
+    );
+
     it('prevents LAN camera discovery from an offline node', async () => {
         jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([node('离线节点', false)]);
         const updateActivePopupTypeAction = jest.fn();
@@ -952,40 +1053,96 @@ describe('ControlCenterView', () => {
         expect(updateActivePopupTypeAction).not.toHaveBeenCalled();
     });
 
-    it('shows an associated Jetson under its parent node', async () => {
+    it('shows a verified Jetson as a fixed card with the Jetson icon', async () => {
         const machine = node('山东节点', true);
+        const terminalSession = {
+            version: 1 as const,
+            session_id: 'terminal-edge-1',
+            node_id: machine.node_id,
+            node_name: machine.name,
+            transport: 'tailscale' as const,
+            state: 'running' as const,
+            created_at: 1,
+            last_activity_at: 1,
+            cursor: 0,
+            output: '',
+            output_truncated: false,
+        };
         jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([machine]);
-        jest.spyOn(ComputeClusterService, 'lanAssets').mockResolvedValue({
+        jest.spyOn(ComputeClusterService, 'terminalTargets').mockResolvedValue({
             version: 1,
-            group_id: 'group-1',
-            summary: {total: 1, online: 1, offline: 0, new: 0, changed: 0, networks: 1},
-            latest_scans: [],
-            assets: [{
-                asset_id: 'jetson-1',
+            enabled: true,
+            targets: [{
                 node_id: machine.node_id,
                 node_name: machine.name,
-                cidr: '10.168.10.0/24',
-                address: '10.168.10.26',
-                hostname: 'nvidia-desktop',
-                mac: '3c:6d:66:87:70:30',
-                device_kind: 'edge_compute',
-                display_name: 'sdgt-dlk-04',
-                device_model: 'NVIDIA Jetson',
-                ports: [{port: 22, service: 'ssh'}],
+                platform: 'Windows',
                 online: true,
-                first_seen_at: 1,
-                last_seen_at: 1,
-                last_changed_at: 1,
-                change_type: 'unchanged',
+                available: true,
+                reason: 'available',
             }],
         });
+        jest.spyOn(ComputeClusterService, 'startTerminal').mockResolvedValue(terminalSession);
+        jest.spyOn(ComputeClusterService, 'terminal').mockImplementation(() => new Promise(() => undefined));
+        const terminalInput = jest.spyOn(ComputeClusterService, 'terminalInput').mockResolvedValue(terminalSession);
+        jest.spyOn(ComputeClusterService, 'terminalControl').mockResolvedValue({...terminalSession, state: 'closed'});
+        const lanAssets = jest.spyOn(ComputeClusterService, 'lanAssets')
+            .mockResolvedValueOnce({
+                version: 1,
+                group_id: 'group-1',
+                summary: {total: 0, online: 0, offline: 0, new: 0, changed: 0, networks: 0},
+                latest_scans: [],
+                assets: [],
+            })
+            .mockResolvedValue({
+                version: 1,
+                group_id: 'group-1',
+                summary: {total: 1, online: 1, offline: 0, new: 0, changed: 0, networks: 1},
+                latest_scans: [],
+                assets: [{
+                    asset_id: 'ssh-edge-1',
+                    node_id: machine.node_id,
+                    node_name: machine.name,
+                    cidr: '10.168.10.0/24',
+                    address: '10.168.10.24',
+                    hostname: 'jetson-orin',
+                    mac: '3c:6d:66:87:70:30',
+                    device_kind: 'edge_compute',
+                    display_name: 'jetson-orin',
+                    device_model: 'Orin',
+                    ssh_username: 'nvidia',
+                    ports: [{port: 22, service: 'ssh'}],
+                    online: true,
+                    first_seen_at: 1,
+                    last_seen_at: 1,
+                    last_changed_at: 1,
+                    change_type: 'unchanged',
+                }],
+            });
 
         render(<ControlCenterView language={Language.CHINESE}/>);
 
-        const jetsonName = await screen.findByText('sdgt-dlk-04');
-        expect(jetsonName).toBeInTheDocument();
-        expect(screen.getByText('NVIDIA Jetson · 10.168.10.26')).toBeInTheDocument();
-        expect(within(jetsonName.closest('.ControlCameraCard') as HTMLElement).getByText('正常')).toBeInTheDocument();
+        await screen.findByRole('heading', {name: '山东节点'});
+        expect(screen.queryByText('jetson-orin')).not.toBeInTheDocument();
+        fireEvent(window, new CustomEvent('opensight:edge-device-updated'));
+        await waitFor(() => expect(lanAssets).toHaveBeenCalledTimes(2));
+        const deviceName = await screen.findByText('jetson-orin');
+        const deviceCard = deviceName.closest('.ControlCameraCard') as HTMLElement;
+        expect(screen.getByText('Orin · 10.168.10.24')).toBeInTheDocument();
+        expect(deviceCard.querySelector('.ControlCameraIcon img')).toHaveAttribute('src', '/ico/jetson-agx-orin.png');
+        expect(within(deviceCard).getByText('正常')).toBeInTheDocument();
+
+        fireEvent.click(deviceCard);
+        expect(await screen.findByRole('dialog', {name: '边缘设备终端'}))
+            .toHaveClass('EdgeDeviceTerminalDialog');
+        expect(screen.getByRole('tab', {name: /jetson-orin/})).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('heading', {name: 'jetson-orin · 终端'})).toBeInTheDocument();
+        const connectTerminal = await screen.findByRole('button', {name: '连接终端'});
+        await waitFor(() => expect(connectTerminal).toBeEnabled());
+        fireEvent.click(connectTerminal);
+        await waitFor(() => expect(terminalInput).toHaveBeenCalledWith(
+            'terminal-edge-1', 'ssh nvidia@10.168.10.24\r',
+        ));
+        fireEvent.click(screen.getByRole('button', {name: '关闭边缘设备终端'}));
 
         fireEvent.click(screen.getByRole('button', {name: '1 个相关设备'}));
         expect(screen.getByRole('dialog', {name: '设备管理'})).toBeInTheDocument();
@@ -1083,6 +1240,7 @@ describe('ControlCenterView', () => {
     it('opens Jetson discovery from the edge-device add button', async () => {
         const remoteNode = node('远程节点', true);
         remoteNode.control_transport = 'tailscale';
+        remoteNode.capabilities.push('control.jetson.connect.v1');
         jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([remoteNode]);
         const updateActivePopupTypeAction = jest.fn();
         render(<ControlCenterView
@@ -1098,6 +1256,23 @@ describe('ControlCenterView', () => {
             '远程节点',
             true,
         );
+    });
+
+    it('does not treat Jetson scan support as Jetson connection support', async () => {
+        const machine = node('扫描节点', true);
+        machine.capabilities.push('task.network.lan_discovery.v1');
+        jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([machine]);
+        const updateActivePopupTypeAction = jest.fn();
+        render(<ControlCenterView
+            language={Language.CHINESE}
+            updateActivePopupTypeAction={updateActivePopupTypeAction}
+        />);
+
+        const button = await screen.findByRole('button', {name: '发现并添加局域网边缘计算设备'});
+        expect(button).toBeDisabled();
+        expect(button).toHaveAttribute('title', '此节点不支持 SSH 设备认证');
+        fireEvent.click(button);
+        expect(updateActivePopupTypeAction).not.toHaveBeenCalled();
     });
 
     it('shows the central group at zero and local groups from one', async () => {

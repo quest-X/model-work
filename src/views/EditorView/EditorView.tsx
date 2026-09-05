@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React from 'react';
 import './EditorView.scss';
 import EditorContainer from './EditorContainer/EditorContainer';
 import {PopupWindowType} from '../../data/enums/PopupWindowType';
@@ -12,10 +12,13 @@ import AgentChatTrigger from '../Common/AgentSideChat/AgentChatTrigger';
 
 interface IProps {
     activePopupType: PopupWindowType;
+    platformMode: PlatformMode;
+    onPlatformSwitch: () => void;
 }
 
-const EditorView: React.FC<IProps> = ({activePopupType}) => {
-    const [platformMode, setPlatformMode] = useState<'annotation' | 'control'>('control');
+export type PlatformMode = 'annotation' | 'control';
+
+const EditorView: React.FC<IProps> = ({activePopupType, platformMode, onPlatformSwitch}) => {
 
     const getClassName = () => {
         return classNames(
@@ -33,10 +36,10 @@ const EditorView: React.FC<IProps> = ({activePopupType}) => {
         >
             <TopNavigationBar
                 platformMode={platformMode}
-                onPlatformSwitch={() => setPlatformMode(mode => mode === 'annotation' ? 'control' : 'annotation')}
+                onPlatformSwitch={onPlatformSwitch}
             />
             {platformMode === 'control'
-                ? <ControlCenterView onCameraOpened={() => setPlatformMode('annotation')}/>
+                ? <ControlCenterView/>
                 : <EditorContainer/>}
             <AgentChatTrigger/>
             <AgentSideChat/>

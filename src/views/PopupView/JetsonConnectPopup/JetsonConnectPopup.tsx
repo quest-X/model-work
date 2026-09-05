@@ -7,6 +7,7 @@ import {
     ComputeJetsonConnectResult,
     ComputeLanAsset,
     ComputeLanDiscoveryResult,
+    ComputeTask,
 } from '../../../services/ComputeClusterService';
 import {AppState} from '../../../store';
 import {GenericYesNoPopup} from '../GenericYesNoPopup/GenericYesNoPopup';
@@ -19,31 +20,112 @@ interface IProps {
     remote?: boolean;
 }
 
+type DiscoverySummary = Pick<ComputeLanDiscoveryResult, 'cidr' | 'addresses_scanned'>;
+const isVerifiedJetson = (asset: ComputeLanAsset): boolean =>
+    asset.device_kind === 'edge_compute' && Boolean(asset.device_model?.toLowerCase().includes('jetson'));
+
+// eslint-disable-next-line complexity
 export const JetsonConnectPopup: React.FC<IProps> = ({language, nodeId = null, nodeName = null, remote = false}) => {
     const zh = language === Language.CHINESE;
+    const activeScan = nodeId ? ComputeClusterService.activeLanScan(nodeId) : null;
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [scanning, setScanning] = useState(false);
+    const [scanning, setScanning] = useState(Boolean(activeScan));
     const [scanProgress, setScanProgress] = useState(0);
     const [scanCount, setScanCount] = useState({completed: 0, total: 0});
     const [connecting, setConnecting] = useState(false);
-    const [discovery, setDiscovery] = useState<ComputeLanDiscoveryResult | null>(null);
+    const [discovery, setDiscovery] = useState<DiscoverySummary | null>(null);
     const [candidates, setCandidates] = useState<ComputeLanAsset[]>([]);
     const [selected, setSelected] = useState<ComputeLanAsset | null>(null);
     const [fingerprint, setFingerprint] = useState('');
     const [result, setResult] = useState<ComputeJetsonConnectResult | null>(null);
     const [error, setError] = useState('');
     const scanController = useRef<AbortController | null>(null);
+    const scanTask = useRef<ComputeTask | null>(activeScan);
 
     useEffect(() => () => {
-        scanController.current?.abort();
         scanController.current = null;
+        scanTask.current = null;
     }, []);
 
+    useEffect(() => {
+        const controller = new AbortController();
+        if (nodeId) void ComputeClusterService.lanAssets(controller.signal).then(inventory => {
+            const previousScan = inventory.latest_scans.find(item => item.node_id === nodeId);
+            if (!previousScan) return;
+            const sshCandidates = inventory.assets.filter(asset =>
+                asset.node_id === nodeId
+                && asset.online
+                && asset.ports.some(service => service.port === 22),
+            );
+            setDiscovery(previousScan);
+            setCandidates(sshCandidates);
+            setSelected(sshCandidates[0] || null);
+        }, () => undefined);
+        return () => controller.abort();
+    }, [nodeId]);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        let attachedTask: ComputeTask | undefined;
+        const attach = async () => {
+            if (!nodeId) return;
+            try {
+                attachedTask = ComputeClusterService.activeLanScan(nodeId) || undefined;
+                if (!attachedTask) {
+                    const response = await ComputeClusterService.tasks(controller.signal, 200);
+                    attachedTask = response.tasks.find(task =>
+                        task.node_id === nodeId
+                        && task.task_type === 'network.lan_discovery'
+                        && (task.state === 'queued' || task.state === 'running'),
+                    );
+                }
+                if (controller.signal.aborted || !attachedTask || scanController.current) return;
+                scanController.current = controller;
+                scanTask.current = attachedTask;
+                setScanning(true);
+                const nextDiscovery = await ComputeClusterService.watchLanScan(
+                    attachedTask,
+                    controller.signal,
+                    (percent, completed = 0, total = 0) => {
+                        if (scanController.current !== controller) return;
+                        setScanProgress(percent);
+                        setScanCount({completed, total});
+                    },
+                );
+                if (scanController.current !== controller) return;
+                const inventory = await ComputeClusterService.lanAssets(controller.signal);
+                const sshCandidates = inventory.assets.filter(asset =>
+                    asset.node_id === nodeId
+                    && asset.online
+                    && asset.ports.some(service => service.port === 22),
+                );
+                setDiscovery(nextDiscovery);
+                setCandidates(sshCandidates);
+                setSelected(sshCandidates[0] || null);
+            } catch (reason) {
+                if (!controller.signal.aborted) {
+                    setError(reason instanceof Error ? reason.message : String(reason));
+                }
+            } finally {
+                if (scanController.current === controller) {
+                    scanController.current = null;
+                    setScanning(false);
+                }
+                if (scanTask.current?.task_id === attachedTask?.task_id) scanTask.current = null;
+            }
+        };
+        void attach();
+        return () => controller.abort();
+    }, [nodeId]);
+
     const stopScan = () => {
+        const task = scanTask.current;
         scanController.current?.abort();
         scanController.current = null;
+        scanTask.current = null;
         setScanning(false);
+        if (task) void ComputeClusterService.controlTask(task, 'cancel').catch(() => undefined);
     };
 
     const scan = async () => {
@@ -61,10 +143,12 @@ export const JetsonConnectPopup: React.FC<IProps> = ({language, nodeId = null, n
                 nodeId,
                 controller.signal,
                 (percent, completed = 0, total = 0) => {
+                    if (scanController.current !== controller) return;
                     setScanProgress(percent);
                     setScanCount({completed, total});
                 },
             );
+            if (scanController.current !== controller) return;
             const inventory = await ComputeClusterService.lanAssets();
             const sshCandidates = inventory.assets.filter(asset =>
                 asset.node_id === nodeId
@@ -77,7 +161,8 @@ export const JetsonConnectPopup: React.FC<IProps> = ({language, nodeId = null, n
                 || sshCandidates[0]
                 || null);
         } catch (reason) {
-            if (!(reason instanceof Error && reason.name === 'AbortError')) {
+            if (scanController.current === controller
+                && !(reason instanceof Error && reason.name === 'AbortError')) {
                 const message = reason instanceof Error ? reason.message : String(reason);
                 setError(zh && message === 'Selected node has no scannable LAN segment'
                     ? '该节点没有可扫描的局域网网段（可能故障或没有私有网卡）'
@@ -106,7 +191,7 @@ export const JetsonConnectPopup: React.FC<IProps> = ({language, nodeId = null, n
             } else {
                 setResult(response);
                 setPassword('');
-                window.dispatchEvent(new CustomEvent('opensight:jetson-updated'));
+                window.dispatchEvent(new CustomEvent('opensight:edge-device-updated'));
             }
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : String(reason));
@@ -160,9 +245,13 @@ export const JetsonConnectPopup: React.FC<IProps> = ({language, nodeId = null, n
                     <strong>{zh
                         ? `NVIDIA Jetson 发现${scanning ? ` (${scanCount.completed}/${scanCount.total})` : ''}`
                         : `NVIDIA Jetson discovery${scanning ? ` (${scanCount.completed}/${scanCount.total})` : ''}`}</strong>
-                    <span>{zh
-                        ? '先显示开放 SSH 端口的候选设备，连接后再核验是否为 NVIDIA Jetson。'
-                        : 'SSH candidates are shown first and identified as NVIDIA Jetson only after connection.'}</span>
+                    <span>{scanning
+                        ? (zh ? '后台扫描中；关闭窗口不会停止。' : 'Scanning in the background; closing this window will not stop it.')
+                        : discovery
+                            ? (zh ? '扫描已完成；可选择结果或重新扫描。' : 'Scan complete; select a result or scan again.')
+                            : (zh
+                                ? '先显示开放 SSH 端口的候选设备，连接后再核验是否为 NVIDIA Jetson。'
+                                : 'SSH candidates are shown first and identified as NVIDIA Jetson only after connection.')}</span>
                 </div>
                 <button
                     type='button'
@@ -170,7 +259,11 @@ export const JetsonConnectPopup: React.FC<IProps> = ({language, nodeId = null, n
                     onClick={scanning ? stopScan : scan}
                     disabled={!nodeId}
                 >
-                    {scanning ? (zh ? '停止' : 'Stop') : (zh ? '开始扫描' : 'Start scan')}
+                    {scanning
+                        ? (zh ? '停止' : 'Stop')
+                        : discovery
+                            ? (zh ? '重新扫描' : 'Rescan')
+                            : (zh ? '开始扫描' : 'Start scan')}
                 </button>
             </div>
             {scanning && <div className='JetsonScanProgress'>
@@ -190,15 +283,15 @@ export const JetsonConnectPopup: React.FC<IProps> = ({language, nodeId = null, n
                     aria-pressed={selected?.asset_id === asset.asset_id}
                     onClick={() => choose(asset)}
                 >
-                    <span className={`CameraDiscoveryDot ${asset.device_kind === 'edge_compute' ? 'confirmed' : ''}`}/>
+                    <span className={`CameraDiscoveryDot ${isVerifiedJetson(asset) ? 'confirmed' : ''}`}/>
                     <span className='CameraDiscoveryIdentity'>
                         <strong>{asset.display_name || asset.hostname || asset.address}</strong>
                         <span>{asset.device_model || (zh ? '待 SSH 识别型号' : 'Awaiting SSH identification')}</span>
                     </span>
                     <code>{asset.address}</code>
                     <span className='CameraDiscoveryPorts'>SSH 22</span>
-                    <span className={`CameraDiscoveryStatus ${asset.device_kind === 'edge_compute' ? 'saved' : 'disconnected'}`}>
-                        {asset.device_kind === 'edge_compute' ? (zh ? '已验证' : 'Verified') : (zh ? '未连接' : 'Not connected')}
+                    <span className={`CameraDiscoveryStatus ${isVerifiedJetson(asset) ? 'saved' : 'disconnected'}`}>
+                        {isVerifiedJetson(asset) ? (zh ? '已验证' : 'Verified') : (zh ? '未连接' : 'Not connected')}
                     </span>
                 </button>)}
             </div>}

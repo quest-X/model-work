@@ -169,9 +169,13 @@ export class CameraResourceService {
         return response.blob();
     }
 
-    public static async discover(timeoutSeconds: number = 0.35): Promise<CameraDiscoveryResponse> {
+    public static async discover(
+        timeoutSeconds: number = 0.35,
+        signal?: AbortSignal,
+    ): Promise<CameraDiscoveryResponse> {
         const response = await fetch(`${cameraBaseUrl()}/discovery`, {
             method: 'POST',
+            signal,
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({timeout_seconds: timeoutSeconds}),
         });

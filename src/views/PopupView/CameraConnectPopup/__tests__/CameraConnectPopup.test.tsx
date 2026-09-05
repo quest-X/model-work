@@ -1,7 +1,7 @@
 import React from 'react';
-import {fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {Language} from '../../../../data/LanguageConfig';
-import {CameraResourceService} from '../../../../services/CameraResourceService';
+import {CameraDiscoveryResponse, CameraResourceService} from '../../../../services/CameraResourceService';
 import {ComputeClusterService} from '../../../../services/ComputeClusterService';
 import {CameraConnectPopup} from '../CameraConnectPopup';
 
@@ -71,6 +71,7 @@ const savedResource = {
 describe('CameraConnectPopup LAN discovery', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        window.localStorage.clear();
         const connected = {
             status: 'success',
             device: savedResource.device,
@@ -162,7 +163,7 @@ describe('CameraConnectPopup LAN discovery', () => {
         expect(screen.getByLabelText('播放通道')).toHaveValue('101');
         const successBanner = screen.getByText('相机连接成功');
         const protocolSelect = screen.getByLabelText('协议');
-        const confirmButton = screen.getByRole('button', {name: '确认'});
+        const confirmButton = screen.getByRole('button', {name: '保存'});
         const connectedDetails = document.querySelector('.CameraConnectedDetails');
         expect(successBanner.closest('.CameraForm')).toBeNull();
         expect(successBanner.nextElementSibling).toHaveClass('CameraForm');
@@ -170,7 +171,7 @@ describe('CameraConnectPopup LAN discovery', () => {
         expect(successBanner.compareDocumentPosition(confirmButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(connectedDetails).not.toBeNull();
         expect(connectedDetails?.closest('.CameraDiscoveryPanel')).not.toBeNull();
-        fireEvent.click(screen.getByRole('button', {name: '确认'}));
+        fireEvent.click(screen.getByRole('button', {name: '保存'}));
 
         await waitFor(() => expect(CameraResourceService.update).toHaveBeenCalledWith(
             savedResource.id,
@@ -198,6 +199,76 @@ describe('CameraConnectPopup LAN discovery', () => {
         expect(screen.getByPlaceholderText('123456')).toHaveValue('');
         expect(screen.getByText('未连接')).toBeInTheDocument();
         expect(screen.getByRole('button', {name: '连接'})).toBeDisabled();
+    });
+
+    it('restores the last scan and offers a rescan when reopened', async () => {
+        (CameraResourceService.list as jest.Mock).mockResolvedValue([]);
+        const firstOpen = render(<CameraConnectPopup language={Language.CHINESE} imagesData={[]} />);
+        fireEvent.click(screen.getByRole('button', {name: '开始扫描'}));
+        expect(await screen.findByText('North gate')).toBeInTheDocument();
+        firstOpen.unmount();
+
+        render(<CameraConnectPopup language={Language.CHINESE} imagesData={[]} />);
+
+        await waitFor(() => expect(CameraResourceService.list).toHaveBeenCalledTimes(2));
+        expect(screen.getByText('North gate')).toBeInTheDocument();
+        expect(screen.queryByText('Office Axis')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '重新扫描'})).toBeInTheDocument();
+        expect(CameraResourceService.discover).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps scanning when closed and reattaches when reopened', async () => {
+        let resolveScan: ((result: CameraDiscoveryResponse) => void) | undefined;
+        let signal: AbortSignal | undefined;
+        (CameraResourceService.list as jest.Mock).mockResolvedValue([]);
+        (CameraResourceService.discover as jest.Mock).mockImplementation((_timeout, nextSignal) => {
+            signal = nextSignal;
+            return new Promise(resolve => {
+                resolveScan = resolve;
+            });
+        });
+        const firstOpen = render(<CameraConnectPopup language={Language.CHINESE} imagesData={[]} />);
+        fireEvent.click(screen.getByRole('button', {name: '开始扫描'}));
+        expect(await screen.findByText('后台扫描中；关闭窗口不会停止。')).toBeInTheDocument();
+
+        firstOpen.unmount();
+        render(<CameraConnectPopup language={Language.CHINESE} imagesData={[]} />);
+
+        expect(await screen.findByRole('button', {name: '停止'})).toBeInTheDocument();
+        expect(CameraResourceService.discover).toHaveBeenCalledTimes(1);
+        expect(signal?.aborted).toBe(false);
+        await act(async () => resolveScan?.({
+            networks: ['192.168.10.0/24'], scanned_hosts: 253, duration_ms: 1220,
+            devices: [{
+                host: '192.168.10.12', name: 'North gate', manufacturer: 'Hikvision', model: '',
+                scheme: 'http', port: 80, rtsp_port: 554, sdk_port: 8000,
+                open_ports: [80, 554, 8000], services: ['HTTP', 'RTSP'],
+                discovery_methods: ['RTSP'], confidence: 'confirmed',
+            }],
+        }));
+        expect(await screen.findByText('扫描已完成；可选择结果或重新扫描。')).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '重新扫描'})).toBeInTheDocument();
+    });
+
+    it('cancels a camera scan only when Stop is clicked', async () => {
+        let signal: AbortSignal | undefined;
+        (CameraResourceService.list as jest.Mock).mockResolvedValue([]);
+        (CameraResourceService.discover as jest.Mock).mockImplementation((_timeout, nextSignal) => {
+            signal = nextSignal;
+            return new Promise((_resolve, reject) => nextSignal?.addEventListener('abort', () => {
+                const aborted = new Error('Aborted');
+                aborted.name = 'AbortError';
+                reject(aborted);
+            }));
+        });
+        render(<CameraConnectPopup language={Language.CHINESE} imagesData={[]} />);
+        fireEvent.click(screen.getByRole('button', {name: '开始扫描'}));
+
+        fireEvent.click(await screen.findByRole('button', {name: '停止'}));
+
+        expect(signal?.aborted).toBe(true);
+        expect(await screen.findByRole('button', {name: '开始扫描'})).toBeInTheDocument();
+        expect(screen.queryByText('Aborted')).not.toBeInTheDocument();
     });
 
     it('runs discovery on the selected remote node instead of this computer', async () => {
@@ -240,7 +311,9 @@ describe('CameraConnectPopup LAN discovery', () => {
         expect(await screen.findByText('remote-camera')).toBeInTheDocument();
         expect(screen.getByText('dahua-camera')).toBeInTheDocument();
         expect(screen.queryByText('web-server')).not.toBeInTheDocument();
-        expect(ComputeClusterService.discoverCameras).toHaveBeenCalledWith('remote-node');
+        expect(ComputeClusterService.discoverCameras).toHaveBeenCalledWith(
+            'remote-node', 0.35, expect.any(AbortSignal),
+        );
         expect(CameraResourceService.discover).not.toHaveBeenCalled();
     });
 
@@ -257,6 +330,7 @@ describe('CameraConnectPopup LAN discovery', () => {
         fireEvent.click(screen.getByRole('button', {name: '开始扫描'}));
 
         expect(await screen.findByRole('progressbar', {name: '扫描进度'})).not.toHaveAttribute('value');
+        fireEvent.click(screen.getByRole('button', {name: '停止'}));
     });
 
     it('does not create a remote resource when camera authentication fails', async () => {
@@ -326,7 +400,7 @@ describe('CameraConnectPopup LAN discovery', () => {
         await screen.findByText('相机连接成功');
         fireEvent.click(screen.getByRole('button', {name: '抓图预览'}));
         await screen.findByAltText('相机抓图预览');
-        fireEvent.click(screen.getByRole('button', {name: '确认'}));
+        fireEvent.click(screen.getByRole('button', {name: '保存'}));
 
         await waitFor(() => expect(CameraResourceService.openCluster).toHaveBeenCalled());
         expect(ComputeClusterService.connectCamera).toHaveBeenCalledWith(

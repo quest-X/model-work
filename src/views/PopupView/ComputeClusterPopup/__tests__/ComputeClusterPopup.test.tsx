@@ -363,7 +363,7 @@ describe('ComputeClusterPopup', () => {
         }
     });
 
-    it('shows only compute nodes and sensors while moving operations data into hover cards', async () => {
+    it('shows main nodes, edge devices, and cameras with role-specific codes', async () => {
         const user = userEvent.setup();
         service.status.mockResolvedValue({
             state: 'ready', version: '0.1.0', protocol_version: 1,
@@ -405,10 +405,16 @@ describe('ComputeClusterPopup', () => {
         service.resourceGraph.mockResolvedValue({
             ...currentGraph,
             summary: {
-                ...currentGraph.summary, entities: 13, relations: 12,
+                ...currentGraph.summary, entities: 14, relations: 13,
                 online_nodes: 1, regions: 2, compute_resources: 2,
             },
             entities: [...currentGraph.entities, {
+                entity_id: 'managed-device:node-12345678:edge-1', kind: 'managed_device',
+                label: 'AIPACK-01', state: 'available', callable: false,
+                node_id: 'node-12345678', modes: [], provider: 'jetson-connect',
+                device_kind: 'edge_compute', device_status: 'registered', channels: 0,
+                device_model: 'NVIDIA Jetson Orin', device_capabilities: ['terminal.ssh.v1'],
+            }, {
                 entity_id: 'region:shandong', kind: 'compute_region', label: '山东',
                 state: 'unavailable', callable: false, modes: [], region_id: 'shandong',
                 region_name: '山东', region_source: 'region_label', member_count: 1,
@@ -424,7 +430,15 @@ describe('ComputeClusterPopup', () => {
                 cpu_logical: 8, memory_available_bytes: 12 * 1024 ** 3,
                 disk_free_bytes: 100 * 1024 ** 3, gpu_count: 0,
             }],
-            relations: [...currentGraph.relations, {
+            relations: [...currentGraph.relations.filter(relation => relation.relation_id !== 'manages:camera-1'), {
+                relation_id: 'manages:edge-1', kind: 'manages', source_id: 'node:node-12345678',
+                target_id: 'managed-device:node-12345678:edge-1', active: true, reason: 'available',
+            }, {
+                relation_id: 'manages:edge-camera-1', kind: 'manages',
+                source_id: 'managed-device:node-12345678:edge-1',
+                target_id: 'managed-device:node-12345678:camera-1',
+                active: false, reason: 'not_console_allowlisted',
+            }, {
                 relation_id: 'contains:offline', kind: 'contains', source_id: 'group:group-1',
                 target_id: 'region:shandong', active: true, reason: 'node_offline',
             }, {
@@ -439,20 +453,22 @@ describe('ComputeClusterPopup', () => {
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
 
         expect(await screen.findByText('计算群地域 Graph')).toBeInTheDocument();
-        const resourceWorkspace = screen.getByRole('button', {name: '节点与传感器 3'}).closest('.ComputeClusterPopup');
+        const resourceWorkspace = screen.getByRole('button', {name: '节点与传感器 4'}).closest('.ComputeClusterPopup');
         const schedulerPanel = resourceWorkspace?.querySelector('.ComputeSchedulerPanel');
         const graphPanel = resourceWorkspace?.querySelector('.ComputeKnowledgePanel');
         expect(schedulerPanel?.nextElementSibling).toBe(graphPanel);
         expect(screen.getByText('地域拓扑 · 悬浮查看 / 双击固定')).toBeInTheDocument();
         expect(screen.getByTestId('resource-node-link-graph')).toBeInTheDocument();
-        expect(screen.getAllByTestId('resource-graph-node')).toHaveLength(3);
-        expect(screen.getAllByTestId('resource-graph-edge')).toHaveLength(1);
-        expect(screen.getByTestId('resource-graph-edge')).toHaveClass('inactive');
+        expect(screen.getByTestId('resource-node-link-graph').closest('.ComputeGraphScene')).toHaveAttribute('data-layout', 'radial');
+        expect(screen.getAllByTestId('resource-graph-node')).toHaveLength(4);
+        expect(screen.getAllByTestId('resource-graph-edge')).toHaveLength(2);
+        expect(screen.getAllByTestId('resource-graph-edge').some(edge => edge.classList.contains('inactive'))).toBe(true);
         expect(screen.getByTestId('resource-graph-unavailable-marker')).toBeInTheDocument();
         const graphLegend = graphPanel?.querySelector('.ComputeKnowledgeLegend');
         expect(graphLegend).toHaveTextContent('地域');
-        expect(graphLegend).toHaveTextContent('计算节点');
-        expect(graphLegend).toHaveTextContent('传感器');
+        expect(graphLegend).toHaveTextContent('主节点');
+        expect(graphLegend).toHaveTextContent('边缘计算设备');
+        expect(graphLegend).toHaveTextContent('摄像头');
         expect(screen.queryByText('黄色 · 执行器（预留）')).not.toBeInTheDocument();
         expect(screen.getAllByTestId('resource-graph-region')).toHaveLength(2);
         expect(screen.getByText('上海')).toBeInTheDocument();
@@ -473,15 +489,21 @@ describe('ComputeClusterPopup', () => {
         expect(offlineNode).toHaveAttribute('data-entity-kind', 'compute_node');
         expect(offlineNode).toHaveAttribute('data-entity-shape', 'circle');
         expect(offlineNode).toHaveAttribute('data-entity-state', 'unavailable');
-        expect(within(offlineNode).getByText('N-002')).toBeInTheDocument();
+        expect(within(offlineNode).getByText('M-002')).toBeInTheDocument();
         expect(offlineNode.querySelector('.ComputeGraphNodeState')).not.toBeInTheDocument();
-        const camera = screen.getByRole('button', {name: '查看 IP CAMERA 传感器信息'});
+        const edgeDevice = screen.getByRole('button', {name: '查看 AIPACK-01 设备信息'});
+        expect(edgeDevice).toHaveClass('edge-device');
+        expect(within(edgeDevice).getByText('N-001')).toBeInTheDocument();
+        const camera = screen.getByRole('button', {name: '查看 IP CAMERA 设备信息'});
         expect(camera).toHaveAttribute('data-entity-kind', 'managed_device');
         expect(camera).toHaveAttribute('data-entity-shape', 'rounded-rectangle');
         expect(camera).toHaveClass('sensor');
-        expect(within(camera).getByText('S-003')).toBeInTheDocument();
+        expect(within(camera).getByText('S-001')).toBeInTheDocument();
 
         const onlineNode = screen.getByRole('button', {name: '查看 edge-01 节点信息'});
+        expect(onlineNode).toHaveStyle({top: '52%'});
+        expect(edgeDevice.style.top).not.toBe(onlineNode.style.top);
+        expect(camera.style.top).not.toBe(edgeDevice.style.top);
         await user.hover(onlineNode);
         const operationsCard = screen.getByRole('status', {name: 'edge-01 运维信息'});
         expect(operationsCard).toHaveClass('anchored');
@@ -506,7 +528,7 @@ describe('ComputeClusterPopup', () => {
         await user.unhover(onlineNode);
         expect(screen.getByRole('status', {name: 'edge-01 运维信息'})).toBeInTheDocument();
 
-        await user.click(screen.getByRole('figure', {name: '计算群节点与传感器关系图'}));
+        await user.click(screen.getByRole('figure', {name: '主节点、边缘设备与摄像头关系图'}));
         expect(onlineNode).toHaveAttribute('aria-pressed', 'false');
         expect(screen.queryByRole('status', {name: 'edge-01 运维信息'})).not.toBeInTheDocument();
 
@@ -524,10 +546,10 @@ describe('ComputeClusterPopup', () => {
         await user.unhover(offlineNode);
         await user.hover(camera);
         const sensorCard = screen.getByRole('status', {name: 'IP CAMERA 运维信息'});
-        expect(within(sensorCard).getByText('摄像头传感器 S-003 · 故障')).toBeInTheDocument();
+        expect(within(sensorCard).getByText('摄像头传感器 S-001 · 正常')).toBeInTheDocument();
         expect(within(sensorCard).getByText('DS-2CD2686FWDA2-IZS')).toBeInTheDocument();
         expect(within(sensorCard).getByText('2 个通道')).toBeInTheDocument();
-        expect(within(sensorCard).getByText('归属节点 · edge-01')).toBeInTheDocument();
+        expect(within(sensorCard).getByText('上级设备 · AIPACK-01')).toBeInTheDocument();
         await waitFor(() => expect(service.resourceGraph).toHaveBeenCalledTimes(1));
     });
 

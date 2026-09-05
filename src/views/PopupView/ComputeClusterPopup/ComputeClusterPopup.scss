@@ -277,6 +277,7 @@
   strong { color: #d6b8ff; font-size: 14px; }
   span { color: rgba(255, 255, 255, 0.36); font-size: 8px; white-space: nowrap; }
   .online strong { color: #66dda0; }
+  .warning strong { color: #e7a640; }
   .offline strong { color: #ff8f8f; }
 }
 
@@ -301,6 +302,8 @@
   i.entity-shape.rounded-rectangle { width: 15px; height: 9px; border-color: rgba(241, 189, 103, 0.72); border-radius: 4px; background: rgba(118, 85, 40, 0.56); }
   i.entity-shape.region { width: 15px; height: 9px; border-color: rgba(155, 119, 204, 0.72); border-radius: 3px; background: rgba(67, 48, 91, 0.38); }
   i.entity-shape.sensor { border-color: rgba(91, 195, 255, 0.78); background: rgba(43, 113, 153, 0.62); }
+  i.entity-shape.edge-device { border-color: rgba(102, 221, 160, 0.78); background: rgba(34, 117, 77, 0.72); }
+  i.entity-shape.controller { border-color: rgba(190, 137, 241, 0.78); background: rgba(76, 47, 105, 0.72); }
   i.entity-shape.actuator { border-color: rgba(244, 194, 83, 0.82); background: rgba(136, 100, 34, 0.64); }
   i.node-state { width: 8px; height: 8px; border: 1px solid rgba(255, 255, 255, 0.18); }
   i.node-state.online { background: #66dda0; box-shadow: 0 0 7px rgba(102, 221, 160, 0.52); }
@@ -351,7 +354,7 @@
   background-image:
     linear-gradient(rgba(191, 143, 249, 0.025) 1px, transparent 1px),
     linear-gradient(90deg, rgba(191, 143, 249, 0.025) 1px, transparent 1px),
-    radial-gradient(circle at 50% 35%, rgba(122, 71, 176, 0.18), transparent 42%);
+    radial-gradient(circle at 50% 50%, rgba(122, 71, 176, 0.18), transparent 42%);
 }
 
 .ComputeClusterPopup.maximized .ComputeGraphScene {
@@ -484,9 +487,9 @@
     background: radial-gradient(circle at 38% 30%, rgba(109, 68, 154, 0.96), rgba(49, 34, 68, 0.98) 68%);
   }
   &.compute_node.node-online {
-    border: 2px solid rgba(102, 221, 160, 0.9);
-    background: radial-gradient(circle at 38% 30%, rgba(47, 129, 89, 0.98), rgba(24, 65, 48, 0.98) 68%);
-    box-shadow: 0 0 0 6px rgba(102, 221, 160, 0.06), 0 0 24px rgba(102, 221, 160, 0.22);
+    border: 2px solid rgba(190, 137, 241, 0.92);
+    background: radial-gradient(circle at 38% 30%, rgba(109, 68, 154, 0.98), rgba(49, 34, 68, 0.98) 68%);
+    box-shadow: 0 0 0 6px rgba(190, 137, 241, 0.06), 0 0 24px rgba(190, 137, 241, 0.22);
     filter: none;
   }
   &.compute_node.node-offline {
@@ -559,10 +562,22 @@
       background: linear-gradient(145deg, rgba(76, 47, 105, 0.92), rgba(30, 24, 37, 0.98));
       > i { border-color: rgba(190, 137, 241, 0.6); background: #382344; color: #d4a4ff; }
     }
+    &.edge-device {
+      border-color: rgba(102, 221, 160, 0.78);
+      background: linear-gradient(145deg, rgba(34, 117, 77, 0.94), rgba(18, 49, 36, 0.98));
+      > i { border-color: rgba(102, 221, 160, 0.62); background: #173b2b; color: #8ee4b3; }
+      > span { color: rgba(132, 231, 175, 0.78); }
+    }
     &.actuator {
       border-color: rgba(244, 194, 83, 0.76);
       background: linear-gradient(145deg, rgba(92, 67, 24, 0.92), rgba(35, 29, 19, 0.98));
       > i { border-color: rgba(244, 194, 83, 0.62); background: #443318; color: #f6ce72; }
+    }
+    &.state-unavailable {
+      border-color: rgba(226, 76, 76, 0.92);
+      background: linear-gradient(145deg, rgba(133, 52, 58, 0.96), rgba(57, 30, 34, 0.98));
+      > i { border-color: rgba(226, 76, 76, 0.68); background: #442126; color: #ffaaaa; }
+      > span { color: rgba(255, 170, 170, 0.82); }
     }
   }
   &.compute_node.pinned {

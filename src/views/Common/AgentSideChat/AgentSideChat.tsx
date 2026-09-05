@@ -28,6 +28,16 @@ type ChatMessage = {
 
 type NodeOperation = 'status' | 'probe' | 'filesystem-list-desktop';
 
+const filesystemListUnavailableReason = (node: ComputeClusterNode, zh: boolean): string => {
+    if (!node.online) return zh
+        ? '节点当前故障，恢复正常后才能读取公共桌面。'
+        : 'The node must return to normal before the public desktop can be listed.';
+    if (!node.capabilities?.includes('filesystem.list.v1')) return zh
+        ? '此节点不支持读取公共桌面（需要 filesystem.list.v1）。'
+        : 'This node cannot list the public desktop (filesystem.list.v1 is required).';
+    return '';
+};
+
 type FilesystemSessionIdentity = {
     privateKey: CryptoKey;
     user: {user_id: string; user_name: string; user_public_key: string};
@@ -326,7 +336,7 @@ const quickScanResources = (node: ComputeClusterNode, zh: boolean): Omit<QuickSc
         .filter((value): value is number => Number.isFinite(value));
     const gpuTemperature = temperatures.length ? Math.max(...temperatures) : null;
     const ssh = computeSshAvailability(node);
-    const networkFault = !ssh.lan && !ssh.tailscale;
+    const networkFault = !ssh.lan || !ssh.tailscale;
 
     if (cpu === null) problems.push(zh ? 'CPU 未上报' : 'CPU not reported');
     else if (cpu >= QUICK_SCAN_LIMITS.cpuPercent) problems.push(`CPU ${cpu}%`);
@@ -975,6 +985,13 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
             setSendError(zh ? '未找到该节点' : 'Node not found');
             return;
         }
+        if (deviceCommand?.node && deviceCommand.operation === 'filesystem-list-desktop') {
+            const unavailableReason = filesystemListUnavailableReason(deviceCommand.node, zh);
+            if (unavailableReason) {
+                setSendError(unavailableReason);
+                return;
+            }
+        }
         setDraft('');
         setSendError('');
         if (sending) {
@@ -1325,7 +1342,12 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
                 <button type='button' disabled={!selectedNode.online} onClick={() => selectNodeOperation('probe')}>
                     {zh ? '测试连通' : 'Test connection'}
                 </button>
-                <button type='button' disabled={!selectedNode.online} onClick={() => selectNodeOperation('filesystem-list-desktop')}>
+                <button
+                    type='button'
+                    disabled={Boolean(filesystemListUnavailableReason(selectedNode, zh))}
+                    title={filesystemListUnavailableReason(selectedNode, zh) || undefined}
+                    onClick={() => selectNodeOperation('filesystem-list-desktop')}
+                >
                     {zh ? '查看公共桌面' : 'List public desktop'}
                 </button>
             </div>}

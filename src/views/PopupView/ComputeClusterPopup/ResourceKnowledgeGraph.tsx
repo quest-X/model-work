@@ -53,21 +53,34 @@ const spread = (count: number, minimum: number, maximum: number): number[] => {
     return Array.from({length: count}, (_, index) => minimum + (maximum - minimum) * index / (count - 1));
 };
 
+const radialPoint = (
+    centerX: number,
+    centerY: number,
+    radiusX: number,
+    radiusY: number,
+    angle: number,
+): GraphPoint => ({
+    x: centerX + Math.cos(angle) * radiusX,
+    y: centerY + Math.sin(angle) * radiusY,
+});
+
 const visibleEntity = (entity: ComputeResourceGraphEntity): boolean =>
     entity.kind === 'compute_node' || entity.kind === 'managed_device';
 
 const deviceClass = (entity: ComputeResourceGraphEntity): 'sensor' | 'controller' | 'actuator' => {
     const kind = (entity.device_kind || '').toLowerCase();
-    if (['plc', 'controller', 'control'].includes(kind)) return 'controller';
+    if (['plc', 'controller', 'control', 'edge_compute'].includes(kind)) return 'controller';
     if (['actuator', 'motor', 'valve', 'robot'].includes(kind)) return 'actuator';
     return 'sensor';
 };
 
 const displayCodes = (entities: ComputeResourceGraphEntity[]): Map<string, string> => {
     const prefix = (entity: ComputeResourceGraphEntity): string => {
-        if (entity.kind === 'compute_node') return 'N';
+        if (entity.kind === 'compute_node') return 'M';
         if (entity.kind === 'work_agent') return 'A';
         if (entity.kind === 'managed_device') {
+            if (entity.device_kind === 'edge_compute') return 'N';
+            if (entity.device_kind === 'camera') return 'S';
             const classification = deviceClass(entity);
             return classification === 'sensor' ? 'S' : classification === 'controller' ? 'C' : 'E';
         }
@@ -80,10 +93,13 @@ const displayCodes = (entities: ComputeResourceGraphEntity[]): Map<string, strin
             return (order[left.kind] ?? 9) - (order[right.kind] ?? 9)
                 || left.entity_id.localeCompare(right.entity_id);
         });
-    return new Map(operational.map((entity, index) => [
-        entity.entity_id,
-        `${prefix(entity)}-${String(index + 1).padStart(3, '0')}`,
-    ]));
+    const counts = new Map<string, number>();
+    return new Map(operational.map(entity => {
+        const codePrefix = prefix(entity);
+        const index = (counts.get(codePrefix) || 0) + 1;
+        counts.set(codePrefix, index);
+        return [entity.entity_id, `${codePrefix}-${String(index).padStart(3, '0')}`] as const;
+    }));
 };
 
 const operationsTopology = (
@@ -93,6 +109,22 @@ const operationsTopology = (
     const points = new Map<string, GraphPoint>();
     const nodes = entities.filter(entity => entity.kind === 'compute_node');
     const devices = entities.filter(entity => entity.kind === 'managed_device');
+    const ownerByTarget = new Map(relations
+        .filter(relation => relation.kind === 'manages')
+        .map(relation => [relation.target_id, relation.source_id]));
+    const childrenByOwner = new Map<string, ComputeResourceGraphEntity[]>();
+    devices.forEach(device => {
+        const ownerId = ownerByTarget.get(device.entity_id) || `unowned:${device.node_id || 'unknown'}`;
+        childrenByOwner.set(ownerId, [...(childrenByOwner.get(ownerId) || []), device]);
+    });
+    const branchWeight = (entity: ComputeResourceGraphEntity): number =>
+        entity.device_kind === 'edge_compute'
+            ? Math.max(1, (childrenByOwner.get(entity.entity_id) || []).length)
+            : 1;
+    const nodeWeight = (nodeId: string): number => Math.max(
+        1,
+        (childrenByOwner.get(nodeId) || []).reduce((total, child) => total + branchWeight(child), 0),
+    );
     const regionEntities = entities.filter(entity => entity.kind === 'compute_region');
     const regionRecords = new Map<string, Omit<GraphRegion, 'left' | 'width'>>();
     regionEntities.forEach(region => regionRecords.set(region.entity_id, {
@@ -133,43 +165,59 @@ const operationsTopology = (
         .filter(region => region.nodeIds.length > 0)
         .sort((left, right) => left.regionId.localeCompare(right.regionId) || left.entityId.localeCompare(right.entityId));
     const gap = 2;
-    const regionWidth = orderedRegions.length
-        ? (96 - gap * Math.max(0, orderedRegions.length - 1)) / orderedRegions.length
-        : 96;
-    const regions = orderedRegions.map((region, index): GraphRegion => ({
-        ...region,
-        left: 2 + index * (regionWidth + gap),
-        width: regionWidth,
-    }));
+    const usableWidth = 96 - gap * Math.max(0, orderedRegions.length - 1);
+    const regionWeights = orderedRegions.map(region =>
+        Math.sqrt(region.nodeIds.reduce((total, nodeId) => total + nodeWeight(nodeId), 0)),
+    );
+    const totalWeight = Math.max(1, regionWeights.reduce((total, weight) => total + weight, 0));
+    let regionLeft = 2;
+    const regions = orderedRegions.map((region, index): GraphRegion => {
+        const width = usableWidth * regionWeights[index] / totalWeight;
+        const positioned = {...region, left: regionLeft, width};
+        regionLeft += width + gap;
+        return positioned;
+    });
     regions.forEach(region => {
-        const nodeXs = spread(region.nodeIds.length, region.nodeIds.length === 1 ? 50 : 22, region.nodeIds.length === 1 ? 50 : 78);
-        region.nodeIds.forEach((nodeId, index) => points.set(nodeId, {
-            x: region.left + region.width * nodeXs[index] / 100,
-            y: 38,
-        }));
-    });
-
-    const deviceGroups = new Map<string, ComputeResourceGraphEntity[]>();
-    devices.forEach(device => {
-        const ownerRelation = relations.find(relation =>
-            relation.kind === 'manages' && relation.target_id === device.entity_id,
-        );
-        const ownerId = ownerRelation?.source_id || `unowned:${device.node_id || 'unknown'}`;
-        deviceGroups.set(ownerId, [...(deviceGroups.get(ownerId) || []), device]);
-    });
-
-    let unownedIndex = 0;
-    deviceGroups.forEach((ownedDevices, ownerId) => {
-        const owner = points.get(ownerId);
-        const offsets = spread(ownedDevices.length, ownedDevices.length === 1 ? 0 : -9, ownedDevices.length === 1 ? 0 : 9);
-        ownedDevices.forEach((device, index) => {
-            const fallback = spread(devices.length, 14, 86)[unownedIndex++] ?? 50;
-            points.set(device.entity_id, {
-                x: Math.max(8, Math.min(92, (owner?.x ?? fallback) + offsets[index])),
-                y: 76,
+        const centerX = region.left + region.width / 2;
+        const centerY = 52;
+        const nodeCount = region.nodeIds.length;
+        const sectorSize = Math.PI * 2 / Math.max(1, nodeCount);
+        region.nodeIds.forEach((nodeId, nodeIndex) => {
+            const nodeAngle = -Math.PI / 2 + sectorSize * nodeIndex;
+            points.set(nodeId, nodeCount === 1
+                ? {x: centerX, y: centerY}
+                : radialPoint(centerX, centerY, region.width * .12, 10, nodeAngle));
+            const children = childrenByOwner.get(nodeId) || [];
+            const childrenWeight = Math.max(1, children.reduce((total, child) => total + branchWeight(child), 0));
+            let usedWeight = 0;
+            children.forEach(child => {
+                const weight = branchWeight(child);
+                const childAngle = nodeCount === 1
+                    ? -Math.PI / 2 + Math.PI * 2 * (usedWeight + weight / 2) / childrenWeight
+                    : nodeAngle - sectorSize * .38 + sectorSize * .76 * (usedWeight + weight / 2) / childrenWeight;
+                const isEdgeDevice = child.device_kind === 'edge_compute';
+                points.set(child.entity_id, radialPoint(
+                    centerX,
+                    centerY,
+                    region.width * (isEdgeDevice ? .24 : .4),
+                    isEdgeDevice ? 21 : 38,
+                    childAngle,
+                ));
+                const grandchildren = childrenByOwner.get(child.entity_id) || [];
+                const branchArc = (nodeCount === 1 ? Math.PI * 2 : sectorSize * .76) * weight / childrenWeight;
+                spread(grandchildren.length, -.35, .35).forEach((offset, index) => points.set(
+                    grandchildren[index].entity_id,
+                    radialPoint(centerX, centerY, region.width * .4, 38, childAngle + branchArc * offset),
+                ));
+                usedWeight += weight;
             });
         });
     });
+    const unowned = devices.filter(device => !points.has(device.entity_id));
+    unowned.forEach((device, index) => points.set(
+        device.entity_id,
+        radialPoint(50, 52, 40, 38, -Math.PI / 2 + Math.PI * 2 * index / Math.max(1, unowned.length)),
+    ));
     return {points, regions};
 };
 
@@ -187,6 +235,7 @@ const availabilityLabel = (available: boolean, zh: boolean): string =>
     available ? (zh ? '正常' : 'Normal') : (zh ? '故障' : 'Fault');
 
 const sensorKindLabel = (entity: ComputeResourceGraphEntity, zh: boolean): string => {
+    if (entity.device_kind === 'edge_compute') return zh ? '边缘计算设备' : 'Edge device';
     const classification = deviceClass(entity);
     if (classification === 'controller') return zh ? '控制器' : 'Controller';
     if (classification === 'actuator') return zh ? '执行器' : 'Actuator';
@@ -195,7 +244,7 @@ const sensorKindLabel = (entity: ComputeResourceGraphEntity, zh: boolean): strin
 };
 
 const deviceStatusLabel = (status: string | null | undefined, zh: boolean): string => {
-    const healthy = ['online', 'available', 'healthy'].includes(status || '');
+    const healthy = ['registered', 'online', 'available', 'healthy'].includes(status || '');
     return availabilityLabel(healthy, zh);
 };
 
@@ -239,7 +288,12 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     const points = topology.points;
     const codes = useMemo(() => displayCodes(graph.entities), [graph.entities]);
     const graphNodes = visibleEntities.filter(entity => entity.kind === 'compute_node');
-    const sensors = visibleEntities.filter(entity => entity.kind === 'managed_device');
+    const edgeDevices = visibleEntities.filter(entity =>
+        entity.kind === 'managed_device' && entity.device_kind === 'edge_compute',
+    );
+    const sensors = visibleEntities.filter(entity =>
+        entity.kind === 'managed_device' && entity.device_kind !== 'edge_compute',
+    );
     const offlineNodes = graphNodes.filter(entity => entity.state !== 'available').length;
     const sshReachableNodes = graphNodes.filter(entity => {
         const node = entity.node_id ? nodeIndex.get(entity.node_id) : undefined;
@@ -275,37 +329,39 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
         return relation ? index.get(relation.source_id) : undefined;
     };
 
-    return <section className='ComputeKnowledgePanel' aria-label={zh ? '节点与传感器拓扑' : 'Node and sensor topology'}>
+    return <section className='ComputeKnowledgePanel' aria-label={zh ? '主节点、边缘设备与摄像头拓扑' : 'Main node, edge device, and camera topology'}>
         <div className='ComputeKnowledgeHeading'>
             <div>
                 <span>{zh ? '地域拓扑 · 悬浮查看 / 双击固定' : 'Regional topology · Hover / double-click to pin'}</span>
                 <h3>{zh ? '计算群地域 Graph' : 'Compute cluster regional graph'}</h3>
                 <p>{zh
-                    ? '计算群按地域归组计算节点，节点再连接传感器；SSH、公网、Tailscale 和任务执行器收进节点就近信息卡。'
-                    : 'The cluster groups compute nodes by region, then connects their sensors. SSH, public egress, Tailscale, and task workers appear beside each node.'}</p>
+                    ? '计算群按地域归组主节点，主节点连接边缘计算设备，边缘设备再连接对应摄像头。'
+                    : 'The cluster groups main nodes by region, then links them to edge devices and each edge device to its cameras.'}</p>
             </div>
             <div className='ComputeKnowledgeStats'>
                 <div><strong>{topology.regions.length}</strong><span>{zh ? '地域' : 'regions'}</span></div>
-                <div><strong>{graphNodes.length}</strong><span>{zh ? '计算节点' : 'compute nodes'}</span></div>
+                <div><strong>{graphNodes.length}</strong><span>{zh ? '主节点' : 'main nodes'}</span></div>
                 <div className='online'><strong>{graph.summary.online_nodes}</strong><span>{zh ? '正常' : 'Normal'}</span></div>
                 <div className='offline'><strong>{offlineNodes}</strong><span>{zh ? '故障' : 'Fault'}</span></div>
                 <div><strong>{sshReachableNodes}</strong><span>{zh ? 'SSH 正常' : 'SSH Normal'}</span></div>
-                <div><strong>{sensors.length}</strong><span>{zh ? '传感器' : 'sensors'}</span></div>
+                <div><strong>{edgeDevices.length}</strong><span>{zh ? '边缘设备' : 'edge devices'}</span></div>
+                <div><strong>{sensors.length}</strong><span>{zh ? '摄像头' : 'cameras'}</span></div>
             </div>
         </div>
 
         <div className='ComputeKnowledgeLegend'>
             <span><i className='entity-shape region'/>{zh ? '地域' : 'Region'}</span>
-            <span><i className='entity-shape circle'/>{zh ? '计算节点' : 'Compute node'}</span>
-            <span><i className='entity-shape rounded-rectangle sensor'/>{zh ? '传感器' : 'Sensor'}</span>
+            <span><i className='entity-shape circle'/>{zh ? '主节点' : 'Main node'}</span>
+            <span><i className='entity-shape rounded-rectangle edge-device'/>{zh ? '边缘计算设备' : 'Edge device'}</span>
+            <span><i className='entity-shape rounded-rectangle sensor'/>{zh ? '摄像头' : 'Camera'}</span>
         </div>
 
         <div className='ComputeGraphViewport'>
             <div
                 className='ComputeGraphScene operations-only'
-                style={{minWidth: `${Math.max(720, topology.regions.length * 390)}px`}}
+                data-layout='radial'
                 role='figure'
-                aria-label={zh ? '计算群节点与传感器关系图' : 'Compute cluster node and sensor graph'}
+                aria-label={zh ? '主节点、边缘设备与摄像头关系图' : 'Main node, edge device, and camera graph'}
                 onClick={event => {
                     const target = event.target as Element;
                     if (!target.closest('[data-testid="resource-graph-node"]')) setPinnedEntityId(null);
@@ -367,7 +423,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                     return <button
                         type='button'
                         key={entity.entity_id}
-                        className={`ComputeGraphNode ${entity.kind} ${classification} state-${entity.state} ${isNode
+                        className={`ComputeGraphNode ${entity.kind} ${classification} ${entity.device_kind === 'edge_compute' ? 'edge-device' : ''} state-${entity.state} ${isNode
                             ? (entity.state === 'available' ? 'node-online' : 'node-offline')
                             : 'sensor-node'} ${isHovered || isPinned ? 'focused' : ''} ${isPinned ? 'pinned' : ''}`}
                         style={{left: `${point.x}%`, top: `${point.y}%`}}
@@ -383,18 +439,20 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                         aria-pressed={isNode ? isPinned : undefined}
                         aria-label={isNode
                             ? `${zh ? '查看' : 'Inspect'} ${entity.label} ${zh ? '节点信息' : 'node details'}`
-                            : `${zh ? '查看' : 'Inspect'} ${entity.label} ${zh ? '传感器信息' : 'sensor details'}`}
+                            : `${zh ? '查看' : 'Inspect'} ${entity.label} ${zh ? '设备信息' : 'device details'}`}
                         data-testid='resource-graph-node'
                         data-entity-kind={entity.kind}
                         data-entity-shape={isNode ? 'circle' : 'rounded-rectangle'}
                         data-entity-state={entity.state}
                     >
                         <i>{codes.get(entity.entity_id)}</i>
-                        <span>{isNode ? (zh ? '计算节点' : 'Compute node') : sensorKindLabel(entity, zh)}</span>
+                        <span>{isNode ? (zh ? '主节点' : 'Main node') : sensorKindLabel(entity, zh)}</span>
                         <strong>{entity.label}</strong>
                         <small>{isNode
                             ? `${zh ? '心跳' : 'Heartbeat'} ${heartbeatLabel(node?.heartbeat_age_seconds, zh)}`
-                            : `${entity.device_model || (zh ? '型号未知' : 'Unknown model')} · ${entity.channels || 0} ${zh ? '通道' : 'channels'}`}</small>
+                            : entity.device_kind === 'edge_compute'
+                                ? entity.device_model || (zh ? '型号未知' : 'Unknown model')
+                                : `${entity.device_model || (zh ? '型号未知' : 'Unknown model')} · ${entity.channels || 0} ${zh ? '通道' : 'channels'}`}</small>
                     </button>;
                     },
                 )}
@@ -420,8 +478,8 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                         const tailscaleAvailable = dependencyFor(inspectedEntity, 'tailscale');
                         return <>
                             <span>{zh
-                                ? `计算节点 ${codes.get(inspectedEntity.entity_id)} · 运维信息${pinnedEntityId === inspectedEntity.entity_id ? ' · 已固定（双击节点或点击空白取消）' : ''}`
-                                : `Compute node ${codes.get(inspectedEntity.entity_id)} · Operations${pinnedEntityId === inspectedEntity.entity_id ? ' · Pinned (double-click node or click blank space to unpin)' : ''}`}</span>
+                                ? `主节点 ${codes.get(inspectedEntity.entity_id)} · 运维信息${pinnedEntityId === inspectedEntity.entity_id ? ' · 已固定（双击节点或点击空白取消）' : ''}`
+                                : `Main node ${codes.get(inspectedEntity.entity_id)} · Operations${pinnedEntityId === inspectedEntity.entity_id ? ' · Pinned (double-click node or click blank space to unpin)' : ''}`}</span>
                             <strong>{inspectedEntity.label}</strong>
                             <small className={node?.online ? 'online' : 'offline'}>{node?.online
                                 ? `${zh ? '正常 · 心跳' : 'Normal · heartbeat'} ${heartbeatLabel(node.heartbeat_age_seconds, zh)}`
@@ -451,9 +509,10 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                         <strong>{inspectedEntity.label}</strong>
                         <small>{inspectedEntity.device_model || (zh ? '型号未知' : 'Unknown model')}</small>
                         <div className='ComputeGraphSensorFacts'>
-                            <em>{inspectedEntity.channels || 0} {zh ? '个通道' : 'channels'}</em>
+                            {inspectedEntity.device_kind !== 'edge_compute'
+                                && <em>{inspectedEntity.channels || 0} {zh ? '个通道' : 'channels'}</em>}
                             <em>{zh ? '接入方式' : 'Provider'} · {inspectedEntity.provider || '—'}</em>
-                            <em>{zh ? '归属节点' : 'Owner'} · {ownerFor(inspectedEntity)?.label || (zh ? '未归属' : 'Unassigned')}</em>
+                            <em>{zh ? '上级设备' : 'Owner'} · {ownerFor(inspectedEntity)?.label || (zh ? '未归属' : 'Unassigned')}</em>
                         </div>
                     </>}
                 </aside>}

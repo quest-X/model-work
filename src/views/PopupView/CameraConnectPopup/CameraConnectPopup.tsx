@@ -26,11 +26,57 @@ interface IProps {
     remote?: boolean;
 }
 
+const discoveryStorageKey = (nodeId: string | null): string =>
+    `opensight.camera-discovery.${nodeId || 'local'}`;
+
+type CameraScan = {controller: AbortController; promise: Promise<CameraDiscoveryResponse>};
+
+// ponytail: survives popup remounts only; use a durable backend task if page-reload recovery becomes necessary.
+const activeCameraScans = new Map<string, CameraScan>();
+
+const startCameraScan = (key: string, nodeId: string | null): CameraScan => {
+    const current = activeCameraScans.get(key);
+    if (current) return current;
+    const controller = new AbortController();
+    const scan = {
+        controller,
+        promise: nodeId
+            ? ComputeClusterService.discoverCameras(nodeId, 0.35, controller.signal)
+            : CameraResourceService.discover(0.35, controller.signal),
+    };
+    activeCameraScans.set(key, scan);
+    void scan.promise.then(
+        () => {
+            if (activeCameraScans.get(key) === scan) activeCameraScans.delete(key);
+        },
+        () => {
+            if (activeCameraScans.get(key) === scan) activeCameraScans.delete(key);
+        },
+    );
+    return scan;
+};
+
+const loadDiscovery = (key: string): CameraDiscoveryResponse | null => {
+    try {
+        const stored = JSON.parse(window.localStorage.getItem(key) || 'null') as CameraDiscoveryResponse | null;
+        return stored
+            && Array.isArray(stored.networks)
+            && typeof stored.scanned_hosts === 'number'
+            && typeof stored.duration_ms === 'number'
+            && Array.isArray(stored.devices)
+            ? stored
+            : null;
+    } catch {
+        return null;
+    }
+};
+
 // eslint-disable-next-line complexity
 export const CameraConnectPopup: React.FC<IProps> = (
     {language, imagesData, nodeId = null, nodeName = null, remote = false},
 ) => {
     const chinese = language === Language.CHINESE;
+    const storageKey = discoveryStorageKey(nodeId);
     const [scheme, setScheme] = useState<'http' | 'https'>('http');
     const [host, setHost] = useState('');
     const [port, setPort] = useState('80');
@@ -46,12 +92,46 @@ export const CameraConnectPopup: React.FC<IProps> = (
     const [previewUrl, setPreviewUrl] = useState('');
     const [resourceName, setResourceName] = useState('');
     const [saving, setSaving] = useState(false);
-    const [scanning, setScanning] = useState(false);
+    const [scanning, setScanning] = useState(() => activeCameraScans.has(storageKey));
     const [scanError, setScanError] = useState('');
-    const [discovery, setDiscovery] = useState<CameraDiscoveryResponse | null>(null);
+    const [discovery, setDiscovery] = useState<CameraDiscoveryResponse | null>(() => loadDiscovery(storageKey));
     const [savedResources, setSavedResources] = useState<CameraResource[]>([]);
     const [savedResource, setSavedResource] = useState<CameraResource | null>(null);
     const [loadingCredentials, setLoadingCredentials] = useState(false);
+
+    const showDiscovery = (nextDiscovery: CameraDiscoveryResponse) => {
+        const visibleDiscovery = {
+            ...nextDiscovery,
+            devices: nextDiscovery.devices.filter(({manufacturer}) =>
+                /^(?:(?:hikvision|dahua)(?:\b|-)|海康|大华)/i.test(manufacturer),
+            ),
+        };
+        setDiscovery(visibleDiscovery);
+        window.localStorage.setItem(storageKey, JSON.stringify(visibleDiscovery));
+    };
+
+    useEffect(() => {
+        const activeScan = activeCameraScans.get(storageKey);
+        if (!activeScan) return undefined;
+        let mounted = true;
+        setScanning(true);
+        setScanError('');
+        void activeScan.promise.then(
+            nextDiscovery => {
+                if (mounted) showDiscovery(nextDiscovery);
+            },
+            scanFailure => {
+                if (mounted && !activeScan.controller.signal.aborted) {
+                    setScanError(scanFailure instanceof Error ? scanFailure.message : String(scanFailure));
+                }
+            },
+        ).finally(() => {
+            if (mounted) setScanning(false);
+        });
+        return () => {
+            mounted = false;
+        };
+    }, [storageKey]);
 
     useEffect(() => () => {
         if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -109,23 +189,25 @@ export const CameraConnectPopup: React.FC<IProps> = (
 
     const scanCameras = async () => {
         if (scanning) return;
+        const scan = startCameraScan(storageKey, nodeId);
         setScanning(true);
         setScanError('');
         try {
-            const nextDiscovery = nodeId
-                ? await ComputeClusterService.discoverCameras(nodeId)
-                : await CameraResourceService.discover();
-            setDiscovery({
-                ...nextDiscovery,
-                devices: nextDiscovery.devices.filter(({manufacturer}) =>
-                    /^(?:(?:hikvision|dahua)(?:\b|-)|海康|大华)/i.test(manufacturer),
-                ),
-            });
+            showDiscovery(await scan.promise);
         } catch (scanFailure) {
-            setScanError(scanFailure instanceof Error ? scanFailure.message : String(scanFailure));
+            if (!scan.controller.signal.aborted) {
+                setScanError(scanFailure instanceof Error ? scanFailure.message : String(scanFailure));
+            }
         } finally {
             setScanning(false);
         }
+    };
+
+    const stopCameraScan = () => {
+        const scan = activeCameraScans.get(storageKey);
+        scan?.controller.abort();
+        if (scan) activeCameraScans.delete(storageKey);
+        setScanning(false);
     };
 
     const useSavedResource = async (resource: CameraResource) => {
@@ -352,14 +434,24 @@ export const CameraConnectPopup: React.FC<IProps> = (
                 <div className='CameraDiscoveryHeader'>
                     <div>
                         <strong>{chinese ? '海康、大华相机发现' : 'Hikvision and Dahua camera discovery'}</strong>
-                        <span>{chinese
-                            ? '扫描结果只显示海康、大华相机，其他设备不会显示；扫描不会提交账号密码。'
-                            : 'Scan results show only Hikvision and Dahua cameras; other devices are hidden and no credentials are sent.'}</span>
+                        <span>{scanning
+                            ? (chinese ? '后台扫描中；关闭窗口不会停止。' : 'Scanning in the background; closing this window will not stop it.')
+                            : discovery
+                                ? (chinese ? '扫描已完成；可选择结果或重新扫描。' : 'Scan complete; select a result or scan again.')
+                                : (chinese
+                                    ? '扫描结果只显示海康、大华相机，其他设备不会显示；扫描不会提交账号密码。'
+                                    : 'Scan results show only Hikvision and Dahua cameras; other devices are hidden and no credentials are sent.')}</span>
                     </div>
-                    <button type='button' onClick={scanCameras} disabled={scanning}>
+                    <button
+                        type='button'
+                        className={scanning ? 'danger' : undefined}
+                        onClick={scanning ? stopCameraScan : scanCameras}
+                    >
                         {scanning
-                            ? (chinese ? '正在扫描…' : 'Scanning…')
-                            : (chinese ? '开始扫描' : 'Start scan')}
+                            ? (chinese ? '停止' : 'Stop')
+                            : discovery
+                                ? (chinese ? '重新扫描' : 'Rescan')
+                                : (chinese ? '开始扫描' : 'Start scan')}
                     </button>
                 </div>
                 {scanning && nodeId && <div className='JetsonScanProgress'>
@@ -466,7 +558,7 @@ export const CameraConnectPopup: React.FC<IProps> = (
                 ? (chinese ? '正在读取…' : 'Loading…')
             : connecting
                 ? (chinese ? '正在连接…' : 'Connecting…')
-                : result ? (chinese ? '确认' : 'Confirm') : (chinese ? '连接' : 'Connect')}
+                : result ? (chinese ? '保存' : 'Save') : (chinese ? '连接' : 'Connect')}
         onAccept={result ? saveCamera : connectCamera}
         disableAcceptButton={formInvalid || loadingCredentials || connecting || saving || (!!result && !resourceName.trim())}
         rejectLabel={chinese ? '关闭' : 'Close'}

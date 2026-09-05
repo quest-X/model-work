@@ -46,6 +46,10 @@ export type ComputeManagedDevice = {
     capabilities: string[];
 };
 
+export const cameraStreamingAvailable = (camera: ComputeManagedDevice): boolean =>
+    (camera.status === 'registered' || camera.status === 'online')
+    && camera.capabilities.includes('camera.stream.v1');
+
 export type ComputeDeviceInventory = {
     state: 'disabled' | 'ready' | 'unavailable';
     devices: ComputeManagedDevice[];
@@ -105,6 +109,16 @@ export const computeSshAvailability = (node: ComputeClusterNode): {lan: boolean;
             ?? Boolean(controlSshHealthy && node.network.online
                 && (!dependency('tailscale') || dependency('tailscale') === 'healthy')),
     };
+};
+
+export const computeNodeNormal = (node: ComputeClusterNode): boolean => {
+    if (!node.online) return false;
+    const ssh = computeSshAvailability(node);
+    return ssh.lan
+        && ssh.tailscale
+        && node.device_inventory.state !== 'unavailable'
+        && !node.device_inventory.devices.some(device =>
+            device.status === 'offline' || device.status === 'unavailable');
 };
 
 export type ComputeRuntimeState = 'healthy' | 'degraded' | 'unavailable' | 'unknown';
@@ -345,6 +359,8 @@ export type ComputeLanAsset = {
     device_kind?: string;
     display_name?: string;
     device_model?: string;
+    ssh_username?: string;
+    parent_asset_id?: string;
     ports: {port: number; service: string}[];
     online: boolean;
     first_seen_at: number;
@@ -638,6 +654,12 @@ const requestBlob = async (path: string, payload: unknown, signal?: AbortSignal)
 };
 
 export class ComputeClusterService {
+    private static readonly activeLanScans = new Map<string, ComputeTask>();
+
+    public static activeLanScan(nodeId: string): ComputeTask | null {
+        return this.activeLanScans.get(nodeId) || null;
+    }
+
     public static status(signal?: AbortSignal): Promise<ComputeClusterStatus> {
         return request('/status', signal);
     }
@@ -784,6 +806,31 @@ export class ComputeClusterService {
         });
     }
 
+    public static updateCameraResource(
+        nodeId: string,
+        resourceId: string,
+        name: string,
+        signal?: AbortSignal,
+    ): Promise<CameraResource> {
+        return request(
+            `/nodes/${encodeURIComponent(nodeId)}/cameras/resources/${encodeURIComponent(resourceId)}`,
+            signal,
+            {method: 'PUT', body: JSON.stringify({name})},
+        );
+    }
+
+    public static async deleteCameraResource(
+        nodeId: string,
+        resourceId: string,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        await request(
+            `/nodes/${encodeURIComponent(nodeId)}/cameras/resources/${encodeURIComponent(resourceId)}`,
+            signal,
+            {method: 'DELETE'},
+        );
+    }
+
     public static async scanLan(
         nodeId: string,
         signal?: AbortSignal,
@@ -799,40 +846,53 @@ export class ComputeClusterService {
             cidr,
             lease_seconds: 60,
         }, signal);
+        this.activeLanScans.set(nodeId, submitted);
         try {
-            const deadline = Date.now() + 90000;
-            while (Date.now() < deadline) {
-                let current: ComputeTask;
-                try {
-                    // eslint-disable-next-line no-await-in-loop
-                    current = await this.taskStatus(submitted, signal);
-                } catch (reason) {
-                    if (signal?.aborted) throw reason;
-                    // eslint-disable-next-line no-await-in-loop
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    continue;
-                }
-                if (typeof current?.progress?.percent === 'number') {
-                    onProgress?.(
-                        Math.round(Math.max(0, Math.min(100, current.progress.percent))),
-                        current.progress.completed,
-                        current.progress.total,
-                    );
-                }
-                if (current?.state === 'succeeded' && current.result && 'hosts' in current.result) {
-                    return current.result;
-                }
-                if (current?.state === 'failed' || current?.state === 'cancelled') {
-                    throw new Error(current.error || 'LAN scan failed');
-                }
-                // eslint-disable-next-line no-await-in-loop
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-            throw new Error('LAN scan timed out');
+            return await this.watchLanScan(submitted, signal, onProgress);
         } catch (reason) {
             if (signal?.aborted) await this.controlTask(submitted, 'cancel').catch(() => undefined);
             throw reason;
+        } finally {
+            if (this.activeLanScans.get(nodeId)?.task_id === submitted.task_id) {
+                this.activeLanScans.delete(nodeId);
+            }
         }
+    }
+
+    public static async watchLanScan(
+        task: Pick<ComputeTask, 'node_id' | 'task_id'>,
+        signal?: AbortSignal,
+        onProgress?: (percent: number, completed?: number, total?: number) => void,
+    ): Promise<ComputeLanDiscoveryResult> {
+        const deadline = Date.now() + 90000;
+        while (Date.now() < deadline) {
+            let current: ComputeTask;
+            try {
+                // eslint-disable-next-line no-await-in-loop
+                current = await this.taskStatus(task, signal);
+            } catch (reason) {
+                if (signal?.aborted) throw reason;
+                // eslint-disable-next-line no-await-in-loop
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                continue;
+            }
+            if (typeof current?.progress?.percent === 'number') {
+                onProgress?.(
+                    Math.round(Math.max(0, Math.min(100, current.progress.percent))),
+                    current.progress.completed,
+                    current.progress.total,
+                );
+            }
+            if (current?.state === 'succeeded' && current.result && 'hosts' in current.result) {
+                return current.result;
+            }
+            if (current?.state === 'failed' || current?.state === 'cancelled') {
+                throw new Error(current.error || 'LAN scan failed');
+            }
+            // eslint-disable-next-line no-await-in-loop
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        throw new Error('LAN scan timed out');
     }
 
     public static lanSchedules(signal?: AbortSignal): Promise<ComputeLanSchedulesResponse> {

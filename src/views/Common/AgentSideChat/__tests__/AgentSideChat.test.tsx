@@ -66,7 +66,7 @@ const mockDesktopAuthorizationFlow = () => {
     const subtle = mockFilesystemCrypto();
     const node = {
         node_id: 'node-166', installation_id: 'installation-166',
-        name: 'baoxin-166-windows', online: true,
+        name: 'baoxin-166-windows', online: true, capabilities: ['filesystem.list.v1'],
     } as ComputeClusterNode;
     jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([node]);
     jest.spyOn(AgentChatService, 'status').mockResolvedValue({
@@ -681,6 +681,43 @@ describe('AgentSideChat', () => {
         expect(nodes).toHaveBeenCalledTimes(2);
     });
 
+    it.each([
+        {
+            name: '旧节点',
+            online: true,
+            capabilities: [],
+            reason: '此节点不支持读取公共桌面（需要 filesystem.list.v1）。',
+        },
+        {
+            name: '离线节点',
+            online: false,
+            capabilities: ['filesystem.list.v1'],
+            reason: '节点当前故障，恢复正常后才能读取公共桌面。',
+        },
+    ])('blocks public-desktop access before dispatch for $name', async ({name, online, capabilities, reason}) => {
+        const machine = {node_id: `${name}-id`, name, online, capabilities} as ComputeClusterNode;
+        jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([machine]);
+        const create = jest.spyOn(ComputeClusterService, 'createFilesystemAuthorization');
+        jest.spyOn(AgentChatService, 'status').mockResolvedValue({
+            status: 'ready', auth_configured: true, llm_configured: true, primary_model: 'Qwen3-Coder',
+        });
+        render(<AgentSideChat language={Language.CHINESE}/>);
+
+        act(() => { window.dispatchEvent(new Event(AGENT_CHAT_TOGGLE_EVENT)); });
+        const composer = await screen.findByRole('textbox', {name: '发送给 Agent'});
+        fireEvent.change(composer, {target: {value: '@'}});
+        fireEvent.click(await screen.findByRole('option', {name: new RegExp(name)}));
+        const action = screen.getByRole('button', {name: '查看公共桌面'});
+        expect(action).toBeDisabled();
+        expect(action).toHaveAttribute('title', reason);
+
+        fireEvent.change(composer, {target: {value: `@${name} 查看公共桌面`}});
+        fireEvent.click(screen.getByRole('button', {name: '发送'}));
+        expect(await screen.findByText(reason)).toBeInTheDocument();
+        expect(create).not.toHaveBeenCalled();
+        expect(AgentChatService.startTrace).not.toHaveBeenCalled();
+    });
+
     it('creates a normalized desktop authorization and signs only the server challenge', async () => {
         const {subtle, create, challenge: currentChallenge} = mockDesktopAuthorizationFlow();
         jest.spyOn(AgentChatService, 'send');
@@ -831,7 +868,7 @@ describe('AgentSideChat', () => {
         mockFilesystemCrypto();
         const node = {
             node_id: 'node-166', installation_id: 'installation-166',
-            name: 'baoxin-166-windows', online: true,
+            name: 'baoxin-166-windows', online: true, capabilities: ['filesystem.list.v1'],
         } as ComputeClusterNode;
         jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([node]);
         jest.spyOn(AgentChatService, 'status').mockResolvedValue({
@@ -859,7 +896,7 @@ describe('AgentSideChat', () => {
         mockFilesystemCrypto();
         const node = {
             node_id: 'node-166', installation_id: 'installation-166',
-            name: 'baoxin-166-windows', online: true,
+            name: 'baoxin-166-windows', online: true, capabilities: ['filesystem.list.v1'],
         } as ComputeClusterNode;
         jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([node]);
         jest.spyOn(AgentChatService, 'status').mockResolvedValue({
@@ -890,7 +927,7 @@ describe('AgentSideChat', () => {
         const subtle = mockFilesystemCrypto();
         const node = {
             node_id: 'node-166', installation_id: 'installation-166',
-            name: 'baoxin-166-windows', online: true,
+            name: 'baoxin-166-windows', online: true, capabilities: ['filesystem.list.v1'],
         } as ComputeClusterNode;
         jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue([node]);
         jest.spyOn(AgentChatService, 'status').mockResolvedValue({

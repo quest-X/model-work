@@ -45,6 +45,7 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
     const [activeServicesDropdown, setActiveServicesDropdown] = useState<ServicesDropdown>(null);
     const [cameraConnectAvailable, setCameraConnectAvailable] = useState(false);
     const [computeClusterAvailable, setComputeClusterAvailable] = useState(false);
+    const extensionEngineBaseUrl = getExtensionEngineBaseUrl();
     const [accountAvatar, setAccountAvatar] = useState(() => {
         try {
             return window.localStorage.getItem(ACCOUNT_AVATAR_KEY) || '';
@@ -180,7 +181,7 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
             return undefined;
         }
         const controller = new AbortController();
-        fetch(`${getExtensionEngineBaseUrl()}/health`, {signal: controller.signal})
+        fetch(`${extensionEngineBaseUrl}/health`, {signal: controller.signal})
             .then(response => response.ok ? response.json() : Promise.reject(new Error(`${response.status}`)))
             .then(health => {
                 const plugin = health?.plugins?.camera_connect;
@@ -195,7 +196,7 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                 }
             });
         return () => controller.abort();
-    }, [props.hasExtensionEngine]);
+    }, [props.hasExtensionEngine, extensionEngineBaseUrl, activeServicesDropdown]);
 
     const toggleLanguage = () => {
         const newLanguage = props.language === Language.CHINESE ? Language.ENGLISH : Language.CHINESE;

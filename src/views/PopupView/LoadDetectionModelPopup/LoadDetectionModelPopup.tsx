@@ -18,9 +18,6 @@ import {ClipLoader} from 'react-spinners';
 import {useDropzone} from 'react-dropzone';
 import {DetectionAPIDetector} from '../../../ai/DetectionAPIDetector';
 import {SegmentationAPIDetector} from '../../../ai/SegmentationAPIDetector';
-import {AIDetectionActions} from '../../../logic/actions/AIDetectionActions';
-import {ImageData} from '../../../store/labels/types';
-import {LabelsSelector} from '../../../store/selectors/LabelsSelector';
 import {EditorModel} from '../../../staticModels/EditorModel';
 import {getSelectedCustomExt, getSelectedModelFamily, getServerUrl, SEG_MODEL_FAMILIES} from '../CallModelPopup/CallModelPopup';
 import {Language, LanguageConfig} from '../../../data/LanguageConfig';
@@ -47,7 +44,7 @@ interface IProps {
     language: Language;
 }
 
-const LoadDetectionModelPopup: React.FC<IProps> = ({ updateActivePopupTypeAction, submitNewNotificationAction, language }) => {
+export const LoadDetectionModelPopup: React.FC<IProps> = ({ updateActivePopupTypeAction, submitNewNotificationAction, language }) => {
     const texts = LanguageConfig[language];
     const modelFamily = getSelectedModelFamily();
     const serverUrl = getServerUrl();
@@ -55,6 +52,7 @@ const LoadDetectionModelPopup: React.FC<IProps> = ({ updateActivePopupTypeAction
     const customExtDot = `.${customExt}`;
     const isMlpackage = customExt === 'mlpackage';
     const variants = modelFamily?.variants || [];
+    const isSegModel = modelFamily && SEG_MODEL_FAMILIES.some(f => f.id === modelFamily.id);
 
     const [modelSource, setModelSource] = useState(modelFamily ? ModelSource.OFFICIAL : ModelSource.UPLOAD);
     const [selectedVariant, setSelectedVariant] = useState(modelFamily?.defaultVariant || variants[0] || '');
@@ -71,21 +69,23 @@ const LoadDetectionModelPopup: React.FC<IProps> = ({ updateActivePopupTypeAction
     useEffect(() => {
         fetch(`${serverUrl}/health`).then(r => r.json())
             .then(data => { if (data.model) setLoadedModel(data.model.replace(/\.(pt|onnx)$/, '')); })
-            .catch(() => {});
+            .catch(() => undefined);
         fetch(`${serverUrl}/available-models`).then(r => r.json())
             .then(data => {
                 if (data.models) setDownloadedModels(data.models.map((m: unknown) =>
                     typeof m === 'string' ? m : (m as { name: string }).name
                 ));
             })
-            .catch(() => {});
+            .catch(() => undefined);
     }, [serverUrl]);
 
     const pollLoadStatus = (): Promise<void> => {
         return new Promise((resolve, reject) => {
             const interval = setInterval(async () => {
                 try {
-                    const res = await fetch(`${serverUrl}/load-status`);
+                    const service = isSegModel ? 'segmentation' : 'detection';
+                    const res = await fetch(`${serverUrl}/load-status?service=${service}`);
+                    if (!res.ok) throw new Error(`${res.status}`);
                     const data = await res.json();
                     setLoadProgress(data.progress || 0);
                     setLoadState(data.state || '');
@@ -93,7 +93,7 @@ const LoadDetectionModelPopup: React.FC<IProps> = ({ updateActivePopupTypeAction
                         clearInterval(interval);
                         setLoadedModel(data.model?.replace(/\.(pt|onnx)$/, '') || '');
                         resolve();
-                    } else if (data.state === 'error') {
+                    } else if (['error', 'missing_dep', 'not_loaded'].includes(data.state)) {
                         clearInterval(interval);
                         reject(new Error(data.error || texts.loadYoloModel.loadFailed));
                     }
@@ -141,8 +141,6 @@ const LoadDetectionModelPopup: React.FC<IProps> = ({ updateActivePopupTypeAction
             ? {onDrop, noClick: true}
             : {onDrop, accept: {'application/octet-stream': [customExtDot]}}
     );
-
-    const isSegModel = modelFamily && SEG_MODEL_FAMILIES.some(f => f.id === modelFamily.id);
 
     const triggerDetection = () => {
         const baseUrl = serverUrl.replace(/\/+$/, '');

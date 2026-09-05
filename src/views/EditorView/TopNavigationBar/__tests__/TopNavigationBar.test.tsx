@@ -88,6 +88,31 @@ describe('TopNavigationBar core-engine change badge', () => {
 });
 
 describe('TopNavigationBar compute-cluster entry', () => {
+    it('refreshes recovered plugins when reopening the extension menu', async () => {
+        const previousFetch = global.fetch;
+        let state = 'error';
+        global.fetch = jest.fn().mockImplementation(async () => ({
+            ok: true,
+            json: async () => ({plugins: {
+                camera_connect: {enabled: true, state},
+                compute_cluster: {enabled: true, state},
+            }}),
+        }));
+        const view = renderNavigation([], Language.CHINESE, {hasExtensionEngine: true});
+        try {
+            fireEvent.click(screen.getByText('拓展引擎'));
+            await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+            expect(screen.queryByText('计算群')).not.toBeInTheDocument();
+            fireEvent.click(screen.getByText('拓展引擎'));
+            state = 'ready';
+            fireEvent.click(screen.getByText('拓展引擎'));
+            await waitFor(() => expect(screen.getByText('计算群')).toBeInTheDocument());
+        } finally {
+            view.unmount();
+            global.fetch = previousFetch;
+        }
+    });
+
     it('opens the compute cluster only when its extension is ready', async () => {
         const updatePopup = jest.fn();
         const previousFetch = global.fetch;

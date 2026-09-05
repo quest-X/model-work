@@ -13,6 +13,7 @@ import {
     CameraResourceService,
 } from '../../../services/CameraResourceService';
 import {ComputeClusterService} from '../../../services/ComputeClusterService';
+import {ApprovalIdentityPanel} from '../../Common/ApprovalIdentityPanel';
 import {GenericYesNoPopup} from '../GenericYesNoPopup/GenericYesNoPopup';
 import './CameraConnectPopup.scss';
 
@@ -366,6 +367,7 @@ export const CameraConnectPopup: React.FC<IProps> = (
             </div>}
 
             <div className='CameraForm'>
+                {nodeId && <ApprovalIdentityPanel zh={chinese}/>}
                 <label>
                     <span>{chinese ? '协议' : 'Protocol'}</span>
                     <select value={scheme} onChange={event => {

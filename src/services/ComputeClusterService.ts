@@ -1,4 +1,5 @@
 import {getExtensionEngineBaseUrl} from '../utils/DefaultBackendUrl';
+import {ApprovalRequest, authorizationChallenge, canonicalAuthorizationJson, getApprovalIdentity, sensitiveRequestDigest, SignedApproval, signAuthorization} from './ApprovalIdentityService';
 import type {
     CameraConnectionProfile,
     CameraConnectResult,
@@ -142,6 +143,14 @@ export type ComputeRuntimeService = {
         state: 'running' | 'stopped' | 'unknown';
     } | null;
     task_counts?: Record<string, number>;
+    execution?: {
+        available: boolean;
+        pid: number | null;
+        task_id: string | null;
+        error: string | null;
+        gpu_uuids?: string[];
+        last_exit: {task_id: string | null; recorded_at: number; attempt: number; pid: number | null; exit_code: number | null; reason: string | null} | null;
+    };
 };
 
 export type ComputeRuntimeSnapshot = {
@@ -653,6 +662,47 @@ const requestBlob = async (path: string, payload: unknown, signal?: AbortSignal)
     return response.blob();
 };
 
+const CAMERA_COMMAND_PATH = '/extension_service/extensions/camera-connect';
+const normalizedCameraCredentials = (profile: CameraConnectionProfile): CameraConnectionProfile => {
+    const literal = profile.host.trim().replace(/^\[([^\]]+)\]$/, '$1');
+    const host = literal.includes(':') ? new URL(`http://[${literal}]/`).hostname.slice(1, -1) : literal;
+    return {
+        host, port: profile.port ?? 80, rtsp_port: profile.rtsp_port ?? 554,
+        username: profile.username.trim(), password: profile.password, scheme: profile.scheme ?? 'http',
+        verify_tls: profile.verify_tls ?? false, timeout_seconds: profile.timeout_seconds ?? 8,
+    };
+};
+
+const approveConnection = async (
+    nodeId: string, operation: 'camera.connect' | 'camera.request' | 'jetson.connect',
+    credentials: Record<string, unknown>, signal?: AbortSignal,
+): Promise<SignedApproval> => {
+    const identity = getApprovalIdentity();
+    const challenge = await request<ApprovalRequest & {state: string; error_code: string | null}>(
+        `/nodes/${encodeURIComponent(nodeId)}/connections/authorizations`, signal, {
+            method: 'POST', body: JSON.stringify({operation, credentials, user: identity.user, ttl_seconds: 120}),
+        },
+    );
+    const target = operation === 'camera.request'
+        ? {kind: 'camera_request', method: credentials.method, path: credentials.path}
+        : {kind: operation.split('.')[0], host: credentials.host};
+    if (challenge.state !== 'pending' || challenge.error_code !== null || challenge.target_installation_id !== nodeId
+        || challenge.operation !== operation || canonicalAuthorizationJson(challenge.target) !== canonicalAuthorizationJson(target)
+        || canonicalAuthorizationJson(challenge.parameters) !== canonicalAuthorizationJson({request_sha256: await sensitiveRequestDigest(credentials, challenge.nonce)})) {
+        throw new Error('授权范围或参数摘要不匹配 / Authorization scope or parameter digest mismatch');
+    }
+    const visible = operation === 'camera.request' ? credentials.payload as Record<string, unknown> : credentials;
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (!window.confirm(`批准本次操作 / Approve once\n${identity.user.user_name}\nNode: ${nodeId}\n${operation}\n${canonicalAuthorizationJson({...visible, password: '[不显示 / hidden]'})}\n仅本次有效 / One use only`)) {
+        await request(`/authorizations/${encodeURIComponent(challenge.authorization_id)}/reject`, signal, {method: 'POST', body: '{}'});
+        throw new Error('你已拒绝本次授权，操作未执行 / Authorization rejected');
+    }
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    const current = getApprovalIdentity();
+    if (current !== identity) throw new Error('授权身份已改变，请重试 / Approval identity changed');
+    return {...authorizationChallenge(challenge), signature: await signAuthorization(challenge, current)};
+};
+
 export class ComputeClusterService {
     private static readonly activeLanScans = new Map<string, ComputeTask>();
 
@@ -756,23 +806,29 @@ export class ComputeClusterService {
         return request('/lan-assets', signal);
     }
 
-    public static connectJetson(
+    public static async connectJetson(
         assetId: string,
         credentials: {username: string; password: string; expected_fingerprint?: string},
         signal?: AbortSignal,
     ): Promise<ComputeJetsonConnectResult> {
+        const asset = (await this.lanAssets(signal)).assets.find(item => item.asset_id === assetId);
+        if (!asset) throw new Error('Jetson device is no longer registered');
+        const payload = {host: asset.address, port: 22, username: credentials.username.trim(), password: credentials.password, expected_fingerprint: credentials.expected_fingerprint ?? null};
+        const authorization = await approveConnection(asset.node_id, 'jetson.connect', payload, signal);
         return request(`/lan-assets/${encodeURIComponent(assetId)}/jetson`, signal, {
-            method: 'POST', body: JSON.stringify(credentials),
+            method: 'POST', body: JSON.stringify({username: payload.username, password: payload.password, port: 22, expected_fingerprint: payload.expected_fingerprint, authorization}),
         });
     }
 
-    public static connectCamera(
+    public static async connectCamera(
         nodeId: string,
         credentials: CameraConnectionProfile,
         signal?: AbortSignal,
     ): Promise<CameraConnectResult> {
+        const payload = normalizedCameraCredentials(credentials);
+        const authorization = await approveConnection(nodeId, 'camera.connect', payload, signal);
         return request(`/nodes/${encodeURIComponent(nodeId)}/cameras/connect`, signal, {
-            method: 'POST', body: JSON.stringify(credentials),
+            method: 'POST', body: JSON.stringify({...payload, authorization}),
         });
     }
 
@@ -786,23 +842,27 @@ export class ComputeClusterService {
         });
     }
 
-    public static snapshotCamera(
+    public static async snapshotCamera(
         nodeId: string,
         payload: CameraConnectionProfile & {channel_id: string},
         signal?: AbortSignal,
     ): Promise<Blob> {
+        const body = {...normalizedCameraCredentials(payload), channel_id: payload.channel_id};
+        const authorization = await approveConnection(nodeId, 'camera.request', {method: 'POST', path: `${CAMERA_COMMAND_PATH}/snapshot`, payload: body}, signal);
         return requestBlob(
-            `/nodes/${encodeURIComponent(nodeId)}/cameras/snapshot`, payload, signal,
+            `/nodes/${encodeURIComponent(nodeId)}/cameras/snapshot`, {...body, authorization}, signal,
         );
     }
 
-    public static createCameraResource(
+    public static async createCameraResource(
         nodeId: string,
         payload: CameraConnectionProfile & {name: string; channel_id: string},
         signal?: AbortSignal,
     ): Promise<CameraResource> {
+        const body = {...normalizedCameraCredentials(payload), name: payload.name, channel_id: payload.channel_id};
+        const authorization = await approveConnection(nodeId, 'camera.request', {method: 'POST', path: `${CAMERA_COMMAND_PATH}/resources`, payload: body}, signal);
         return request(`/nodes/${encodeURIComponent(nodeId)}/cameras/resources`, signal, {
-            method: 'POST', body: JSON.stringify(payload),
+            method: 'POST', body: JSON.stringify({...body, authorization}),
         });
     }
 

@@ -3,6 +3,12 @@ import {TextEncoder as NodeTextEncoder} from 'util';
 import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {Language} from '../../../../data/LanguageConfig';
 import {AgentChatService} from '../../../../services/AgentChatService';
+import * as ApprovalIdentity from '../../../../services/ApprovalIdentityService';
+
+jest.mock('../../../../services/ApprovalIdentityService', () => ({
+    ...jest.requireActual('../../../../services/ApprovalIdentityService'),
+    getApprovalIdentity: jest.fn(),
+}));
 import {
     ComputeClusterNode,
     ComputeClusterService,
@@ -103,6 +109,8 @@ describe('AgentSideChat', () => {
 
     beforeEach(() => {
         sessionStorage.clear();
+        const {user_id, user_name, user_public_key} = filesystemAuthorization();
+        (ApprovalIdentity.getApprovalIdentity as jest.Mock).mockReturnValue({privateKey: {type: 'private'}, user: {user_id, user_name, user_public_key}});
         traceNumber = 0;
         jest.spyOn(AgentChatService, 'startTrace').mockImplementation(async message => ({
             id: `trace-${++traceNumber}`,
@@ -923,7 +931,7 @@ describe('AgentSideChat', () => {
         }));
     });
 
-    it('keeps the signing identity only for the same browser-tab session', async () => {
+    it('reuses the imported identity across chat remounts without browser storage', async () => {
         const subtle = mockFilesystemCrypto();
         const node = {
             node_id: 'node-166', installation_id: 'installation-166',
@@ -951,7 +959,7 @@ describe('AgentSideChat', () => {
         fireEvent.click(screen.getByRole('button', {name: '发送'}));
         await screen.findByRole('region', {name: '节点操作授权'});
         const stored = JSON.parse(sessionStorage.getItem('opensight.filesystem-identity.v1') || 'null');
-        expect(stored).toEqual(expect.objectContaining({version: 1, private_key: expect.any(String)}));
+        expect(stored).toBeNull();
         expect(users[0]).not.toHaveProperty('private_key');
         first.unmount();
 
@@ -963,7 +971,7 @@ describe('AgentSideChat', () => {
         await screen.findByRole('region', {name: '节点操作授权'});
 
         expect(users[1]).toEqual(users[0]);
-        expect(subtle.generateKey).toHaveBeenCalledTimes(1);
-        expect(subtle.importKey).toHaveBeenCalledTimes(1);
+        expect(subtle.generateKey).not.toHaveBeenCalled();
+        expect(subtle.importKey).not.toHaveBeenCalled();
     });
 });

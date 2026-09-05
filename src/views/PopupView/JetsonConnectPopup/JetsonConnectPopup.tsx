@@ -10,6 +10,7 @@ import {
     ComputeTask,
 } from '../../../services/ComputeClusterService';
 import {AppState} from '../../../store';
+import {ApprovalIdentityPanel} from '../../Common/ApprovalIdentityPanel';
 import {GenericYesNoPopup} from '../GenericYesNoPopup/GenericYesNoPopup';
 import '../CameraConnectPopup/CameraConnectPopup.scss';
 
@@ -218,6 +219,7 @@ export const JetsonConnectPopup: React.FC<IProps> = ({language, nodeId = null, n
         </div>}
 
         <div className='CameraForm JetsonConnectForm'>
+            <ApprovalIdentityPanel zh={zh}/>
             <label className='wide'>
                 <span>{zh ? '设备地址' : 'Device address'}</span>
                 <input value={selected?.address || ''} disabled placeholder={zh ? '请先扫描并选择设备' : 'Scan and select a device first'}/>

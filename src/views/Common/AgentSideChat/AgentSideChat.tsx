@@ -14,7 +14,12 @@ import {
     computeSshAvailability,
 } from '../../../services/ComputeClusterService';
 import {AppState} from '../../../store';
+import {authorizationChallenge, canonicalAuthorizationJson, getApprovalIdentity, signAuthorization} from '../../../services/ApprovalIdentityService';
+import {ApprovalIdentityPanel} from '../ApprovalIdentityPanel';
 import './AgentSideChat.scss';
+
+export {canonicalAuthorizationJson};
+export const filesystemAuthorizationChallenge = authorizationChallenge;
 
 export const AGENT_CHAT_TOGGLE_EVENT = 'opensight:toggle-agent-chat';
 
@@ -38,11 +43,6 @@ const filesystemListUnavailableReason = (node: ComputeClusterNode, zh: boolean):
     return '';
 };
 
-type FilesystemSessionIdentity = {
-    privateKey: CryptoKey;
-    user: {user_id: string; user_name: string; user_public_key: string};
-};
-
 type FilesystemAuthorizationCard = {
     authorization: ComputeFilesystemAuthorization;
     trace: AgentTraceTask;
@@ -50,112 +50,6 @@ type FilesystemAuthorizationCard = {
     busy?: 'approve' | 'reject';
     error?: string;
 };
-
-const FILESYSTEM_IDENTITY_STORAGE_KEY = 'opensight.filesystem-identity.v1';
-
-const bytesToBase64 = (value: ArrayBuffer): string =>
-    btoa(String.fromCharCode(...new Uint8Array(value)));
-
-const base64ToBytes = (value: string): ArrayBuffer => {
-    const decoded = atob(value);
-    return Uint8Array.from(decoded, character => character.charCodeAt(0)).buffer;
-};
-
-const randomUuid = (): string => {
-    if (globalThis.crypto.randomUUID) return globalThis.crypto.randomUUID();
-    const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-};
-
-export const canonicalAuthorizationJson = (value: unknown): string => {
-    if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
-    if (typeof value === 'number') {
-        if (!Number.isFinite(value)) throw new Error('Authorization contains a non-finite number');
-        return JSON.stringify(value);
-    }
-    if (Array.isArray(value)) return `[${value.map(canonicalAuthorizationJson).join(',')}]`;
-    if (typeof value === 'object') {
-        const record = value as Record<string, unknown>;
-        return `{${Object.keys(record).sort().map(key =>
-            `${JSON.stringify(key)}:${canonicalAuthorizationJson(record[key])}`
-        ).join(',')}}`;
-    }
-    throw new Error('Authorization contains an unsupported value');
-};
-
-export const filesystemAuthorizationChallenge = (authorization: ComputeFilesystemAuthorization) => ({
-    version: authorization.version,
-    purpose: authorization.purpose,
-    authorization_id: authorization.authorization_id,
-    user_id: authorization.user_id,
-    user_name: authorization.user_name,
-    user_public_key: authorization.user_public_key,
-    target_installation_id: authorization.target_installation_id,
-    operation: authorization.operation,
-    target: authorization.target,
-    parameters: authorization.parameters,
-    nonce: authorization.nonce,
-    issued_at: authorization.issued_at,
-    expires_at: authorization.expires_at,
-});
-
-const createFilesystemSessionIdentity = async (): Promise<FilesystemSessionIdentity> => {
-    if (!globalThis.crypto?.subtle) throw new Error('WebCrypto is unavailable');
-    try {
-        const stored = JSON.parse(sessionStorage.getItem(FILESYSTEM_IDENTITY_STORAGE_KEY) || 'null');
-        if (stored?.version === 1
-            && typeof stored.private_key === 'string'
-            && typeof stored.user?.user_id === 'string'
-            && typeof stored.user?.user_name === 'string'
-            && typeof stored.user?.user_public_key === 'string') {
-            const privateKey = await globalThis.crypto.subtle.importKey(
-                'pkcs8', base64ToBytes(stored.private_key), {name: 'Ed25519'}, false, ['sign'],
-            );
-            return {privateKey, user: stored.user};
-        }
-    } catch {
-        try {
-            sessionStorage.removeItem(FILESYSTEM_IDENTITY_STORAGE_KEY);
-        } catch {
-            // Continue with an in-memory key when session storage is unavailable.
-        }
-    }
-    const keyPair = await globalThis.crypto.subtle.generateKey(
-        {name: 'Ed25519'}, true, ['sign', 'verify'],
-    ) as CryptoKeyPair;
-    const publicKey = await globalThis.crypto.subtle.exportKey('raw', keyPair.publicKey);
-    const identity = {
-        privateKey: keyPair.privateKey,
-        user: {
-            user_id: randomUuid(),
-            user_name: 'OpenSight Console User',
-            user_public_key: bytesToBase64(publicKey),
-        },
-    };
-    const privateKey = await globalThis.crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
-    try {
-        sessionStorage.setItem(FILESYSTEM_IDENTITY_STORAGE_KEY, JSON.stringify({
-            version: 1,
-            private_key: bytesToBase64(privateKey),
-            user: identity.user,
-        }));
-    } catch {
-        // The in-memory identity remains valid for this page when session storage is unavailable.
-    }
-    return identity;
-};
-
-export const signFilesystemAuthorization = async (
-    authorization: ComputeFilesystemAuthorization,
-    privateKey: CryptoKey,
-): Promise<string> => bytesToBase64(await globalThis.crypto.subtle.sign(
-    'Ed25519',
-    privateKey,
-    new TextEncoder().encode(canonicalAuthorizationJson(filesystemAuthorizationChallenge(authorization))),
-));
 
 const inlineMarkdown = (text: string, key: string): React.ReactNode[] => text
     .split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
@@ -650,7 +544,6 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
     const conversationIdRef = useRef<string | undefined>(undefined);
     const queuedMessagesRef = useRef<string[]>([]);
     const historyRequestRef = useRef(0);
-    const filesystemIdentityRef = useRef<Promise<FilesystemSessionIdentity>>();
     const authorizationBusyRef = useRef(new Set<string>());
     const authorizationFinalizedRef = useRef(new Set<string>());
     const authorizationTimersRef = useRef(new Map<string, number>());
@@ -778,8 +671,7 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
         node: ComputeClusterNode,
         trace: AgentTraceTask,
     ) => {
-        filesystemIdentityRef.current ||= createFilesystemSessionIdentity();
-        const identity = await filesystemIdentityRef.current;
+        const identity = getApprovalIdentity();
         const authorization = await ComputeClusterService.createFilesystemAuthorization(node.node_id, {
             operation: 'filesystem.list',
             target: {kind: 'known_folder', id: 'public_desktop'},
@@ -788,6 +680,9 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
             ttl_seconds: 120,
         });
         if (authorization.target_installation_id !== node.installation_id
+            || authorization.operation !== 'filesystem.list'
+            || authorization.target?.source?.id !== 'public_desktop'
+            || canonicalAuthorizationJson(authorization.parameters) !== '{"limit":200}'
             || authorization.user_id !== identity.user.user_id
             || authorization.user_public_key !== identity.user.user_public_key) {
             throw new Error(zh ? '节点返回了不匹配的授权范围' : 'The node returned a mismatched authorization scope');
@@ -838,9 +733,7 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
                 finishAuthorizationTrace(card, 'failed', {error_code: 'authorization_rejected'});
                 return;
             }
-            filesystemIdentityRef.current ||= createFilesystemSessionIdentity();
-            const identity = await filesystemIdentityRef.current;
-            const signature = await signFilesystemAuthorization(card.authorization, identity.privateKey);
+            const signature = await signAuthorization(card.authorization, getApprovalIdentity());
             const response: ComputeFilesystemDecision =
                 await ComputeClusterService.approveFilesystemAuthorization(authorizationId, signature);
             updateAuthorizationCard(authorizationId, current => ({
@@ -1274,6 +1167,7 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
             </div>})}
         </section>}
         {(!historyOpen || expanded) && <div className='AgentSideChatConversation'>
+        <ApprovalIdentityPanel zh={zh}/>
         <div className='AgentSideChatMessages' aria-live='polite'>
             {messages.length === 0 && <div className='AgentSideChatWelcome'>
                 <strong>{zh ? '有什么需要处理？' : 'What should I handle?'}</strong>

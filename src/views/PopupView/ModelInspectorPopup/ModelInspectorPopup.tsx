@@ -47,11 +47,6 @@ const stateLabel = (state: SlotCapability['state'], zh: boolean): string => {
     return values[state][zh ? 0 : 1];
 };
 
-const bytesLabel = (bytes: number): string => {
-    if (bytes < 1024 * 1024) return `${Math.max(0, bytes / 1024).toFixed(0)} KiB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
-};
-
 const parametersLabel = (value: number): string => {
     if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
     if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
@@ -142,14 +137,19 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
     const [error, setError] = useState<string | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const requestRef = useRef<AbortController | null>(null);
+    const attributionRequestRef = useRef<AbortController | null>(null);
     const sessionIdRef = useRef<string | null>(null);
     const automaticCaptureKeyRef = useRef<string | null>(null);
 
     const discardSession = useCallback((updateState: boolean = true) => {
+        requestRef.current?.abort();
+        attributionRequestRef.current?.abort();
         const sessionId = sessionIdRef.current;
         sessionIdRef.current = null;
         if (sessionId) void ModelInspectorAPI.deleteSession(sessionId);
         if (updateState) {
+            setBusy(false);
+            setAttributionBusy(false);
             setSession(null);
             setActiveLayerId(null);
             setCompareLayerId(null);
@@ -311,14 +311,14 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
 
     const createSession = useCallback(async () => {
         if (!activeImage || capability?.state !== 'ready' || selectedIds.size === 0) return;
+        discardSession();
         setBusy(true);
         setError(null);
-        requestRef.current?.abort();
         const controller = new AbortController();
         requestRef.current = controller;
-        discardSession();
         try {
             const file = await canvasFileFromRepository(activeImage);
+            if (controller.signal.aborted) return;
             const value = await ModelInspectorAPI.createSession(
                 file,
                 slot,
@@ -326,6 +326,10 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
                 sessionCaptureOptions(selectedIds.size, status?.limits),
                 controller.signal,
             );
+            if (controller.signal.aborted) {
+                void ModelInspectorAPI.deleteSession(value.id);
+                return;
+            }
             sessionIdRef.current = value.id;
             setSession(value);
             const readyLayers = value.layers.filter(layer => layer.status === 'ready');
@@ -336,7 +340,7 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
             const predictionClass = value.predictions[0]?.class_id;
             if (predictionClass !== undefined) setTargetClassId(predictionClass);
         } catch (cause: unknown) {
-            if (!isAbortError(cause)) {
+            if (!controller.signal.aborted && !isAbortError(cause)) {
                 setError(errorMessage(cause, t('生成热图失败', 'Heatmap capture failed')));
             }
         } finally {
@@ -388,6 +392,12 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
         setMapKind('mean_abs');
         setActiveChannel(activeLayer?.channels[0]?.index ?? null);
     }, [activeLayerId]);
+
+    useEffect(() => {
+        attributionRequestRef.current?.abort();
+        setAttributionBusy(false);
+        setMapKind(previous => previous === 'gradcam' ? 'mean_abs' : previous);
+    }, [activeLayerId, targetClassId]);
 
     const ribbonRef = useRef<HTMLDivElement>(null);
     const activeLayerIndex = readyLayers.findIndex(layer => layer.id === activeLayerId);
@@ -451,11 +461,15 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
 
     const runAttribution = async () => {
         if (!session || !activeLayer) return;
+        attributionRequestRef.current?.abort();
+        const controller = new AbortController();
+        attributionRequestRef.current = controller;
         setAttributionBusy(true);
         setError(null);
         try {
-            await ModelInspectorAPI.createAttribution(session.id, activeLayer.id, targetClassId);
-            setSession(previous => previous ? {
+            await ModelInspectorAPI.createAttribution(session.id, activeLayer.id, targetClassId, controller.signal);
+            if (controller.signal.aborted || sessionIdRef.current !== session.id) return;
+            setSession(previous => previous?.id === session.id ? {
                 ...previous,
                 layers: previous.layers.map(layer => layer.id === activeLayer.id
                     ? {...layer, maps: Array.from(new Set([...layer.maps, 'gradcam']))}
@@ -464,9 +478,14 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
             setRevision(value => value + 1);
             setMapKind('gradcam');
         } catch (cause: unknown) {
-            setError(errorMessage(cause, t('目标归因失败', 'Target attribution failed')));
+            if (!controller.signal.aborted) {
+                setError(errorMessage(cause, t('目标归因失败', 'Target attribution failed')));
+            }
         } finally {
-            setAttributionBusy(false);
+            if (attributionRequestRef.current === controller) {
+                attributionRequestRef.current = null;
+                setAttributionBusy(false);
+            }
         }
     };
 
@@ -520,6 +539,7 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
                 {previewUrl && <img className='mi-original-image' src={previewUrl} alt={session?.filename || 'source'} />}
                 <img
                     className='mi-heatmap-image'
+                    crossOrigin='anonymous'
                     src={mapUrlFor(layer, comparison)}
                     alt={`${layer.path} heatmap`}
                     style={{opacity: opacity / 100}}
@@ -557,7 +577,7 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
                 </div>
                 <div className='mi-header-meta'>
                     <span>{activeImage?.fileData?.name || t('当前帧', 'Current frame')}</span>
-                    {session && <><b>{session.model}</b><small>{session.elapsed_ms.toFixed(0)} ms · {bytesLabel(status?.cache_bytes || 0)}</small></>}
+                    {session && <><b>{session.model}</b><small>{session.elapsed_ms.toFixed(0)} ms</small></>}
                 </div>
                 <button className='mi-close' onClick={() => PopupActions.close()} aria-label={t('关闭', 'Close')}>×</button>
             </header>
@@ -688,7 +708,7 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
                                             className={activeLayerId === layer.id ? 'active' : ''}
                                             onClick={() => setActiveLayerId(layer.id)}
                                         >
-                                            <img loading='lazy' src={ModelInspectorAPI.mapUrl(session.id, layer.id, {kind: 'mean_abs', palette})} alt='' />
+                                            <img crossOrigin='anonymous' loading='lazy' src={ModelInspectorAPI.mapUrl(session.id, layer.id, {kind: 'mean_abs', palette})} alt='' />
                                             <span>{String(index + 1).padStart(2, '0')}</span>
                                             <small>{layer.path.split('.').slice(-2).join('.')}</small>
                                         </button>)}
@@ -719,7 +739,7 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
                                             className={mapKind === 'channel' && activeChannel === channel.index ? 'active' : ''}
                                             onClick={() => {setActiveChannel(channel.index); setMapKind('channel');}}
                                         >
-                                            <img src={session ? ModelInspectorAPI.mapUrl(session.id, activeLayer.id, {kind: 'channel', palette, channel: channel.index}) : ''} alt='' />
+                                            <img crossOrigin='anonymous' src={session ? ModelInspectorAPI.mapUrl(session.id, activeLayer.id, {kind: 'channel', palette, channel: channel.index}) : ''} alt='' />
                                             <span>ch {channel.index}</span><small>{(channel.score * 100).toFixed(1)}%</small>
                                         </button>)}
                                     </div>

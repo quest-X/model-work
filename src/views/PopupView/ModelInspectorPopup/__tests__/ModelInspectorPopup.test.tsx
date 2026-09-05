@@ -107,6 +107,7 @@ describe('ModelInspectorPopup', () => {
         (ModelInspectorAPI.layers as jest.Mock).mockResolvedValue(catalog);
         (ModelInspectorAPI.createSession as jest.Mock).mockResolvedValue(session);
         (ModelInspectorAPI.deleteSession as jest.Mock).mockResolvedValue(undefined);
+        (ModelInspectorAPI.createAttribution as jest.Mock).mockResolvedValue(undefined);
         Object.defineProperty(URL, 'createObjectURL', {configurable: true, value: jest.fn(() => 'blob:source')});
         Object.defineProperty(URL, 'revokeObjectURL', {configurable: true, value: jest.fn()});
         EditorModel.videoFrameImage = undefined;
@@ -120,6 +121,7 @@ describe('ModelInspectorPopup', () => {
         expect(screen.getByText('当前推理模型')).toBeInTheDocument();
         expect(screen.getByText('yolo11n.pt')).toBeInTheDocument();
         expect(await screen.findByTestId('inspector-view-a')).toBeInTheDocument();
+        expect(screen.getByAltText('model.0 heatmap')).toHaveAttribute('crossorigin', 'anonymous');
         expect(capture).toHaveTextContent('重新生成 2 层透视');
         expect(screen.getAllByText('model.0').length).toBeGreaterThan(0);
         expect(ModelInspectorAPI.createSession).toHaveBeenCalledWith(
@@ -151,6 +153,33 @@ describe('ModelInspectorPopup', () => {
         expect(capture).toHaveTextContent('重新生成 2 层透视');
         expect(ModelInspectorAPI.createSession).toHaveBeenCalledTimes(1);
         expect(ModelInspectorAPI.deleteSession).not.toHaveBeenCalled();
+    });
+
+    it('deletes a late capture result after the popup closes', async () => {
+        let finish: (value: InspectionSession) => void;
+        (ModelInspectorAPI.createSession as jest.Mock).mockReturnValue(new Promise(resolve => {finish = resolve;}));
+        const view = render(<ModelInspectorPopup language={Language.CHINESE} activeImage={activeImage} activeModelTask='detect'/>);
+        await waitFor(() => expect(ModelInspectorAPI.createSession).toHaveBeenCalled());
+        const signal = (ModelInspectorAPI.createSession as jest.Mock).mock.calls[0][4];
+        view.unmount();
+        expect(signal.aborted).toBe(true);
+        await act(async () => finish(session));
+        expect(ModelInspectorAPI.deleteSession).toHaveBeenCalledWith(session.id);
+    });
+
+    it('does not publish attribution for a previous layer or target class', async () => {
+        let finish: () => void;
+        (ModelInspectorAPI.createSession as jest.Mock).mockResolvedValue({...session, predictions: []});
+        (ModelInspectorAPI.createAttribution as jest.Mock).mockReturnValue(new Promise(resolve => {finish = resolve;}));
+        render(<ModelInspectorPopup language={Language.CHINESE} activeImage={activeImage} activeModelTask='detect'/>);
+        await screen.findByTestId('inspector-view-a');
+        fireEvent.click(screen.getByRole('button', {name: '生成类别响应图'}));
+        const signal = (ModelInspectorAPI.createAttribution as jest.Mock).mock.calls[0][3];
+        fireEvent.change(screen.getByRole('spinbutton'), {target: {value: '1'}});
+        expect(signal.aborted).toBe(true);
+        await act(async () => finish());
+        expect(screen.getByRole('button', {name: '平均响应'})).toHaveClass('active');
+        expect(screen.getByRole('button', {name: '生成类别响应图'})).not.toBeDisabled();
     });
 
     it('scrolls the stage ribbon with the wheel and changes layers from the canvas arrows', async () => {

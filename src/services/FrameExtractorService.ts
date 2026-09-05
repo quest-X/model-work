@@ -61,11 +61,7 @@ function unzipInWorker(buffer: ArrayBuffer): Promise<WorkerEntry[]> {
 
     const id = ++workerSeq;
     return new Promise<WorkerEntry[]>((resolve, reject) => {
-        const timer = setTimeout(() => {
-            worker.removeEventListener('message', onMessage);
-            reject(new Error(`Worker unzip timeout after ${WORKER_TIMEOUT_MS}ms`));
-        }, WORKER_TIMEOUT_MS);
-
+        let timer: ReturnType<typeof setTimeout> | undefined = undefined;
         const onMessage = (ev: MessageEvent) => {
             const data = ev.data;
             if (!data || data.id !== id) return;
@@ -78,6 +74,10 @@ function unzipInWorker(buffer: ArrayBuffer): Promise<WorkerEntry[]> {
             }
         };
 
+        timer = setTimeout(() => {
+            worker.removeEventListener('message', onMessage);
+            reject(new Error(`Worker unzip timeout after ${WORKER_TIMEOUT_MS}ms`));
+        }, WORKER_TIMEOUT_MS);
         worker.addEventListener('message', onMessage);
         // Transfer the ArrayBuffer to avoid a structured-clone copy.
         worker.postMessage({ id, buffer }, [buffer]);
@@ -169,7 +169,7 @@ export class FrameExtractorService {
         videoFile: File,
         targetFps: number = 0,
         onProgress?: ProgressCallback,
-    ): Promise<{ sessionId: string; metadata: any }> {
+    ): Promise<{ sessionId: string; metadata: FrameExtractionResult }> {
 
         const formData = new FormData();
         formData.append('file', videoFile, videoFile.name);
@@ -185,7 +185,14 @@ export class FrameExtractorService {
             } : undefined,
         });
 
-        return response.data; // { sessionId, metadata }
+        const {sessionId, metadata} = response.data || {};
+        if (typeof sessionId !== 'string' || !sessionId || !metadata ||
+            !['fps', 'duration', 'width', 'height', 'totalFrames'].every(key =>
+                Number.isFinite(metadata[key]) && metadata[key] > 0) ||
+            !Number.isInteger(metadata.totalFrames)) {
+            throw new Error('视频元数据无效 / Invalid video metadata');
+        }
+        return {sessionId, metadata};
     }
 
     // ── 按需取帧 ────────────────────────────────────────────────────────────
@@ -205,10 +212,10 @@ export class FrameExtractorService {
             response = await axios.get(`${getApiBase()}/frames/${sessionId}`, {
                 params: { start, count },
                 responseType: 'arraybuffer',
-                timeout: 0,
+                timeout: 150000,
             });
-        } catch (err: any) {
-            if (err?.response?.status === 404) {
+        } catch (err) {
+            if (axios.isAxiosError(err) && err.response?.status === 404) {
                 throw new SessionExpiredError(sessionId);
             }
             throw err;
@@ -216,13 +223,18 @@ export class FrameExtractorService {
 
         // 解析 metadata
         const metadataHeader = response.headers['x-frame-metadata'];
-        let metadata: any = {};
-        if (metadataHeader) {
-            try { metadata = JSON.parse(metadataHeader); } catch { /* ignore */ }
-        }
+        let metadata: {startFrame: number; batchFrames: number};
+        try { metadata = JSON.parse(metadataHeader); }
+        catch { throw new Error('帧元数据无效 / Invalid frame metadata'); }
 
         // 解压 ZIP（Web Worker，避免阻塞主线程）
         const entries = await unzipInWorker(response.data as ArrayBuffer);
+        const indices = entries.map(entry => Number(/^frame_(\d+)\.jpg$/.exec(entry.name)?.[1]));
+        if (!metadata || metadata.startFrame !== start || metadata.batchFrames !== entries.length ||
+            entries.length === 0 || entries.length > count ||
+            indices.some((index, i) => !Number.isSafeInteger(index) || index < 1 || index !== indices[0] + i)) {
+            throw new Error('帧数据缺失或顺序不一致，请重试 / Missing or misaligned frames; retry');
+        }
 
         const frames: File[] = [];
         for (let i = 0; i < entries.length; i++) {

@@ -4,6 +4,7 @@ export enum PopupWindowType {
     SUGGEST_LABEL_NAMES = 'SUGGEST_LABEL_NAMES',
     IMPORT_IMAGES = 'IMPORT_IMAGES',
     CALL_MODEL = 'CALL_MODEL',               // 调用模型 (formerly LOAD_AI_MODEL / 本地模型)
+    OCR = 'OCR',
     CONNECT_AI_MODEL_VIA_API = 'CONNECT_AI_MODEL_VIA_API',
     MODEL_ENGINE = 'MODEL_ENGINE',           // 模型引擎 (formerly INTEGRATE_AI_MODEL / 远程模型)
     MANAGE_AI_MODELS = 'MANAGE_AI_MODELS',

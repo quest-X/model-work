@@ -14,6 +14,7 @@ import { ClipLoader } from 'react-spinners';
 import ImportLabelPopup from './ImportLabelPopup/ImportLabelPopup';
 import ExportLabelPopup from './ExportLabelsPopup/ExportLabelPopup';
 import CallModelPopup from './CallModelPopup/CallModelPopup';
+import OCRPopup from './OCRPopup/OCRPopup';
 import LoadDetectionModelPopup from './LoadDetectionModelPopup/LoadDetectionModelPopup';
 import ConnectInferenceServerPopup from './ConnectInferenceServerPopup/ConnectInferenceServerPopup';
 import ModelEnginePopup from './ModelEnginePopup/ModelEnginePopup';
@@ -92,6 +93,7 @@ const PopupView: React.FC<IProps> = (
         [PopupWindowType.EXIT_PROJECT]: () => <ExitProjectPopup />,
         [PopupWindowType.IMPORT_IMAGES]: () => <LoadMoreMediaPopup />,
         [PopupWindowType.CALL_MODEL]: () => <CallModelPopup />,
+        [PopupWindowType.OCR]: () => <OCRPopup />,
         [PopupWindowType.LOAD_DETECTION_MODEL]: () => <LoadDetectionModelPopup />,
         [PopupWindowType.CONNECT_AI_MODEL_VIA_API]: () => <ConnectInferenceServerPopup />,
         [PopupWindowType.MODEL_ENGINE]: () => <ModelEnginePopup />,

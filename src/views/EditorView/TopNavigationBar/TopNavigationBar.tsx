@@ -361,6 +361,15 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                                         <img src='ico/ai.png' alt='local-models'/>
                                         {currentTexts.modelManagement.callModels}
                                     </div>
+                                    <button type='button' className='DropDownMenuContentOption active'
+                                        onClick={() => {
+                                            setActiveServicesDropdown(null);
+                                            props.updateActivePopupTypeAction(PopupWindowType.OCR);
+                                        }}>
+                                        <div className='Marker'/>
+                                        <img src='ico/ai.png' alt=''/>
+                                        {props.language === Language.CHINESE ? '文字识别 OCR' : 'Text Recognition OCR'}
+                                    </button>
                                     <div className='DropDownMenuContentOption active'
                                         onClick={openTrainingTask}>
                                         <div className='Marker'/>

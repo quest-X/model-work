@@ -6,6 +6,7 @@
  * an AbortController to cancel mid-stream.
  */
 import { getEngineBaseUrl } from '../utils/DefaultBackendUrl';
+import {consumeNDJSON} from './consumeNDJSON';
 
 export type TrackFrameResult = {
     frame_idx: number;
@@ -90,47 +91,17 @@ export class TrackingAPIService {
                 return;
             }
 
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder('utf-8');
-            let buffer = '';
-
             try {
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
-
-                    let newlineIdx;
-                    while ((newlineIdx = buffer.indexOf('\n')) >= 0) {
-                        const line = buffer.slice(0, newlineIdx).trim();
-                        buffer = buffer.slice(newlineIdx + 1);
-                        if (!line) continue;
-                        let msg: any;
-                        try { msg = JSON.parse(line); }
-                        catch {
-                            if (line.startsWith('{')) {
-                                cb.onError(new Error(`Malformed tracking response: ${line.slice(0, 100)}`));
-                                return;
-                            }
-                            continue;
-                        }
-                        if (msg.error) { cb.onError(new Error(msg.error)); return; }
-                        if (msg.done) { cb.onDone(msg.total ?? 0); return; }
-                        if (msg.status) { cb.onStatus?.(msg as TrackStatusMessage); continue; }
-                        if (typeof msg.frame_idx === 'number') {
-                            cb.onFrame(msg as TrackFrameResult);
-                        }
-                    }
-                }
-                // Flush any final line without newline
-                const tail = buffer.trim();
-                if (tail) {
-                    try {
-                        const msg = JSON.parse(tail);
-                        if (msg.error) { cb.onError(new Error(msg.error)); return; }
-                        if (msg.done) cb.onDone(msg.total ?? 0);
-                    } catch { /* ignore */ }
-                }
+                await consumeNDJSON(response.body, line => {
+                    const msg = JSON.parse(line);
+                    if (!msg || typeof msg !== 'object') throw new Error('Invalid tracking event');
+                    if (msg.error) throw new Error(msg.error);
+                    if (msg.cancelled) throw new Error('Tracking cancelled');
+                    if (msg.done) { cb.onDone(msg.total ?? 0); return true; }
+                    if (msg.status) cb.onStatus?.(msg as TrackStatusMessage);
+                    else if (typeof msg.frame_idx === 'number') cb.onFrame(msg as TrackFrameResult);
+                    return false;
+                });
             } catch (e: any) {
                 if (e?.name !== 'AbortError') cb.onError(e as Error);
             }

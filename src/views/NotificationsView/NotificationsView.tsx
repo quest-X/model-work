@@ -1,4 +1,4 @@
-import React, {useState, useEffect} from 'react';
+import React, {useState} from 'react';
 import './NotificationsView.scss';
 import {AppState} from '../../store';
 import {connect} from 'react-redux';
@@ -43,22 +43,8 @@ enum Animation {
     OUT = 'animation-out'
 }
 
-const NotificationsView: React.FC<IProps> = (props) => {
+export const NotificationsView: React.FC<IProps> = (props) => {
     const [ notificationState, setNotificationState ] = useState(NotificationState.IDLE);
-    const [ currentTime, setCurrentTime ] = useState(Date.now());
-
-    // 为推理进度通知添加实时计时器更新
-    useEffect(() => {
-        const notification = props.queue[0];
-        if (notification?.isInferenceProgress && notification.startTime) {
-            const timer = setInterval(() => {
-                setCurrentTime(Date.now());
-            }, 1000);
-            
-            return () => clearInterval(timer);
-        }
-        return () => {}; // 确保总是返回清理函数
-    }, [props.queue]);
 
     if (props.queue.length > 0 && notificationState === NotificationState.IDLE) {
         setNotificationState(NotificationState.IN)
@@ -209,7 +195,7 @@ const NotificationsView: React.FC<IProps> = (props) => {
                                                 return texts.aiInference.totalTime;
                                             })()}</span>
                                             <span className='summary-value'>
-                                                {((currentTime - notification.startTime!) / 1000).toFixed(2)}s
+                                                {(notification.stepTimes.stepDurations.reduce((sum, duration) => sum + duration, 0) / 1000).toFixed(2)}s
                                             </span>
                                         </div>
                                         <div className='summary-item'>

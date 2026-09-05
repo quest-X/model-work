@@ -14,6 +14,7 @@
  */
 import { getEngineBaseUrl } from '../utils/DefaultBackendUrl';
 import { DetectionResult } from './DetectionAPIDetector';
+import {consumeNDJSON} from './consumeNDJSON';
 
 export type DetectSessionFrame = {
     frame_idx: number;
@@ -46,12 +47,10 @@ function handleLine(line: string, cb: DetectSessionCallbacks): LineOutcome {
     try {
         msg = JSON.parse(line);
     } catch {
-        if (line.startsWith('{')) {
-            cb.onError(new Error(`Malformed detect-session response: ${line.slice(0, 100)}`));
-            return 'stop';
-        }
-        return 'continue';
+        throw new Error(`Malformed detect-session response: ${line.slice(0, 100)}`);
     }
+    if (!msg || typeof msg !== 'object') throw new Error('Invalid detect-session event');
+    if (msg.cancelled) throw new Error('Video detection cancelled');
     const frameIdx = msg.frame_idx;
     // Stream-level error (no frame_idx) aborts the run; per-frame errors flow
     // through onFrame so one bad frame doesn't kill the batch.
@@ -67,31 +66,6 @@ function handleLine(line: string, cb: DetectSessionCallbacks): LineOutcome {
         cb.onFrame(msg as unknown as DetectSessionFrame);
     }
     return 'continue';
-}
-
-async function consumeStream(body: ReadableStream<Uint8Array>, cb: DetectSessionCallbacks): Promise<void> {
-    const reader = body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    let buffer = '';
-
-    for (;;) {
-        // Sequential by nature: NDJSON chunks must be consumed in order.
-        // eslint-disable-next-line no-await-in-loop
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        let newlineIdx;
-        while ((newlineIdx = buffer.indexOf('\n')) >= 0) {
-            const line = buffer.slice(0, newlineIdx).trim();
-            buffer = buffer.slice(newlineIdx + 1);
-            if (handleLine(line, cb) === 'stop') return;
-        }
-    }
-    const tail = buffer.trim();
-    if (tail && handleLine(tail, cb) === 'stop') return;
-    // Stream ended without a done marker — treat as soft completion.
-    cb.onDone(-1);
 }
 
 export class DetectSessionAPIService {
@@ -129,7 +103,7 @@ export class DetectSessionAPIService {
             }
 
             try {
-                await consumeStream(response.body, cb);
+                await consumeNDJSON(response.body, line => handleLine(line, cb) === 'stop');
             } catch (e) {
                 if ((e as Error)?.name !== 'AbortError') cb.onError(e as Error);
             }

@@ -193,6 +193,13 @@
         color: white;
         font-size: 14px;
 
+        &:is(button) {
+          border: 0;
+          padding: 0;
+          background: transparent;
+          font-family: inherit;
+        }
+
         &.divider::after {
           content: '';
           position: absolute;

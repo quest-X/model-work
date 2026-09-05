@@ -54,6 +54,13 @@ const renderNavigation = (
 );
 
 describe('TopNavigationBar core-engine change badge', () => {
+    it('opens OCR from the core engine menu', () => {
+        const updatePopup = jest.fn();
+        renderNavigation([], Language.CHINESE, {updateActivePopupTypeAction: updatePopup});
+        fireEvent.click(screen.getByText('核心引擎'));
+        fireEvent.click(screen.getByRole('button', {name: '文字识别 OCR'}));
+        expect(updatePopup).toHaveBeenCalledWith(PopupWindowType.OCR);
+    });
     it('shows the number of dirty datasets only', () => {
         renderNavigation([
             queueItem('dirty-1', QueueDataSyncStatus.DIRTY),

@@ -50,6 +50,15 @@ export const App: React.FC<IProps> = (
     const [storageUnavailable, setStorageUnavailable] = useState(false);
     const [platformMode, setPlatformMode] = useState<PlatformMode>('control');
 
+    const beforeOpenAnnotationResource = () => {
+        if (storedDataInfo?.hasProject || storageUnavailable) {
+            // Resolve the existing recovery snapshot before a resource can replace the workspace.
+            setPlatformMode('annotation');
+            return false;
+        }
+        return true;
+    };
+
     useEffect(() => {
         initializeApp();
     }, []);
@@ -284,7 +293,10 @@ export const App: React.FC<IProps> = (
         <div className={classNames('App', {'AI': isAILoaded})} draggable={false}
         >
             {selectRoute()}
-            <PopupView/>
+            <PopupView
+                onBeforeOpenAnnotation={beforeOpenAnnotationResource}
+                onOpenAnnotation={() => setPlatformMode('annotation')}
+            />
             <NotificationsView/>
         </div>
     );

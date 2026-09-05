@@ -17,6 +17,10 @@ import {
     ImageWorkspaceUnavailableError,
 } from '../../../../services/ImageDatasetRestoreService';
 import {DataCenterPopup} from '../DataCenterPopup';
+import {store} from '../../../../index';
+import {PopupActions} from '../../../../logic/actions/PopupActions';
+
+jest.mock('../../../../index', () => ({store: {getState: jest.fn()}}));
 
 jest.mock('../../GenericYesNoPopup/GenericYesNoPopup', () => ({
     GenericYesNoPopup: ({title, renderContent}: {title: React.ReactNode; renderContent: () => React.ReactNode}) => (
@@ -163,6 +167,9 @@ describe('DataCenterPopup', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        (store.getState as jest.Mock).mockReturnValue({queue: {activeQueueItemId: 'queue-1', items: [localItem]}});
+        (ImageDatasetRestoreService.restore as jest.Mock).mockResolvedValue({id: 'queue-1'});
+        (VideoDatasetRestoreService.restore as jest.Mock).mockResolvedValue({id: 'queue-1'});
         global.fetch = jest.fn((input: RequestInfo, init?: RequestInit) => {
             const url = String(input);
             if (url.endsWith('/datasets/dataset-1') && init?.method === 'PATCH') {
@@ -221,7 +228,7 @@ describe('DataCenterPopup', () => {
         }) as jest.Mock;
     });
 
-    const renderPopup = (queueItems = [localItem]) => render(<DataCenterPopup
+    const renderPopup = (queueItems = [localItem], extra: Partial<React.ComponentProps<typeof DataCenterPopup>> = {}) => render(<DataCenterPopup
         language={Language.CHINESE}
         projectName='default-project'
         queueItems={queueItems}
@@ -230,7 +237,45 @@ describe('DataCenterPopup', () => {
         labels={[]}
         updateActivePopupTypeAction={updateActivePopupTypeAction}
         updateQueueItemAction={updateQueueItemAction}
+        {...extra}
     />);
+
+    it('navigates to annotation only after the restored resource is active', async () => {
+        const onOpenAnnotation = jest.fn();
+        renderPopup([], {onOpenAnnotation});
+        fireEvent.click(await screen.findByRole('button', {name: /default-project.*465/}));
+        fireEvent.click(screen.getByRole('button', {name: '使用'}));
+        await waitFor(() => expect(onOpenAnnotation).toHaveBeenCalledTimes(1));
+        expect(PopupActions.close).toHaveBeenCalled();
+    });
+
+    it('checks pending recovery before changing the workspace', async () => {
+        const onOpenAnnotation = jest.fn();
+        renderPopup([], {onBeforeOpenAnnotation: () => false, onOpenAnnotation});
+        fireEvent.click(await screen.findByRole('button', {name: /default-project.*465/}));
+        fireEvent.click(screen.getByRole('button', {name: '使用'}));
+        expect(ImageDatasetRestoreService.restore).not.toHaveBeenCalled();
+        expect(onOpenAnnotation).not.toHaveBeenCalled();
+        expect(PopupActions.close).not.toHaveBeenCalled();
+    });
+
+    it.each(['rejected', 'inactive', 'queue-error'])('keeps a failed resource open: %s', async failure => {
+        const onOpenAnnotation = jest.fn();
+        if (failure === 'rejected') {
+            (ImageDatasetRestoreService.restore as jest.Mock).mockRejectedValueOnce(new Error('bad workspace'));
+        } else {
+            (store.getState as jest.Mock).mockReturnValue({queue: {
+                activeQueueItemId: failure === 'inactive' ? 'other' : 'queue-1',
+                items: [{...localItem, status: QueueItemStatus.ERROR, error: 'queue load failed'}],
+            }});
+        }
+        renderPopup([], {onOpenAnnotation});
+        fireEvent.click(await screen.findByRole('button', {name: /default-project.*465/}));
+        fireEvent.click(screen.getByRole('button', {name: '使用'}));
+        await screen.findByText(failure === 'rejected' ? 'bad workspace' : 'queue load failed');
+        expect(onOpenAnnotation).not.toHaveBeenCalled();
+        expect(PopupActions.close).not.toHaveBeenCalled();
+    });
 
     it('separates browser work data from server snapshots', async () => {
         renderPopup();

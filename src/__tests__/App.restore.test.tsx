@@ -16,7 +16,18 @@ jest.mock('../views/EditorView/EditorView', () => ({
         <button type='button' onClick={onPlatformSwitch}>切换平台</button>
     </main>,
 }));
-jest.mock('../views/PopupView/PopupView', () => ({__esModule: true, default: () => null}));
+const mockResourceLoad = jest.fn();
+jest.mock('../views/PopupView/PopupView', () => ({
+    __esModule: true,
+    default: ({onBeforeOpenAnnotation, onOpenAnnotation}: {
+        onBeforeOpenAnnotation: () => boolean;
+        onOpenAnnotation: () => void;
+    }) => <button type='button' onClick={() => {
+        if (!onBeforeOpenAnnotation()) return;
+        mockResourceLoad();
+        onOpenAnnotation();
+    }}>使用资源</button>,
+}));
 jest.mock('../views/NotificationsView/NotificationsView', () => ({__esModule: true, default: () => null}));
 jest.mock('../views/MobileMainView/MobileMainView', () => ({__esModule: true, default: () => null}));
 jest.mock('../views/SizeItUpView/SizeItUpView', () => ({SizeItUpView: () => null}));
@@ -52,6 +63,31 @@ describe('App restore prompt scope', () => {
         jest.clearAllMocks();
         autoSave.initialize.mockResolvedValue();
         restore.restoreSettings.mockResolvedValue(true);
+        restore.checkForStoredData.mockResolvedValue({hasSettings: false, hasProject: false, lastSaved: 0});
+    });
+
+    it('opens a resource in annotation when no recovery is pending', async () => {
+        render(<App {...props}/>);
+        await waitFor(() => expect(autoSave.resume).toHaveBeenCalled());
+        fireEvent.click(screen.getByRole('button', {name: '使用资源'}));
+        expect(await screen.findByText('annotation')).toBeInTheDocument();
+        expect(mockResourceLoad).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['stored-project', 'storage-error'])('protects existing work before resource loading: %s', async condition => {
+        if (condition === 'stored-project') {
+            restore.checkForStoredData.mockResolvedValue({hasSettings: true, hasProject: true, lastSaved: 1});
+        } else {
+            restore.checkForStoredData.mockRejectedValueOnce(new Error('database unavailable'));
+        }
+        const errorLog = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        render(<App {...props}/>);
+        fireEvent.click(await screen.findByRole('button', {name: '使用资源'}));
+        expect(await screen.findByText('是否恢复之前的工作?')).toBeInTheDocument();
+        expect(mockResourceLoad).not.toHaveBeenCalled();
+        expect(restore.clearAllStoredData).not.toHaveBeenCalled();
+        expect(autoSave.resume).not.toHaveBeenCalled();
+        errorLog.mockRestore();
     });
 
     it('waits until the annotation platform before offering project recovery', async () => {

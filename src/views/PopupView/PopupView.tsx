@@ -38,6 +38,8 @@ import {clearDatasetActionSelections} from '../../services/DatasetActionSelectio
 
 
 interface IProps {
+    onBeforeOpenAnnotation?: () => boolean;
+    onOpenAnnotation?: () => void;
     activePopupType: PopupWindowType;
     activePopupNodeId: string | null;
     activePopupNodeName: string | null;
@@ -45,7 +47,8 @@ interface IProps {
 }
 
 const PopupView: React.FC<IProps> = (
-    { activePopupType, activePopupNodeId, activePopupNodeName, activePopupNodeRemote },
+    { activePopupType, activePopupNodeId, activePopupNodeName, activePopupNodeRemote,
+        onBeforeOpenAnnotation, onOpenAnnotation },
 ) => {
 
     useEffect(() => {
@@ -99,7 +102,10 @@ const PopupView: React.FC<IProps> = (
         [PopupWindowType.PIPELINE_PREPROCESS]: () => <PipelinePreprocessPopup />,
         [PopupWindowType.PIPELINE_INFERENCE]: () => <PipelineInferencePopup />,
         [PopupWindowType.PIPELINE_POSTPROCESS]: () => <PipelinePostprocessPopup />,
-        [PopupWindowType.DATA_CENTER]: () => <DataCenterPopup />,
+        [PopupWindowType.DATA_CENTER]: () => <DataCenterPopup
+            onBeforeOpenAnnotation={onBeforeOpenAnnotation}
+            onOpenAnnotation={onOpenAnnotation}
+        />,
         [PopupWindowType.DATASET_EXPORT]: () => <DatasetExportPopup />,
         [PopupWindowType.DATASET_INFERENCE]: () => <DatasetInferencePopup />,
         [PopupWindowType.TRAINING_TASK]: () => <TrainingTaskPopup />,

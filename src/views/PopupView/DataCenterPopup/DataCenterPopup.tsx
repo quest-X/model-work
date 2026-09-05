@@ -9,9 +9,10 @@ import {PopupWindowType} from '../../../data/enums/PopupWindowType';
 import {updateActivePopupType} from '../../../store/general/actionCreators';
 import {removeQueueItem, updateQueueItem} from '../../../store/queue/actionCreators';
 import {AppState} from '../../../store';
+import {store} from '../../../index';
 import {Language} from '../../../data/LanguageConfig';
 import {ImageData, LabelName} from '../../../store/labels/types';
-import {QueueDataSyncStatus, QueueItem, QueueItemType} from '../../../store/queue/types';
+import {QueueDataSyncStatus, QueueItem, QueueItemStatus, QueueItemType} from '../../../store/queue/types';
 import {getEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
 import {DataBatchSyncService} from '../../../services/DataBatchSyncService';
 import {TrainingDatasetSelection} from '../../../services/TrainingDatasetSelection';
@@ -127,6 +128,8 @@ const STORAGE_TIERS: StorageTier[] = ['persistent', 'temporary'];
 const DATASET_PREVIEW_LIMIT = 12;
 
 interface IProps {
+    onBeforeOpenAnnotation?: () => boolean;
+    onOpenAnnotation?: () => void;
     language: Language;
     projectName: string;
     queueItems: QueueItem[];
@@ -349,6 +352,8 @@ const tierSidebarCopy = (module: ResourceModule, zh: boolean) => {
 };
 
 export const DataCenterPopup: React.FC<IProps> = ({
+    onBeforeOpenAnnotation,
+    onOpenAnnotation,
     language,
     projectName,
     queueItems,
@@ -869,12 +874,25 @@ export const DataCenterPopup: React.FC<IProps> = ({
         return {className: status.toLowerCase(), label: labelsByStatus[status]};
     };
 
-    const openLocalItem = (item: QueueItem) => {
-        if (item.id === activeQueueItemId) {
-            PopupActions.close();
-            return;
+    const finishResourceOpen = (queueId: string) => {
+        const queue = store.getState().queue;
+        const item = queue.items.find(candidate => candidate.id === queueId);
+        if (queue.activeQueueItemId !== queueId || item?.status !== QueueItemStatus.COMPLETED) {
+            throw new Error(item?.error || (zh ? '资源未能激活，请重试' : 'Resource was not activated; please retry'));
         }
-        void QueueActions.switchToQueueItem(item, imagesData).then(() => PopupActions.close());
+        onOpenAnnotation?.();
+        PopupActions.close();
+    };
+
+    const openLocalItem = async (item: QueueItem) => {
+        if (onBeforeOpenAnnotation?.() === false) return;
+        setDatasetActionError(null);
+        try {
+            if (item.id !== activeQueueItemId) await QueueActions.switchToQueueItem(item, imagesData);
+            finishResourceOpen(item.id);
+        } catch (cause) {
+            setDatasetActionError(cause instanceof Error ? cause.message : String(cause));
+        }
     };
 
     const syncLocalItem = (item: QueueItem) => {
@@ -928,13 +946,13 @@ export const DataCenterPopup: React.FC<IProps> = ({
         const revision = dataset.media_type === 'video'
             ? dataset.revision || 1
             : await upgradeLegacyVideoDataset(dataset);
-        await VideoDatasetRestoreService.restore(
+        const item = await VideoDatasetRestoreService.restore(
             dataset.id,
             datasetDisplayName(dataset),
             revision,
             imagesData,
         );
-        PopupActions.close();
+        finishResourceOpen(item.id);
     };
 
     const openLegacyImageDataset = async (dataset: DatasetSummary): Promise<void> => {
@@ -949,19 +967,21 @@ export const DataCenterPopup: React.FC<IProps> = ({
             }),
         ]);
         updateActivePopupTypeAction(PopupWindowType.IMPORT_ANNOTATIONS);
+        // Legacy resources still require the import wizard; this only opens that workflow.
+        onOpenAnnotation?.();
     };
 
     const openImageDataset = async (dataset: DatasetSummary): Promise<void> => {
         if (dataset.format !== 'opensight-batch') return openLegacyImageDataset(dataset);
         try {
-            await ImageDatasetRestoreService.restore(
+            const item = await ImageDatasetRestoreService.restore(
                 dataset.id,
                 datasetDisplayName(dataset),
                 dataset.revision || 1,
                 dataset.source_id,
                 imagesData,
             );
-            PopupActions.close();
+            finishResourceOpen(item.id);
         } catch (cause) {
             // Only snapshots created before workspace.json existed may take the
             // lossy YOLO compatibility path. A malformed modern workspace must
@@ -975,12 +995,13 @@ export const DataCenterPopup: React.FC<IProps> = ({
     };
 
     const openDatasetForEditing = async (dataset: DatasetSummary) => {
+        if (onBeforeOpenAnnotation?.() === false) return;
         setDatasetActionId(dataset.id);
         setDatasetActionError(null);
         try {
             if (dataset.media_type === 'camera' && dataset.camera) {
                 await CameraResourceService.open(dataset.camera, imagesData);
-                PopupActions.close();
+                finishResourceOpen(CameraResourceService.toQueueItem(dataset.camera).id);
                 return;
             }
             if (dataset.media_type === 'video' || dataset.source_type === 'video_queue') {
@@ -1433,6 +1454,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
                 <span>{zh ? '查看当前浏览器中的工作副本、标注状态与服务器同步状态。' : 'Inspect browser work copies, annotation state, and server sync status.'}</span>
             </div>
         </div>
+        {datasetActionError && <p className='TaskActionError' role='alert'>{datasetActionError}</p>}
         <div className='LocalDataList'>
             {temporaryItems.length === 0 && <div className='EmptyState'>
                 <strong>{zh ? '暂无临时数据' : 'No temporary data'}</strong>

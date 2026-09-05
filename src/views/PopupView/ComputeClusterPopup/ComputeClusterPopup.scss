@@ -498,6 +498,12 @@
     box-shadow: 0 0 0 6px rgba(217, 76, 76, 0.05), 0 0 20px rgba(217, 76, 76, 0.14);
     filter: none;
   }
+  &.compute_node.node-warning {
+    border: 2px solid #e7a640;
+    background: radial-gradient(circle at 38% 30%, rgba(133, 91, 35, 0.96), rgba(57, 42, 26, 0.98) 68%);
+    box-shadow: 0 0 0 6px rgba(231, 166, 64, 0.05), 0 0 20px rgba(231, 166, 64, 0.14);
+    > i, > span { color: #e7a640; }
+  }
   .ComputeGraphNodeState {
     position: absolute;
     right: -18px;
@@ -616,6 +622,7 @@
   > strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
   > small { color: rgba(255, 255, 255, 0.5); font-size: 8px; }
   > small.online { color: #7fe0a8; }
+  > small.warning { color: #e7a640; }
   > small.offline { color: #ff9d9d; }
 }
 
@@ -633,7 +640,7 @@
     background: rgba(255, 255, 255, 0.025);
     padding: 7px;
     > span { color: rgba(255, 255, 255, 0.45); font-size: 7px; white-space: nowrap; }
-    > strong { color: #ff9d9d; font-size: 9px; }
+    > strong { color: #e7a640; font-size: 9px; }
     > small { overflow: hidden; color: rgba(255, 255, 255, 0.3); font-size: 6px; text-overflow: ellipsis; white-space: nowrap; }
     &.available { border-color: rgba(102, 221, 160, 0.24); background: rgba(56, 139, 94, 0.08); }
     &.available > strong { color: #7fe0a8; }

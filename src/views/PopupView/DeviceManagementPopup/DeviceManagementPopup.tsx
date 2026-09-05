@@ -5,6 +5,7 @@ import {
     ComputeClusterService,
     ComputeLanAsset,
     ComputeManagedDevice,
+    computeNodeNormal,
 } from '../../../services/ComputeClusterService';
 import './DeviceManagementPopup.scss';
 
@@ -50,6 +51,7 @@ export const DeviceManagementPopup: React.FC<IProps> = (
     },
 ) => {
     const zh = language === Language.CHINESE;
+    const nodeTone: DeviceTone = !node.online ? 'abnormal' : computeNodeNormal(node) ? 'normal' : 'fault';
     const [tab, setTab] = useState<DeviceTab>(initialTab);
     const [query, setQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<DeviceStatusFilter>('all');
@@ -201,7 +203,7 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                     <div className='DeviceManagementNodeState'>
                         <small>{zh ? '所属节点' : 'Assigned node'}</small>
                         <strong>{node.name}</strong>
-                        <span className={node.online ? 'normal' : 'abnormal'}><i/> {statusLabel(node.online ? 'normal' : 'abnormal')}</span>
+                        <span className={nodeTone}><i/> {statusLabel(nodeTone)}</span>
                     </div>
                 </nav>
 

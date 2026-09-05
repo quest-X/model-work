@@ -738,6 +738,10 @@ describe('ControlCenterView', () => {
             rizhaoNode,
         ]);
         const resourceGraph = graph(onlineNode);
+        resourceGraph.relations.push({
+            relation_id: 'contains:backup', kind: 'contains', source_id: 'region:test',
+            target_id: `node:${backupNode.node_id}`, active: true, reason: 'available',
+        });
         resourceGraph.entities.forEach(entity => {
             entity.region_id = '310000';
             entity.region_name = '上海市';
@@ -830,7 +834,18 @@ describe('ControlCenterView', () => {
 
         expect(screen.queryByRole('button', {name: '刷新机器状态'})).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', {name: '图谱'}));
-        expect(screen.getByRole('region', {name: '主节点、边缘设备与摄像头拓扑'})).toBeInTheDocument();
+        const graphPanel = screen.getByRole('region', {name: '主节点、边缘设备与摄像头拓扑'});
+        const graphStats = graphPanel.querySelector('.ComputeKnowledgeStats');
+        expect(graphStats?.querySelector('.online')).toHaveTextContent('0正常');
+        expect(graphStats?.querySelector('.warning')).toHaveTextContent('2故障');
+        expect(graphStats?.querySelector('.offline')).toHaveTextContent('1异常');
+        expect(within(graphPanel).getByText('0/2 正常节点')).toBeInTheDocument();
+        expect(within(graphPanel).getByText('0/1 正常节点')).toBeInTheDocument();
+        const graphNode = within(graphPanel).getByRole('button', {name: '查看 在线节点 节点信息'});
+        expect(graphNode).toHaveClass('node-warning');
+        expect(within(graphPanel).getByRole('button', {name: '查看 日照节点 节点信息'})).toHaveClass('node-offline');
+        fireEvent.mouseEnter(graphNode);
+        expect(within(graphPanel).getByText('故障 · 心跳 刚刚')).toHaveClass('warning');
         expect(screen.getByText('边缘集群图谱', {selector: 'strong'})).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', {name: '地图'}));
         expect(screen.getByRole('region', {name: '计算群地理地图'})).toBeInTheDocument();

@@ -9,6 +9,7 @@ jest.mock('../../../../logic/actions/PopupActions', () => ({
     PopupActions: {close: jest.fn()},
 }));
 jest.mock('../../../../services/ComputeClusterService', () => ({
+    ...jest.requireActual('../../../../services/ComputeClusterService'),
     ComputeClusterService: {
         status: jest.fn(), nodes: jest.fn(), tasks: jest.fn(), scheduler: jest.fn(),
         resourceGraph: jest.fn(), lanScanTargets: jest.fn(), lanAssets: jest.fn(),
@@ -34,6 +35,7 @@ describe('ComputeClusterPopup', () => {
             agent_version: '0.1.0', capabilities: ['system.health.v1'],
             network: {
                 provider: 'tailscale', installed: true, online: true, ssh_available: true,
+                lan_ssh_available: true, tailscale_ssh_available: true,
                 addresses: ['100.64.0.1'],
             },
             network_dependencies: [{
@@ -483,7 +485,8 @@ describe('ComputeClusterPopup', () => {
         expect(graphStats?.querySelector('.online strong')).toHaveTextContent('1');
         expect(graphStats?.querySelector('.offline strong')).toHaveTextContent('1');
         expect(graphStats?.querySelector('.online')).toHaveTextContent('正常');
-        expect(graphStats?.querySelector('.offline')).toHaveTextContent('故障');
+        expect(graphStats?.querySelector('.warning')).toHaveTextContent('0故障');
+        expect(graphStats?.querySelector('.offline')).toHaveTextContent('异常');
         const offlineNode = screen.getByRole('button', {name: '查看 edge-offline 节点信息'});
         expect(offlineNode).toHaveClass('node-offline');
         expect(offlineNode).toHaveAttribute('data-entity-kind', 'compute_node');
@@ -541,7 +544,7 @@ describe('ComputeClusterPopup', () => {
 
         await user.hover(offlineNode);
         const offlineCard = screen.getByRole('status', {name: 'edge-offline 运维信息'});
-        expect(within(offlineCard).getByText('故障 · 最后心跳 20 小时前')).toBeInTheDocument();
+        expect(within(offlineCard).getByText('异常 · 最后心跳 20 小时前')).toBeInTheDocument();
 
         await user.unhover(offlineNode);
         await user.hover(camera);

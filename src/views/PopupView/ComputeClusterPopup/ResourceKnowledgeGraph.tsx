@@ -3,6 +3,7 @@ import {
     ComputeClusterNode,
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
+    computeNodeNormal,
 } from '../../../services/ComputeClusterService';
 
 interface ResourceKnowledgeGraphProps {
@@ -26,8 +27,6 @@ interface GraphRegion {
     regionId: string;
     regionName: string;
     state: ComputeResourceGraphEntity['state'];
-    memberCount: number;
-    onlineMemberCount: number;
     nodeIds: string[];
     left: number;
     width: number;
@@ -132,8 +131,6 @@ const operationsTopology = (
         regionId: region.region_id || region.region_name || region.label,
         regionName: region.region_name || region.region_id || region.label,
         state: region.state,
-        memberCount: region.member_count || 0,
-        onlineMemberCount: region.online_member_count || 0,
         nodeIds: [],
     }));
     nodes.forEach(node => {
@@ -148,18 +145,12 @@ const operationsTopology = (
                 regionId: node.region_id || node.region_name || 'unassigned',
                 regionName: node.region_name || node.region_id || '未分配地域',
                 state: node.state,
-                memberCount: 0,
-                onlineMemberCount: 0,
                 nodeIds: [],
             });
         }
         const record = regionRecords.get(regionId);
         if (!record) return;
         record.nodeIds.push(node.entity_id);
-        if (regionId.startsWith('region-fallback:')) {
-            record.memberCount += 1;
-            record.onlineMemberCount += Number(node.state === 'available');
-        }
     });
     const orderedRegions = [...regionRecords.values()]
         .filter(region => region.nodeIds.length > 0)
@@ -294,7 +285,11 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     const sensors = visibleEntities.filter(entity =>
         entity.kind === 'managed_device' && entity.device_kind !== 'edge_compute',
     );
-    const offlineNodes = graphNodes.filter(entity => entity.state !== 'available').length;
+    const nodeTones = new Map(graphNodes.map(entity => {
+        const node = entity.node_id ? nodeIndex.get(entity.node_id) : undefined;
+        return [entity.entity_id, !node?.online ? 'offline' : computeNodeNormal(node) ? 'online' : 'warning'];
+    }));
+    const nodeToneCounts = [...nodeTones.values()];
     const sshReachableNodes = graphNodes.filter(entity => {
         const node = entity.node_id ? nodeIndex.get(entity.node_id) : undefined;
         return node?.online && node.network.ssh_available;
@@ -341,8 +336,9 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
             <div className='ComputeKnowledgeStats'>
                 <div><strong>{topology.regions.length}</strong><span>{zh ? '地域' : 'regions'}</span></div>
                 <div><strong>{graphNodes.length}</strong><span>{zh ? '主节点' : 'main nodes'}</span></div>
-                <div className='online'><strong>{graph.summary.online_nodes}</strong><span>{zh ? '正常' : 'Normal'}</span></div>
-                <div className='offline'><strong>{offlineNodes}</strong><span>{zh ? '故障' : 'Fault'}</span></div>
+                <div className='online'><strong>{nodeToneCounts.filter(tone => tone === 'online').length}</strong><span>{zh ? '正常' : 'Normal'}</span></div>
+                <div className='warning'><strong>{nodeToneCounts.filter(tone => tone === 'warning').length}</strong><span>{zh ? '故障' : 'Fault'}</span></div>
+                <div className='offline'><strong>{nodeToneCounts.filter(tone => tone === 'offline').length}</strong><span>{zh ? '异常' : 'Abnormal'}</span></div>
                 <div><strong>{sshReachableNodes}</strong><span>{zh ? 'SSH 正常' : 'SSH Normal'}</span></div>
                 <div><strong>{edgeDevices.length}</strong><span>{zh ? '边缘设备' : 'edge devices'}</span></div>
                 <div><strong>{sensors.length}</strong><span>{zh ? '摄像头' : 'cameras'}</span></div>
@@ -375,7 +371,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                 >
                     <span>{zh ? '地域' : 'Region'}</span>
                     <strong>{zh ? region.regionName : region.regionId}</strong>
-                    <small>{region.onlineMemberCount}/{region.memberCount} {zh ? '正常节点' : 'Normal nodes'}</small>
+                    <small>{region.nodeIds.filter(id => nodeTones.get(id) === 'online').length}/{region.nodeIds.length} {zh ? '正常节点' : 'Normal nodes'}</small>
                 </div>)}
                 <svg className='ComputeGraphEdges' viewBox='0 0 1000 440' preserveAspectRatio='none' data-testid='resource-node-link-graph' aria-hidden='true'>
                     {visibleRelations.map(relation => {
@@ -424,7 +420,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                         type='button'
                         key={entity.entity_id}
                         className={`ComputeGraphNode ${entity.kind} ${classification} ${entity.device_kind === 'edge_compute' ? 'edge-device' : ''} state-${entity.state} ${isNode
-                            ? (entity.state === 'available' ? 'node-online' : 'node-offline')
+                            ? `node-${nodeTones.get(entity.entity_id)}`
                             : 'sensor-node'} ${isHovered || isPinned ? 'focused' : ''} ${isPinned ? 'pinned' : ''}`}
                         style={{left: `${point.x}%`, top: `${point.y}%`}}
                         onMouseEnter={() => setHoveredEntityId(entity.entity_id)}
@@ -472,6 +468,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                     {/* eslint-disable-next-line complexity */}
                     {inspectedEntity.kind === 'compute_node' ? (() => {
                         const node = inspectedEntity.node_id ? nodeIndex.get(inspectedEntity.node_id) : undefined;
+                        const tone = nodeTones.get(inspectedEntity.entity_id);
                         const agents = callableAgentsFor(inspectedEntity);
                         const sshAvailable = dependencyFor(inspectedEntity, 'control_ssh');
                         const publicAvailable = dependencyFor(inspectedEntity, 'public_http');
@@ -481,9 +478,10 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                                 ? `主节点 ${codes.get(inspectedEntity.entity_id)} · 运维信息${pinnedEntityId === inspectedEntity.entity_id ? ' · 已固定（双击节点或点击空白取消）' : ''}`
                                 : `Main node ${codes.get(inspectedEntity.entity_id)} · Operations${pinnedEntityId === inspectedEntity.entity_id ? ' · Pinned (double-click node or click blank space to unpin)' : ''}`}</span>
                             <strong>{inspectedEntity.label}</strong>
-                            <small className={node?.online ? 'online' : 'offline'}>{node?.online
-                                ? `${zh ? '正常 · 心跳' : 'Normal · heartbeat'} ${heartbeatLabel(node.heartbeat_age_seconds, zh)}`
-                                : `${zh ? '故障 · 最后心跳' : 'Fault · last heartbeat'} ${heartbeatLabel(node?.heartbeat_age_seconds, zh)}`}</small>
+                            <small className={tone}>{tone === 'online'
+                                ? (zh ? '正常 · 心跳' : 'Normal · heartbeat')
+                                : tone === 'warning' ? (zh ? '故障 · 心跳' : 'Fault · heartbeat')
+                                    : (zh ? '异常 · 最后心跳' : 'Abnormal · last heartbeat')}{' '}{heartbeatLabel(node?.heartbeat_age_seconds, zh)}</small>
                             <div className='ComputeGraphHoverRoutes'>
                                 <div className={sshAvailable ? 'available' : 'unavailable'}>
                                     <span>{zh ? 'SSH 通路' : 'SSH route'}</span><strong>{availabilityLabel(sshAvailable, zh)}</strong>

@@ -529,9 +529,10 @@ const EditorTopNavigationBar: React.FC<IProps> = React.memo((
                 ActiveModel.setDetection(data.model || '');
                 ActiveModel.setSegmentation(data.segmentation_model || '');
 
-                // 首次：用后端 detection slot 初始化
-                if (!initializedRef.current && data.model && data.model !== 'none') {
-                    setActiveModelName(data.model);
+                // 初次加载也支持仅有分割模型的训练结果。
+                const initialModel = [data.model, data.segmentation_model].find(name => name && name !== 'none');
+                if (!initializedRef.current && initialModel) {
+                    setActiveModelName(initialModel);
                     initializedRef.current = true;
                 }
 

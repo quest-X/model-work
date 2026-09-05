@@ -42,6 +42,8 @@ export const DatasetInferencePopup: React.FC<IProps> = ({language}) => {
     const [overwriteExisting, setOverwriteExisting] = useState(false);
     const [jobs, setJobs] = useState<InferenceJob[]>([]);
     const [createError, setCreateError] = useState<string | null>(null);
+    const [queryError, setQueryError] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
 
     useEffect(() => {
         fetch(`${baseUrl}/datasets`).then(response => response.json()).then(data => {
@@ -61,14 +63,18 @@ export const DatasetInferencePopup: React.FC<IProps> = ({language}) => {
     }, [baseUrl, zh]);
 
     const refreshJobs = () => {
-        fetch(`${baseUrl}/dataset-inference/jobs`).then(response => response.json()).then(data => {
+        return fetch(`${baseUrl}/dataset-inference/jobs`).then(response => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+        }).then(data => {
             if (Array.isArray(data.jobs)) {
                 setJobs(data.jobs);
+                setQueryError(null);
                 if (data.jobs.some((job: InferenceJob) => job.state === 'completed')) {
                     window.dispatchEvent(new CustomEvent('opensight:data-center-updated'));
                 }
             }
-        }).catch(() => undefined);
+        }).catch(error => setQueryError(error.message));
     };
 
     useEffect(() => {
@@ -80,6 +86,7 @@ export const DatasetInferencePopup: React.FC<IProps> = ({language}) => {
     const publishInference = () => {
         if (!selectedDatasetId) return;
         setCreateError(null);
+        setBusy(true);
         fetch(`${baseUrl}/dataset-inference/jobs`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -93,9 +100,27 @@ export const DatasetInferencePopup: React.FC<IProps> = ({language}) => {
                 const body = await response.json().catch(() => ({}));
                 throw new Error(body.detail || `${response.status}`);
             }
-            refreshJobs();
-        }).catch(error => setCreateError(error.message));
+            return refreshJobs();
+        }).catch(error => setCreateError(error.message)).finally(() => setBusy(false));
     };
+
+    const cancelJob = async (jobId: string) => {
+        setCreateError(null);
+        setBusy(true);
+        try {
+            const response = await fetch(`${baseUrl}/dataset-inference/jobs/${jobId}/cancel`, {method: 'POST'});
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+            await refreshJobs();
+        } catch (error) {
+            setCreateError((error as Error).message);
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const canPublish = !busy && !!selectedDatasetId && confidence >= 0 && confidence <= 1
+        && !jobs.some(job => job.dataset_id === selectedDatasetId && ['queued', 'running', 'cancelling', 'saving'].includes(job.state));
 
     const stateLabel = (state: string): string => {
         const labels: Record<string, [string, string]> = {
@@ -103,6 +128,9 @@ export const DatasetInferencePopup: React.FC<IProps> = ({language}) => {
             running: ['推理中', 'Running'],
             completed: ['已完成', 'Completed'],
             failed: ['失败', 'Failed'],
+            cancelling: ['取消中（等待当前批次结束）', 'Cancelling after current batch'],
+            cancelled: ['已取消', 'Cancelled'],
+            saving: ['正在保存结果', 'Saving results'],
         };
         return labels[state] ? (zh ? labels[state][0] : labels[state][1]) : state;
     };
@@ -132,13 +160,14 @@ export const DatasetInferencePopup: React.FC<IProps> = ({language}) => {
                     onChange={event => setOverwriteExisting(event.target.checked)} />
                 <span>{zh ? '覆盖已有标注（默认仅处理空白图片）' : 'Overwrite existing labels (blank images only by default)'}</span>
             </label>
-            {createError && <p className='errorMessage'>{createError}</p>}
-            <button type='button' className='PublishButton' disabled={!selectedDatasetId} onClick={publishInference}>
+            {createError && <p role='alert' className='errorMessage'>{createError}</p>}
+            <button type='button' className='PublishButton' disabled={!canPublish} onClick={publishInference}>
                 {zh ? '发布推理任务' : 'Publish Inference Job'}
             </button>
         </section>
         <section className='InferenceJobsSection'>
             <div className='SectionHeader'>{zh ? '自动推理任务' : 'Inference Jobs'}</div>
+            {queryError && <p role='alert' className='errorMessage'>{queryError}</p>}
             {jobs.length === 0 && <div className='EmptyHint'>{zh ? '暂无推理任务' : 'No jobs yet'}</div>}
             {jobs.map(job => {
                 const progress = job.total_images > 0
@@ -150,9 +179,12 @@ export const DatasetInferencePopup: React.FC<IProps> = ({language}) => {
                         <span className={`JobState state-${job.state}`}>{stateLabel(job.state)}</span>
                     </div>
                     <div className='JobMeta'>{job.model || (zh ? '当前检测模型' : 'Current detection model')}</div>
-                    {(job.state === 'queued' || job.state === 'running') && <>
+                    {['queued', 'running'].includes(job.state) && <>
                         <div className='ProgressBar'><div style={{width: `${progress}%`}} /></div>
                         <small>{job.processed_images} / {job.total_images}</small>
+                        <button className='CancelButton' disabled={busy} onClick={() => cancelJob(job.job_id)}>
+                            {zh ? '取消' : 'Cancel'}
+                        </button>
                     </>}
                     {job.state === 'completed' && <div className='JobResult'>
                         {zh

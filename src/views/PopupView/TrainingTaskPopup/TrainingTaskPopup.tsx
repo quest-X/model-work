@@ -37,6 +37,18 @@ interface IProps {
 
 const POLL_INTERVAL_MS = 3000;
 
+const validTrainingOptions = (weights: string, epochs: number, imgsz: number, batch: number): boolean =>
+    !!weights.trim() && Number.isInteger(epochs) && epochs >= 1 && epochs <= 100000
+    && Number.isInteger(imgsz) && imgsz >= 32 && imgsz <= 4096
+    && Number.isInteger(batch) && batch >= 1 && batch <= 256;
+
+const requestJson = async (url: string, options?: RequestInit) => {
+    const response = await fetch(url, options);
+    const body = await response.json();
+    if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : `HTTP ${response.status}`);
+    return body;
+};
+
 const getJobDatasetLabel = (
     datasets: DatasetSummary[],
     datasetId: string | undefined,
@@ -49,6 +61,9 @@ const getJobDatasetLabel = (
 export const TrainingTaskPopup: React.FC<IProps> = ({language}) => {
     const zh = language === Language.CHINESE;
     const baseUrl = getEngineBaseUrl();
+    const weightsHint = zh
+        ? '使用已下载或上传的 .pt 模型。框标注用 yolov8n；多边形分割标注用 yolov8n-seg。'
+        : 'Use a saved .pt model: yolov8n for boxes, yolov8n-seg for polygon segmentation labels.';
 
     const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
     const [selectedDatasetId, setSelectedDatasetId] = useState<string>(
@@ -57,11 +72,19 @@ export const TrainingTaskPopup: React.FC<IProps> = ({language}) => {
     const [epochs, setEpochs] = useState(100);
     const [imgsz, setImgsz] = useState(640);
     const [batch, setBatch] = useState(16);
+    const [weights, setWeights] = useState('yolov8n');
+    const [device, setDevice] = useState('auto');
     const [jobs, setJobs] = useState<TrainingJobStatus[]>([]);
     const [createError, setCreateError] = useState<string | null>(null);
+    const [queryError, setQueryError] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
+    const [notice, setNotice] = useState('');
+    const [logs, setLogs] = useState<Record<string, string>>({});
+    const canStart = !busy && !!selectedDatasetId && validTrainingOptions(weights, epochs, imgsz, batch)
+        && !jobs.some(job => ['running', 'queued'].includes(job.state));
 
     useEffect(() => {
-        fetch(`${baseUrl}/datasets`).then(r => r.json()).then(data => {
+        requestJson(`${baseUrl}/datasets`).then(data => {
             if (Array.isArray(data.datasets)) {
                 setDatasets(data.datasets);
                 setSelectedDatasetId((previous) => {
@@ -75,13 +98,15 @@ export const TrainingTaskPopup: React.FC<IProps> = ({language}) => {
                     return next;
                 });
             }
-        }).catch(() => undefined);
+        }).catch(e => setCreateError(e.message));
     }, [baseUrl]);
 
     const refreshJobs = () => {
-        fetch(`${baseUrl}/training/jobs`).then(r => r.json()).then(data => {
-            if (Array.isArray(data.jobs)) setJobs(data.jobs);
-        }).catch(() => undefined);
+        return requestJson(`${baseUrl}/training/jobs`).then(data => {
+            if (!Array.isArray(data.jobs)) throw new Error(zh ? '训练任务响应无效' : 'Invalid jobs response');
+            setJobs(data.jobs);
+            setQueryError(null);
+        }).catch(e => setQueryError(e.message));
     };
 
     useEffect(() => {
@@ -94,39 +119,51 @@ export const TrainingTaskPopup: React.FC<IProps> = ({language}) => {
     const startTraining = () => {
         if (!selectedDatasetId) return;
         setCreateError(null);
-        fetch(`${baseUrl}/training/jobs`, {
+        setBusy(true);
+        requestJson(`${baseUrl}/training/jobs`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 dataset_id: selectedDatasetId,
-                model_type: 'yolov8n-seg',
+                model_type: weights.trim(),
+                device,
                 epochs,
                 imgsz,
                 batch,
             }),
-        }).then(async (r) => {
-            if (!r.ok) {
-                const body = await r.json().catch(() => ({}));
-                throw new Error(body.detail || `${r.status}`);
-            }
-            refreshJobs();
-        }).catch((e) => setCreateError(e.message));
+        }).then(refreshJobs).catch((e) => setCreateError(e.message)).finally(() => setBusy(false));
     };
 
     const cancelJob = (jobId: string) => {
-        fetch(`${baseUrl}/training/jobs/${jobId}/cancel`, {method: 'POST'}).then(refreshJobs).catch(() => undefined);
+        setCreateError(null);
+        setBusy(true);
+        requestJson(`${baseUrl}/training/jobs/${jobId}/cancel`, {method: 'POST'})
+            .then(refreshJobs).catch(e => setCreateError(e.message)).finally(() => setBusy(false));
     };
 
     const loadIntoInference = (job: TrainingJobStatus) => {
         if (!job.produced_model) return;
-        const service = 'detection';
-        fetch(`${baseUrl}/load-model`, {
+        setCreateError(null);
+        setBusy(true);
+        setNotice(zh ? '正在加载模型…' : 'Loading model…');
+        // switch-model resolves the saved model's slot and waits for actual readiness.
+        requestJson(`${baseUrl}/switch-model`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({model: job.produced_model, service}),
+            body: JSON.stringify({model: job.produced_model}),
         }).then(() => {
+            setNotice(zh ? '模型已加载，可进入推理任务' : 'Model ready for inference');
             window.dispatchEvent(new CustomEvent('opensight:model-loaded'));
-        }).catch(() => undefined);
+        }).catch(e => {
+            setNotice('');
+            setCreateError(e.message);
+        }).finally(() => setBusy(false));
+    };
+
+    const readLog = (jobId: string) => {
+        requestJson(`${baseUrl}/training/jobs/${jobId}/log`)
+            .then(data => setLogs(previous => ({...previous, [jobId]: data.log || (zh ? '暂无日志' : 'No log yet')})))
+            .catch(e => setLogs(previous => ({...previous, [jobId]: e.message})));
     };
 
     const stateLabel = (state: string): string => {
@@ -146,8 +183,8 @@ export const TrainingTaskPopup: React.FC<IProps> = ({language}) => {
             <div className='FormSection'>
                 <div className='SectionHeader'>{zh ? '新建训练任务' : 'New Training Job'}</div>
                 <div className='FormRow'>
-                    <label>{zh ? '数据集' : 'Dataset'}</label>
-                    <select value={selectedDatasetId} onChange={(e) => {
+                    <label htmlFor='training-dataset'>{zh ? '数据集' : 'Dataset'}</label>
+                    <select id='training-dataset' value={selectedDatasetId} onChange={(e) => {
                         setSelectedDatasetId(e.target.value);
                         TrainingDatasetSelection.set(e.target.value || null);
                     }}>
@@ -158,24 +195,38 @@ export const TrainingTaskPopup: React.FC<IProps> = ({language}) => {
                     </select>
                 </div>
                 <div className='FormRow'>
-                    <label>Epochs</label>
-                    <input type='number' value={epochs} min={1} onChange={(e) => setEpochs(Number(e.target.value))} />
+                    <label htmlFor='training-weights'>{zh ? '起始权重' : 'Base weights'}</label>
+                    <input id='training-weights' value={weights} onChange={e => setWeights(e.target.value)} />
+                </div>
+                <p className='EmptyHint'>{weightsHint}</p>
+                <div className='FormRow'>
+                    <label htmlFor='training-device'>{zh ? '训练设备' : 'Device'}</label>
+                    <select id='training-device' value={device} onChange={e => setDevice(e.target.value)}>
+                        <option value='auto'>{zh ? '自动选择' : 'Auto'}</option>
+                        <option value='cpu'>CPU</option>
+                    </select>
                 </div>
                 <div className='FormRow'>
-                    <label>Imgsz</label>
-                    <input type='number' value={imgsz} min={32} step={32} onChange={(e) => setImgsz(Number(e.target.value))} />
+                    <label htmlFor='training-epochs'>Epochs</label>
+                    <input id='training-epochs' type='number' value={epochs} min={1} max={100000} onChange={(e) => setEpochs(Number(e.target.value))} />
                 </div>
                 <div className='FormRow'>
-                    <label>Batch</label>
-                    <input type='number' value={batch} min={1} onChange={(e) => setBatch(Number(e.target.value))} />
+                    <label htmlFor='training-imgsz'>Imgsz</label>
+                    <input id='training-imgsz' type='number' value={imgsz} min={32} max={4096} step={32} onChange={(e) => setImgsz(Number(e.target.value))} />
                 </div>
-                {createError && <p className='errorMessage'>{createError}</p>}
-                <button className='StartButton' disabled={!selectedDatasetId} onClick={startTraining}>
+                <div className='FormRow'>
+                    <label htmlFor='training-batch'>Batch</label>
+                    <input id='training-batch' type='number' value={batch} min={1} max={256} onChange={(e) => setBatch(Number(e.target.value))} />
+                </div>
+                {createError && <p role='alert' className='errorMessage'>{createError}</p>}
+                {notice && <p role='status'>{notice}</p>}
+                <button className='StartButton' disabled={!canStart} onClick={startTraining}>
                     {zh ? '开始训练' : 'Start Training'}
                 </button>
             </div>
             <div className='JobListSection'>
                 <div className='SectionHeader'>{zh ? '训练任务' : 'Jobs'}</div>
+                {queryError && <p role='alert' className='errorMessage'>{queryError}</p>}
                 {jobs.length === 0 && <div className='EmptyHint'>{zh ? '暂无训练任务' : 'No jobs yet'}</div>}
                 {jobs.map(job => {
                     const pct = job.progress.total_epochs > 0
@@ -202,13 +253,18 @@ export const TrainingTaskPopup: React.FC<IProps> = ({language}) => {
                             )}
                             {job.error && <p className='errorMessage'>{job.error}</p>}
                             <div className='JobActions'>
-                                {(job.state === 'queued' || job.state === 'running') && (
-                                    <button onClick={() => cancelJob(job.job_id)}>{zh ? '取消' : 'Cancel'}</button>
+                                {['queued', 'running'].includes(job.state) && (
+                                    <button disabled={busy} onClick={() => cancelJob(job.job_id)}>{zh ? '取消' : 'Cancel'}</button>
                                 )}
                                 {job.state === 'completed' && job.produced_model && (
-                                    <button onClick={() => loadIntoInference(job)}>{zh ? '加载到推理任务' : 'Load into Inference'}</button>
+                                    <>
+                                        <button disabled={busy} onClick={() => loadIntoInference(job)}>{zh ? '加载到推理任务' : 'Load into Inference'}</button>
+                                        <a href={`${baseUrl}/training/jobs/${job.job_id}/model`} download>{zh ? '下载模型' : 'Download model'}</a>
+                                    </>
                                 )}
+                                <button onClick={() => readLog(job.job_id)}>{zh ? '查看 / 刷新日志' : 'View / refresh log'}</button>
                             </div>
+                            {logs[job.job_id] !== undefined && <pre className='JobLog'>{logs[job.job_id]}</pre>}
                         </div>
                     );
                 })}

@@ -66,4 +66,24 @@ describe('DatasetInferencePopup', () => {
             overwrite_existing: false,
         }));
     });
+
+    it('requests cooperative cancellation and shows the acknowledgement state', async () => {
+        const existingFetch = global.fetch;
+        let state = 'running';
+        global.fetch = jest.fn((input: RequestInfo, options?: RequestInit) => {
+            if (String(input).endsWith('/cancel')) {
+                state = 'cancelling';
+                return Promise.resolve(response({status: 'accepted'}));
+            }
+            if (String(input).endsWith('/dataset-inference/jobs')) return Promise.resolve(response({jobs: [{
+                job_id: 'job-1', dataset_id: 'dataset-1', state, total_images: 465, processed_images: 16,
+            }]}));
+            return existingFetch(input, options);
+        });
+        render(<DatasetInferencePopup language={Language.CHINESE} />);
+        fireEvent.click(await screen.findByRole('button', {name: '取消'}));
+        expect(await screen.findByText('取消中（等待当前批次结束）')).toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: '取消'})).not.toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '发布推理任务'})).toBeDisabled();
+    });
 });

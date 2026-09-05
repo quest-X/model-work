@@ -318,7 +318,8 @@
 }
 
 .ComputeGraphViewport {
-  overflow: auto hidden;
+  min-height: 0;
+  overflow: auto;
   padding: 0 12px 12px;
 }
 

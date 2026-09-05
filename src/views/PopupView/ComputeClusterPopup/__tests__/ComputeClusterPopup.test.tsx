@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import {Language} from '../../../../data/LanguageConfig';
 import {ComputeClusterService} from '../../../../services/ComputeClusterService';
 import {ComputeClusterPopup} from '../ComputeClusterPopup';
+import {ResourceKnowledgeGraph} from '../ResourceKnowledgeGraph';
 
 jest.mock('../../../../logic/actions/PopupActions', () => ({
     PopupActions: {close: jest.fn()},
@@ -554,6 +555,65 @@ describe('ComputeClusterPopup', () => {
         expect(within(sensorCard).getByText('2 个通道')).toBeInTheDocument();
         expect(within(sensorCard).getByText('上级设备 · AIPACK-01')).toBeInTheDocument();
         await waitFor(() => expect(service.resourceGraph).toHaveBeenCalledTimes(1));
+    });
+
+    it('expands a dense radial graph so fixed-size cards do not overlap', async () => {
+        const base = await service.resourceGraph();
+        const main = base.entities.find(entity => entity.kind === 'compute_node');
+        const region = base.entities.find(entity => entity.kind === 'compute_region');
+        if (!main || !region) throw new Error('dense graph fixture needs one main node and one region');
+        const edges = Array.from({length: 18}, (_, index) => ({
+            entity_id: `edge:${index}`, kind: 'managed_device' as const,
+            label: `AIPACK-${index + 1}`, state: 'available' as const, callable: false,
+            node_id: main.node_id, modes: [], provider: 'jetson-connect',
+            device_kind: 'edge_compute', device_status: 'registered', channels: 0,
+            device_model: 'NVIDIA Jetson Orin', device_capabilities: ['terminal.ssh.v1'],
+        }));
+        const cameras = Array.from({length: 30}, (_, index) => ({
+            entity_id: `camera:${index}`, kind: 'managed_device' as const,
+            label: `CAM-${index + 1}`, state: 'available' as const, callable: false,
+            node_id: main.node_id, modes: [], provider: 'camera-connect',
+            device_kind: 'camera', device_status: 'registered', channels: 3,
+            device_model: 'IP CAMERA', device_capabilities: ['camera.stream.v1'],
+        }));
+        render(<ResourceKnowledgeGraph
+            graph={{
+                ...base,
+                entities: [region, main, ...edges, ...cameras],
+                relations: [{
+                    relation_id: 'contains:main', kind: 'contains', source_id: region.entity_id,
+                    target_id: main.entity_id, active: true, reason: 'available',
+                }, ...edges.map(edge => ({
+                    relation_id: `manages:${edge.entity_id}`, kind: 'manages' as const,
+                    source_id: main.entity_id, target_id: edge.entity_id, active: true, reason: 'available',
+                })), ...cameras.map((camera, index) => ({
+                    relation_id: `manages:${camera.entity_id}`, kind: 'manages' as const,
+                    source_id: edges[index % edges.length].entity_id,
+                    target_id: camera.entity_id, active: true, reason: 'available',
+                }))],
+            }}
+            nodes={await service.nodes()}
+            zh={true}
+            onSelectWorkAgent={jest.fn()}
+        />);
+
+        const scene = screen.getByRole('figure', {name: '主节点、边缘设备与摄像头关系图'});
+        const width = parseFloat(scene.style.minWidth);
+        const height = parseFloat(scene.style.minHeight);
+        expect(width).toBeGreaterThan(720);
+        expect(height).toBeGreaterThan(440);
+        const cards = screen.getAllByTestId('resource-graph-node').map(card => ({
+            label: card.querySelector('strong')?.textContent,
+            x: parseFloat(card.style.left) * width / 100,
+            y: parseFloat(card.style.top) * height / 100,
+            width: card.dataset.entityKind === 'compute_node' ? 92 : 136,
+            height: card.dataset.entityKind === 'compute_node' ? 92 : 58,
+        }));
+        const overlaps = cards.flatMap((card, index) => cards.slice(0, index)
+            .filter(other => Math.abs(card.x - other.x) < (card.width + other.width) / 2
+                && Math.abs(card.y - other.y) < (card.height + other.height) / 2 + 10)
+            .map(other => `${card.label}/${other.label}`));
+        expect(overlaps).toEqual([]);
     });
 
     it('shows Chinese region names in Chinese and pinyin region IDs in English', async () => {

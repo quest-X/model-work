@@ -35,6 +35,8 @@ interface GraphRegion {
 interface OperationsTopology {
     points: Map<string, GraphPoint>;
     regions: GraphRegion[];
+    minWidth: number;
+    minHeight: number;
 }
 
 const heartbeatLabel = (seconds: number | undefined, zh: boolean): string => {
@@ -44,12 +46,6 @@ const heartbeatLabel = (seconds: number | undefined, zh: boolean): string => {
     if (seconds < 3600) return zh ? `${Math.floor(seconds / 60)} 分钟前` : `${Math.floor(seconds / 60)}m ago`;
     if (seconds < 86400) return zh ? `${Math.floor(seconds / 3600)} 小时前` : `${Math.floor(seconds / 3600)}h ago`;
     return zh ? `${Math.floor(seconds / 86400)} 天前` : `${Math.floor(seconds / 86400)}d ago`;
-};
-
-const spread = (count: number, minimum: number, maximum: number): number[] => {
-    if (count <= 0) return [];
-    if (count === 1) return [(minimum + maximum) / 2];
-    return Array.from({length: count}, (_, index) => minimum + (maximum - minimum) * index / (count - 1));
 };
 
 const radialPoint = (
@@ -120,10 +116,6 @@ const operationsTopology = (
         entity.device_kind === 'edge_compute'
             ? Math.max(1, (childrenByOwner.get(entity.entity_id) || []).length)
             : 1;
-    const nodeWeight = (nodeId: string): number => Math.max(
-        1,
-        (childrenByOwner.get(nodeId) || []).reduce((total, child) => total + branchWeight(child), 0),
-    );
     const regionEntities = entities.filter(entity => entity.kind === 'compute_region');
     const regionRecords = new Map<string, Omit<GraphRegion, 'left' | 'width'>>();
     regionEntities.forEach(region => regionRecords.set(region.entity_id, {
@@ -155,27 +147,18 @@ const operationsTopology = (
     const orderedRegions = [...regionRecords.values()]
         .filter(region => region.nodeIds.length > 0)
         .sort((left, right) => left.regionId.localeCompare(right.regionId) || left.entityId.localeCompare(right.entityId));
-    const gap = 2;
-    const usableWidth = 96 - gap * Math.max(0, orderedRegions.length - 1);
-    const regionWeights = orderedRegions.map(region =>
-        Math.sqrt(region.nodeIds.reduce((total, nodeId) => total + nodeWeight(nodeId), 0)),
-    );
-    const totalWeight = Math.max(1, regionWeights.reduce((total, weight) => total + weight, 0));
-    let regionLeft = 2;
-    const regions = orderedRegions.map((region, index): GraphRegion => {
-        const width = usableWidth * regionWeights[index] / totalWeight;
-        const positioned = {...region, left: regionLeft, width};
-        regionLeft += width + gap;
-        return positioned;
-    });
+    const regions = orderedRegions.map((region): GraphRegion => ({...region, left: 0, width: 100}));
+    let minWidth = 16;
+    let minHeight = 440;
     regions.forEach(region => {
+        const regionalPoints = new Map<string, GraphPoint>();
         const centerX = region.left + region.width / 2;
         const centerY = 52;
         const nodeCount = region.nodeIds.length;
         const sectorSize = Math.PI * 2 / Math.max(1, nodeCount);
         region.nodeIds.forEach((nodeId, nodeIndex) => {
             const nodeAngle = -Math.PI / 2 + sectorSize * nodeIndex;
-            points.set(nodeId, nodeCount === 1
+            regionalPoints.set(nodeId, nodeCount === 1
                 ? {x: centerX, y: centerY}
                 : radialPoint(centerX, centerY, region.width * .12, 10, nodeAngle));
             const children = childrenByOwner.get(nodeId) || [];
@@ -187,7 +170,7 @@ const operationsTopology = (
                     ? -Math.PI / 2 + Math.PI * 2 * (usedWeight + weight / 2) / childrenWeight
                     : nodeAngle - sectorSize * .38 + sectorSize * .76 * (usedWeight + weight / 2) / childrenWeight;
                 const isEdgeDevice = child.device_kind === 'edge_compute';
-                points.set(child.entity_id, radialPoint(
+                regionalPoints.set(child.entity_id, radialPoint(
                     centerX,
                     centerY,
                     region.width * (isEdgeDevice ? .24 : .4),
@@ -196,20 +179,52 @@ const operationsTopology = (
                 ));
                 const grandchildren = childrenByOwner.get(child.entity_id) || [];
                 const branchArc = (nodeCount === 1 ? Math.PI * 2 : sectorSize * .76) * weight / childrenWeight;
-                spread(grandchildren.length, -.35, .35).forEach((offset, index) => points.set(
-                    grandchildren[index].entity_id,
-                    radialPoint(centerX, centerY, region.width * .4, 38, childAngle + branchArc * offset),
+                grandchildren.forEach((grandchild, index) => regionalPoints.set(
+                    grandchild.entity_id,
+                    radialPoint(centerX, centerY, region.width * .4, 38,
+                        childAngle + branchArc * ((index + .5) / grandchildren.length - .5)),
                 ));
                 usedWeight += weight;
             });
         });
+        // Keep fixed-size cards readable; expanding the canvas preserves the radial ownership layout.
+        // ponytail: pairwise bounds suit inventory-sized graphs; use spatial indexing for thousands of cards.
+        const entries = [...regionalPoints.entries()];
+        let scale = 1;
+        entries.forEach(([id, point], i) => {
+            const main = region.nodeIds.includes(id);
+            entries.slice(0, i).forEach(([otherId, other]) => {
+                const otherMain = region.nodeIds.includes(otherId);
+                // CSS card bounds plus 16px breathing room and the device's raised code badge.
+                const width = ((main ? 92 : 136) + (otherMain ? 92 : 136)) / 2 + 16;
+                const height = ((main ? 92 : 58) + (otherMain ? 92 : 58)) / 2 + 26;
+                scale = Math.max(scale, Math.min(
+                    width / (Math.abs(point.x - other.x) * 7.2),
+                    height / (Math.abs(point.y - other.y) * 4.4),
+                ));
+            });
+        });
+        region.left = minWidth;
+        region.width = Math.ceil(720 * scale);
+        minHeight = Math.max(minHeight, Math.ceil(440 * scale));
+        regionalPoints.forEach((point, id) => points.set(id, {
+            x: region.left + point.x * region.width / 100,
+            y: point.y,
+        }));
+        minWidth += region.width + 16;
     });
+    minWidth = Math.max(720, minWidth);
+    regions.forEach(region => {
+        region.left = region.left / minWidth * 100;
+        region.width = region.width / minWidth * 100;
+    });
+    points.forEach(point => { point.x = point.x / minWidth * 100; });
     const unowned = devices.filter(device => !points.has(device.entity_id));
     unowned.forEach((device, index) => points.set(
         device.entity_id,
         radialPoint(50, 52, 40, 38, -Math.PI / 2 + Math.PI * 2 * index / Math.max(1, unowned.length)),
     ));
-    return {points, regions};
+    return {points, regions, minWidth, minHeight};
 };
 
 const agentLabel = (
@@ -356,6 +371,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
             <div
                 className='ComputeGraphScene operations-only'
                 data-layout='radial'
+                style={{minWidth: topology.minWidth, minHeight: topology.minHeight}}
                 role='figure'
                 aria-label={zh ? '主节点、边缘设备与摄像头关系图' : 'Main node, edge device, and camera graph'}
                 onClick={event => {

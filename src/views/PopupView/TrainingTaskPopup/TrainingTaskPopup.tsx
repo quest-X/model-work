@@ -13,6 +13,8 @@ interface DatasetSummary {
     name: string;
     image_count: number;
     classes: string[];
+    annotated_count?: number;
+    annotation_coverage?: number;
 }
 
 interface TrainingJobProgress {
@@ -41,6 +43,9 @@ const validTrainingOptions = (weights: string, epochs: number, imgsz: number, ba
     !!weights.trim() && Number.isInteger(epochs) && epochs >= 1 && epochs <= 100000
     && Number.isInteger(imgsz) && imgsz >= 32 && imgsz <= 4096
     && Number.isInteger(batch) && batch >= 1 && batch <= 256;
+
+const isTrainableDataset = (dataset: DatasetSummary | undefined): boolean =>
+    Boolean(dataset && dataset.classes.length > 0 && (dataset.annotated_count ?? 0) > 0);
 
 const requestJson = async (url: string, options?: RequestInit) => {
     const response = await fetch(url, options);
@@ -80,8 +85,19 @@ export const TrainingTaskPopup: React.FC<IProps> = ({language}) => {
     const [busy, setBusy] = useState(false);
     const [notice, setNotice] = useState('');
     const [logs, setLogs] = useState<Record<string, string>>({});
-    const canStart = !busy && !!selectedDatasetId && validTrainingOptions(weights, epochs, imgsz, batch)
+    const selectedDataset = datasets.find(dataset => dataset.id === selectedDatasetId);
+    const canStart = !busy && isTrainableDataset(selectedDataset) && validTrainingOptions(weights, epochs, imgsz, batch)
         && !jobs.some(job => ['running', 'queued'].includes(job.state));
+
+    const datasetReadiness = !selectedDataset
+        ? (zh ? '请选择训练数据集' : 'Select a training dataset')
+        : selectedDataset.classes.length === 0
+            ? (zh ? '该数据集没有类别，请先在资源中心完成标注' : 'This dataset has no classes. Annotate it in Resource Center first.')
+            : (selectedDataset.annotated_count ?? 0) === 0
+                ? (zh ? '该数据集没有有效标注，请先在资源中心完成标注' : 'This dataset has no valid annotations. Annotate it in Resource Center first.')
+                : (zh
+                    ? `${selectedDataset.annotated_count}/${selectedDataset.image_count} 张已标注 · ${selectedDataset.classes.length} 个类别`
+                    : `${selectedDataset.annotated_count}/${selectedDataset.image_count} annotated · ${selectedDataset.classes.length} classes`);
 
     useEffect(() => {
         requestJson(`${baseUrl}/datasets`).then(data => {
@@ -190,10 +206,13 @@ export const TrainingTaskPopup: React.FC<IProps> = ({language}) => {
                     }}>
                         {datasets.length === 0 && <option value=''>{zh ? '暂无数据集' : 'No datasets'}</option>}
                         {datasets.map(ds => (
-                            <option key={ds.id} value={ds.id}>{ds.name} ({ds.image_count})</option>
+                            <option key={ds.id} value={ds.id}>
+                                {ds.name} ({ds.annotated_count ?? 0}/{ds.image_count})
+                            </option>
                         ))}
                     </select>
                 </div>
+                <p role='status' className='DatasetReadiness'>{datasetReadiness}</p>
                 <div className='FormRow'>
                     <label htmlFor='training-weights'>{zh ? '起始权重' : 'Base weights'}</label>
                     <input id='training-weights' value={weights} onChange={e => setWeights(e.target.value)} />
@@ -274,7 +293,7 @@ export const TrainingTaskPopup: React.FC<IProps> = ({language}) => {
 
     return (
         <GenericYesNoPopup
-            title={zh ? '训练任务' : 'Training Task'}
+            title={zh ? '训练系统' : 'Training System'}
             renderContent={renderContent}
             skipAcceptButton
             rejectLabel={zh ? '关闭' : 'Close'}

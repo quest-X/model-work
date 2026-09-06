@@ -54,12 +54,30 @@ const renderNavigation = (
 );
 
 describe('TopNavigationBar core-engine change badge', () => {
-    it('opens OCR from the core engine menu', () => {
-        const updatePopup = jest.fn();
-        renderNavigation([], Language.CHINESE, {updateActivePopupTypeAction: updatePopup});
+    it('keeps OCR inside the renamed inference system', () => {
+        renderNavigation([], Language.CHINESE);
         fireEvent.click(screen.getByText('核心引擎'));
-        fireEvent.click(screen.getByRole('button', {name: '文字识别 OCR'}));
-        expect(updatePopup).toHaveBeenCalledWith(PopupWindowType.OCR);
+        expect(screen.getByText('推理系统')).toBeInTheDocument();
+        expect(screen.getByText('训练系统')).toBeInTheDocument();
+        expect(screen.queryByText('文字识别 OCR')).not.toBeInTheDocument();
+    });
+
+    it('closes the current popup before opening task center', () => {
+        jest.useFakeTimers();
+        const updatePopup = jest.fn();
+        const taskCenterHandler = jest.fn();
+        window.addEventListener('opensight:open-task-center', taskCenterHandler);
+        renderNavigation([], Language.CHINESE, {updateActivePopupTypeAction: updatePopup});
+
+        fireEvent.click(screen.getByText('核心引擎'));
+        fireEvent.click(screen.getByText('任务中心'));
+        expect(updatePopup).toHaveBeenCalledWith(null);
+        expect(taskCenterHandler).not.toHaveBeenCalled();
+        jest.runOnlyPendingTimers();
+        expect(taskCenterHandler).toHaveBeenCalledTimes(1);
+
+        window.removeEventListener('opensight:open-task-center', taskCenterHandler);
+        jest.useRealTimers();
     });
     it('shows the number of dirty datasets only', () => {
         renderNavigation([

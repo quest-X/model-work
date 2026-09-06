@@ -30,18 +30,20 @@ const jsonResponse = (body: unknown): Response => ({
 
 describe('TrainingTaskPopup', () => {
     let jobs: unknown[];
+    let datasets: unknown[];
 
     beforeEach(() => {
         jest.clearAllMocks();
         jobs = [];
+        datasets = [
+            {id: 'dataset-1', name: '一号数据', image_count: 10, classes: ['钢卷'], annotated_count: 8},
+            {id: 'dataset-2', name: '二号数据', image_count: 20, classes: ['钢板'], annotated_count: 16},
+        ];
         (TrainingDatasetSelection.get as jest.Mock).mockReturnValue('dataset-2');
-        global.fetch = jest.fn((input: RequestInfo) => {
+        global.fetch = jest.fn((input: RequestInfo | URL) => {
             const url = String(input);
             if (url.endsWith('/datasets')) {
-                return Promise.resolve(jsonResponse({datasets: [
-                    {id: 'dataset-1', name: '一号数据', image_count: 10, classes: []},
-                    {id: 'dataset-2', name: '二号数据', image_count: 20, classes: []},
-                ]}));
+                return Promise.resolve(jsonResponse({datasets}));
             }
             if (url.endsWith('/training/jobs')) return Promise.resolve(jsonResponse({jobs}));
             return Promise.resolve(jsonResponse({status: 'success'}));
@@ -88,18 +90,31 @@ describe('TrainingTaskPopup', () => {
         fireEvent.change(screen.getByLabelText('Epochs'), {target: {value: '0'}});
         expect(screen.getByText('开始训练')).toBeDisabled();
         fireEvent.change(screen.getByLabelText('Epochs'), {target: {value: '1'}});
-        await act(async () => fireEvent.click(screen.getByText('开始训练')));
+        await act(async () => {
+            fireEvent.click(screen.getByText('开始训练'));
+        });
         await waitFor(() => expect(fetch).toHaveBeenCalledWith('https://core.test/core_service/training/jobs',
             expect.objectContaining({method: 'POST', body: JSON.stringify({
                 dataset_id: 'dataset-2', model_type: 'yolov8n-seg', device: 'cpu', epochs: 1, imgsz: 640, batch: 16,
             })})));
     });
 
+    it('blocks training until the selected dataset has valid annotations', async () => {
+        datasets = [
+            {id: 'dataset-2', name: '未标注数据', image_count: 20, classes: ['钢板'], annotated_count: 0},
+        ];
+        render(<TrainingTaskPopup language={Language.CHINESE}/>);
+
+        expect(await screen.findByText('该数据集没有有效标注，请先在资源中心完成标注')).toBeInTheDocument();
+        expect(screen.getByText('开始训练')).toBeDisabled();
+        expect(screen.getByRole('heading', {name: '训练系统'})).toBeInTheDocument();
+    });
+
     it('waits for a successful synchronous switch before advertising model readiness', async () => {
         jobs = [{job_id: 'done', state: 'completed', produced_model: 'seg_done', progress: {epoch: 1, total_epochs: 1}}];
         const existingFetch = global.fetch;
         let finish: (response: Response) => void;
-        global.fetch = jest.fn((input: RequestInfo, options?: RequestInit) => String(input).endsWith('/switch-model')
+        global.fetch = jest.fn((input: RequestInfo | URL, options?: RequestInit) => String(input).endsWith('/switch-model')
             ? new Promise<Response>(resolve => { finish = resolve; }) : existingFetch(input, options));
         const loaded = jest.fn();
         window.addEventListener('opensight:model-loaded', loaded);
@@ -120,7 +135,7 @@ describe('TrainingTaskPopup', () => {
             {job_id: 'running', state: 'running', progress: {epoch: 0, total_epochs: 1}},
         ];
         const existingFetch = global.fetch;
-        global.fetch = jest.fn((input: RequestInfo, options?: RequestInit) => options?.method === 'POST'
+        global.fetch = jest.fn((input: RequestInfo | URL, options?: RequestInit) => options?.method === 'POST'
             ? Promise.resolve({...jsonResponse({detail: 'fixture action failure'}), ok: false, status: 409})
             : existingFetch(input, options));
         const loaded = jest.fn();
@@ -138,7 +153,7 @@ describe('TrainingTaskPopup', () => {
     it('shows the bounded log returned by the backend', async () => {
         jobs = [{job_id: 'done', state: 'failed', progress: {epoch: 0, total_epochs: 1}}];
         const existingFetch = global.fetch;
-        global.fetch = jest.fn((input: RequestInfo, options?: RequestInit) => String(input).endsWith('/log')
+        global.fetch = jest.fn((input: RequestInfo | URL, options?: RequestInit) => String(input).endsWith('/log')
             ? Promise.resolve(jsonResponse({log: 'epoch 1: fixture log'})) : existingFetch(input, options));
         render(<TrainingTaskPopup language={Language.CHINESE}/>);
         fireEvent.click(await screen.findByText('查看 / 刷新日志'));

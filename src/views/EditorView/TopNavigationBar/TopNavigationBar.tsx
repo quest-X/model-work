@@ -16,7 +16,7 @@ import {getEngineBaseUrl, getExtensionEngineBaseUrl} from '../../../utils/Defaul
 import {AUTH_PREVIEW_SIGN_OUT_EVENT} from '../../AuthPreview/AuthPreview';
 
 interface IProps {
-    updateActivePopupTypeAction: (activePopupType: PopupWindowType) => any;
+    updateActivePopupTypeAction: (activePopupType: PopupWindowType | null) => any;
     updateProjectDataAction: (projectData: ProjectData) => any;
     updateLanguageAction: (language: Language) => any;
     updateQueueItemAction: (itemId: string, updates: Partial<QueueItem>) => any;
@@ -146,7 +146,10 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
 
     const openTaskCenter = () => {
         setActiveServicesDropdown(null);
-        window.dispatchEvent(new Event('opensight:open-task-center'));
+        props.updateActivePopupTypeAction(null);
+        window.setTimeout(() => {
+            window.dispatchEvent(new Event('opensight:open-task-center'));
+        }, 0);
     };
 
     const openVectorDb = () => {
@@ -361,15 +364,6 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                                         <img src='ico/ai.png' alt='local-models'/>
                                         {currentTexts.modelManagement.callModels}
                                     </div>
-                                    <button type='button' className='DropDownMenuContentOption active'
-                                        onClick={() => {
-                                            setActiveServicesDropdown(null);
-                                            props.updateActivePopupTypeAction(PopupWindowType.OCR);
-                                        }}>
-                                        <div className='Marker'/>
-                                        <img src='ico/ai.png' alt=''/>
-                                        {props.language === Language.CHINESE ? '文字识别 OCR' : 'Text Recognition OCR'}
-                                    </button>
                                     <div className='DropDownMenuContentOption active'
                                         onClick={openTrainingTask}>
                                         <div className='Marker'/>

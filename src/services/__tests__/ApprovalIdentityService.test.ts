@@ -7,7 +7,7 @@ import {
     ApprovalRequest, SignedApproval, authorizationChallenge, canonicalAuthorizationJson, clearApprovalIdentity,
     currentApprovalUser, getApprovalIdentity, importApprovalIdentity, sensitiveRequestDigest, signAuthorization,
 } from '../ApprovalIdentityService';
-import {ComputeClusterService} from '../ComputeClusterService';
+import {ComputeClusterService, ComputeUpgradeBatch, ComputeUpgradeBatchNode, ComputeUpgradeManifest} from '../ComputeClusterService';
 
 const nodeId = '00000000-0000-4000-8000-000000000001';
 const credentials = {host: '192.168.50.12', port: 80, rtsp_port: 554, username: 'operator', password: 'do-not-log-me', scheme: 'http' as const, verify_tls: false, timeout_seconds: 8};
@@ -37,6 +37,66 @@ describe('personal approvals with native WebCrypto', () => {
     });
     beforeEach(() => { clearApprovalIdentity(); localStorage.clear(); sessionStorage.clear(); });
     afterEach(() => jest.restoreAllMocks());
+
+    const upgradeBatch = async (): Promise<ComputeUpgradeBatch> => {
+        const manifest: ComputeUpgradeManifest = {
+            version: 1, purpose: 'model-work-node.ota-release.v1', release_version: '1.0.5',
+            minimum_node_version: '1.0.4', source_revision: 'a'.repeat(40), platform: 'linux',
+            architecture: 'x86_64', artifact_url: 'https://release.example/v1.0.5/model-work-node-1.0.5-linux-x86_64.zip',
+            sha256: 'b'.repeat(64), size_bytes: 1000, signature: `${'A'.repeat(86)}==`,
+        };
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalAuthorizationJson(manifest)));
+        const hash = Buffer.from(digest).toString('hex');
+        const now = Math.floor(Date.now() / 1000);
+        const nodes = await Promise.all([11, 22].map(async number => {
+            const id = `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`;
+            return {
+                node_id: id, job_id: id, manifest: {...manifest}, authorization_id: id,
+                state: 'awaiting_authorization', error_code: null, result: null,
+                authorization: {
+                    ...await challenge('node.upgrade'), authorization_id: id, target_installation_id: id,
+                    expires_at: now + 14400, operation: 'node.upgrade', state: 'pending',
+                    target: {kind: 'node_upgrade', release_version: '1.0.5', platform: 'linux', architecture: 'x86_64'},
+                    parameters: {job_id: id, source_revision: manifest.source_revision, artifact_sha256: manifest.sha256,
+                        artifact_size_bytes: 1000, manifest_sha256: hash, drain_timeout_seconds: 300},
+                },
+            } as ComputeUpgradeBatchNode;
+        }));
+        return {batch_id: nodeId, state: 'awaiting_authorization', release_version: '1.0.5', current_index: 0,
+            created_at: now, updated_at: now, expires_at: now + 14400, ttl_seconds: 14400,
+            drain_timeout_seconds: 300, error_code: null, user: getApprovalIdentity().user, nodes};
+    };
+
+    it('signs every frozen OTA target with native crypto and submits once without persisting keys', async () => {
+        const {document, publicKey} = person();
+        await importApprovalIdentity(JSON.stringify(document));
+        const batch = await upgradeBatch();
+        globalThis.fetch = jest.fn(async () => ({ok: true, json: async () => ({...batch, state: 'authorized'})} as Response));
+        await ComputeClusterService.approveUpgradeBatch(batch);
+        expect(fetch).toHaveBeenCalledTimes(1);
+        const body = JSON.parse(String((fetch as jest.Mock).mock.calls[0][1].body));
+        expect(body.approvals).toHaveLength(2);
+        body.approvals.forEach((approval, index) => {
+            expect(approval.job_id).toBe(batch.nodes[index].job_id);
+            expect(verify(null, Buffer.from(canonicalAuthorizationJson(authorizationChallenge(batch.nodes[index].authorization))),
+                publicKey, Buffer.from(approval.signature, 'base64'))).toBe(true);
+        });
+        expect(JSON.stringify(body)).not.toContain(document.private_key);
+        expect(localStorage.length + sessionStorage.length).toBe(0);
+        const camera = await challenge();
+        await expect(signAuthorization({...camera, expires_at: camera.issued_at + 301})).rejects.toThrow(/lifetime/);
+        await expect(signAuthorization({...batch.nodes[0].authorization,
+            expires_at: batch.nodes[0].authorization.issued_at + 28801})).rejects.toThrow(/lifetime/);
+    });
+
+    it('rejects a changed later OTA target before submitting any part of the batch', async () => {
+        await importApprovalIdentity(JSON.stringify(person().document));
+        globalThis.fetch = jest.fn();
+        const batch = await upgradeBatch();
+        batch.nodes[1].manifest.artifact_url = 'https://another.example/artifact';
+        await expect(ComputeClusterService.approveUpgradeBatch(batch)).rejects.toThrow(/digest mismatch/);
+        expect(fetch).not.toHaveBeenCalled();
+    });
 
     it('imports a CLI-compatible stable identity without storing or exporting its key', async () => {
         const {document, publicKey} = person();
@@ -149,10 +209,15 @@ describe('personal approvals with native WebCrypto', () => {
     });
 
     const nodeSource = resolve(process.cwd(), '../model-work-node');
+    const nodePython = process.env.MODEL_WORK_NODE_PYTHON || (
+        process.platform === 'win32' && existsSync(resolve(nodeSource, '.venv/Scripts/python.exe'))
+            ? resolve(nodeSource, '.venv/Scripts/python.exe')
+            : process.platform === 'win32' ? 'python' : 'python3'
+    );
     (existsSync(resolve(nodeSource, 'model_work_node/authorization.py')) ? it : it.skip)('verifies native browser signatures and parameter digests with the actual Python Node', async () => {
         const {document} = person();
         await importApprovalIdentity(JSON.stringify(document));
-        const created = spawnSync('python3', ['-c', `
+        const created = spawnSync(nodePython, ['-c', `
 import json,sys,time
 from model_work_node.authorization import sensitive_request
 data=json.load(sys.stdin)
@@ -164,7 +229,7 @@ print(json.dumps(request.as_dict()))
         const approval = JSON.parse(created.stdout);
         expect(approval.parameters).toEqual({request_sha256: await sensitiveRequestDigest(credentials, approval.nonce)});
         const signed = {...approval, signature: await signAuthorization(approval)};
-        const checked = spawnSync('python3', ['-c', `
+        const checked = spawnSync(nodePython, ['-c', `
 import json,sys
 from model_work_node.authorization import UserAuthorization,sensitive_parameters,AuthorizationError
 data=json.load(sys.stdin); auth=UserAuthorization.from_mapping(data['authorization'])

@@ -47,8 +47,8 @@ describe('ManageAIModelsPopup provided services', () => {
         const updatePopup = renderPopup(createEngine('core'));
 
         expect(screen.getByRole('button', {name: '资源中心'})).toBeInTheDocument();
-        expect(screen.getByRole('button', {name: '推理设置'})).toBeInTheDocument();
-        expect(screen.getByRole('button', {name: '训练设置'})).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '推理系统'})).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '训练系统'})).toBeInTheDocument();
         expect(screen.getByRole('button', {name: '任务中心'})).toBeInTheDocument();
         expect(screen.queryByText('ultralytics/yolo26')).not.toBeInTheDocument();
 

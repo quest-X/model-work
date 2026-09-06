@@ -6,6 +6,7 @@ import {TaskTracker} from '../../../services/TaskTracker';
 interface IProps {
     task: ManagedTask;
     texts: LanguageTexts['taskManager'];
+    onCancel?: (task: ManagedTask) => void;
 }
 
 const STATUS_COLOR: Record<TaskStatus, string> = {
@@ -27,7 +28,7 @@ function formatTime(ts: number): string {
     return `${Y}-${M}-${D} ${h}:${m}:${s}`;
 }
 
-export const TaskRow: React.FC<IProps> = ({task, texts}) => {
+export const TaskRow: React.FC<IProps> = ({task, texts, onCancel}) => {
     const statusLabel = (() => {
         switch (task.status) {
             case 'running': return texts.statusRunning;
@@ -59,7 +60,7 @@ export const TaskRow: React.FC<IProps> = ({task, texts}) => {
                     {showCancel && (
                         <button
                             className='TaskRow__cancel'
-                            onClick={() => TaskTracker.cancelById(task.id)}
+                            onClick={() => onCancel ? onCancel(task) : TaskTracker.cancelById(task.id)}
                             title={texts.cancel}
                             type='button'
                         >

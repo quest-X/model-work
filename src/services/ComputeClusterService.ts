@@ -309,6 +309,81 @@ export type ComputeFilesystemDecision = {
     result: ComputeFilesystemResult;
 };
 
+export type ComputeUpgradeManifest = {
+    version: 1;
+    purpose: 'model-work-node.ota-release.v1';
+    release_version: string;
+    minimum_node_version: string;
+    source_revision: string;
+    platform: 'linux' | 'windows';
+    architecture: 'x86_64' | 'aarch64';
+    artifact_url: string;
+    sha256: string;
+    size_bytes: number;
+    signature: string;
+};
+
+export type ComputeUpgradeResult = {
+    job_id: string;
+    state: 'queued' | 'draining' | 'downloading' | 'prepared' | 'installing'
+        | 'checking' | 'rolling_back' | 'recovery_required' | 'succeeded'
+        | 'rolled_back' | 'failed' | 'cancelled';
+    created_at: number;
+    updated_at: number;
+    drain_deadline: number;
+    error_code: string | null;
+    health_task_id: string | null;
+    release_version: string;
+};
+
+export type ComputeUpgradeAuthorization = ApprovalRequest & {
+    operation: 'node.upgrade';
+    target: {
+        kind: 'node_upgrade';
+        release_version: string;
+        platform: 'linux' | 'windows';
+        architecture: 'x86_64' | 'aarch64';
+    };
+    parameters: {
+        job_id: string;
+        source_revision: string;
+        artifact_sha256: string;
+        artifact_size_bytes: number;
+        manifest_sha256: string;
+        drain_timeout_seconds: number;
+    };
+    state: 'pending' | 'approved' | 'executing' | 'succeeded' | 'failed' | 'rejected' | 'expired';
+    error_code: string | null;
+    node_name?: string;
+};
+
+export type ComputeUpgradeBatchNode = {
+    node_id: string;
+    job_id: string;
+    manifest: ComputeUpgradeManifest;
+    authorization_id: string | null;
+    authorization: ComputeUpgradeAuthorization | null;
+    state: 'awaiting_authorization' | 'approval_submitting' | 'rejected'
+        | ComputeUpgradeResult['state'];
+    error_code: string | null;
+    result: ComputeUpgradeResult | null;
+};
+
+export type ComputeUpgradeBatch = {
+    batch_id: string;
+    release_version: string;
+    state: 'awaiting_authorization' | 'authorized' | 'approval_submitting' | 'running' | 'succeeded' | 'failed';
+    current_index: number;
+    created_at: number;
+    updated_at: number;
+    error_code: string | null;
+    drain_timeout_seconds: number;
+    ttl_seconds: number;
+    expires_at: number;
+    user: {user_id: string; user_name: string; user_public_key: string};
+    nodes: ComputeUpgradeBatchNode[];
+};
+
 export type ComputeTaskMode = 'online' | 'background';
 export type ComputeTaskState = 'queued' | 'running' | 'paused' | 'succeeded' | 'failed' | 'cancelled';
 export type ComputeTaskType = 'system.wait'
@@ -774,6 +849,87 @@ export class ComputeClusterService {
             signal,
             {method: 'POST', body: '{}'},
         );
+    }
+
+    public static createUpgradeBatch(
+        nodes: {node_id: string; manifest: ComputeUpgradeManifest}[],
+        signal?: AbortSignal,
+    ): Promise<ComputeUpgradeBatch> {
+        const identity = getApprovalIdentity();
+        return request('/upgrade-batches', signal, {
+            method: 'POST',
+            body: JSON.stringify({
+                nodes,
+                drain_timeout_seconds: 300,
+                user: identity.user,
+                ttl_seconds: 14400,
+            }),
+        });
+    }
+
+    public static upgradeBatch(batchId: string, signal?: AbortSignal): Promise<ComputeUpgradeBatch> {
+        return request(`/upgrade-batches/${encodeURIComponent(batchId)}`, signal);
+    }
+
+    public static refreshUpgradeBatch(batchId: string, signal?: AbortSignal): Promise<ComputeUpgradeBatch> {
+        return request(`/upgrade-batches/${encodeURIComponent(batchId)}/refresh`, signal, {
+            method: 'POST', body: '{}',
+        });
+    }
+
+    public static async approveUpgradeBatch(
+        batch: ComputeUpgradeBatch,
+        signal?: AbortSignal,
+    ): Promise<ComputeUpgradeBatch> {
+        const identity = getApprovalIdentity();
+        const remaining = batch.nodes.slice(batch.current_index);
+        if (batch.state !== 'awaiting_authorization' || remaining.length < 1 || remaining.length > 64
+            || !Number.isInteger(batch.current_index) || batch.current_index < 0
+            || new Set(remaining.map(node => node.node_id)).size !== remaining.length
+            || new Set(remaining.map(node => node.job_id)).size !== remaining.length
+            || !Number.isFinite(batch.expires_at) || batch.expires_at <= Date.now() / 1000) {
+            throw new Error('升级批次无效或已过期 / Invalid or expired upgrade batch');
+        }
+        const approvals = await Promise.all(remaining.map(async node => {
+            const challenge = node.authorization;
+            if (!challenge || challenge.state !== 'pending'
+                || challenge.operation !== 'node.upgrade'
+                || challenge.authorization_id !== node.authorization_id
+                || challenge.expires_at > batch.expires_at
+                || node.manifest.release_version !== batch.release_version
+                || challenge.target_installation_id !== node.node_id
+                || challenge.parameters.job_id !== node.job_id
+                || challenge.parameters.source_revision !== node.manifest.source_revision
+                || challenge.parameters.artifact_sha256 !== node.manifest.sha256
+                || challenge.parameters.artifact_size_bytes !== node.manifest.size_bytes
+                || challenge.parameters.drain_timeout_seconds !== batch.drain_timeout_seconds
+                || canonicalAuthorizationJson(challenge.target) !== canonicalAuthorizationJson({
+                    kind: 'node_upgrade', release_version: node.manifest.release_version,
+                    platform: node.manifest.platform, architecture: node.manifest.architecture,
+                })) {
+                throw new Error('升级授权范围不匹配 / Upgrade authorization scope mismatch');
+            }
+            const digest = await crypto.subtle.digest(
+                'SHA-256',
+                new TextEncoder().encode(canonicalAuthorizationJson(node.manifest)),
+            );
+            const manifestHash = Array.from(new Uint8Array(digest), value =>
+                value.toString(16).padStart(2, '0')).join('');
+            if (challenge.parameters.manifest_sha256 !== manifestHash) {
+                throw new Error('升级清单摘要不匹配 / Upgrade manifest digest mismatch');
+            }
+            const signature = await signAuthorization(challenge, identity);
+            return {job_id: node.job_id, authorization_id: challenge.authorization_id, signature};
+        }));
+        return request(`/upgrade-batches/${encodeURIComponent(batch.batch_id)}/approve`, signal, {
+            method: 'POST', body: JSON.stringify({approvals}),
+        });
+    }
+
+    public static rejectUpgradeBatch(batchId: string, signal?: AbortSignal): Promise<ComputeUpgradeBatch> {
+        return request(`/upgrade-batches/${encodeURIComponent(batchId)}/reject`, signal, {
+            method: 'POST', body: '{}',
+        });
     }
 
     public static tasks(signal?: AbortSignal, limit?: number): Promise<ComputeTasksResponse> {

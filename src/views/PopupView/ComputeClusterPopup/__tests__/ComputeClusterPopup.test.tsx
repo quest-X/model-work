@@ -18,6 +18,8 @@ jest.mock('../../../../services/ComputeClusterService', () => ({
         lanSchedules: jest.fn(), createLanSchedule: jest.fn(), controlLanSchedule: jest.fn(),
         terminalTargets: jest.fn(), startTerminal: jest.fn(), terminal: jest.fn(),
         terminalInput: jest.fn(), terminalControl: jest.fn(),
+        createUpgradeBatch: jest.fn(), upgradeBatch: jest.fn(), refreshUpgradeBatch: jest.fn(),
+        approveUpgradeBatch: jest.fn(), rejectUpgradeBatch: jest.fn(),
         submitTask: jest.fn(), controlTask: jest.fn(),
     },
 }));
@@ -27,13 +29,14 @@ const service = ComputeClusterService as jest.Mocked<typeof ComputeClusterServic
 describe('ComputeClusterPopup', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        localStorage.clear();
         service.status.mockResolvedValue({
             state: 'ready', version: '0.1.0', protocol_version: 1,
             admin_configured: true, nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
         });
         service.nodes.mockResolvedValue([{
             node_id: 'node-12345678', installation_id: 'install-1', name: 'edge-01',
-            agent_version: '0.1.0', capabilities: ['system.health.v1'],
+            agent_version: '0.1.0', capabilities: ['system.health.v1', 'control.node.upgrade.v1'],
             network: {
                 provider: 'tailscale', installed: true, online: true, ssh_available: true,
                 lan_ssh_available: true, tailscale_ssh_available: true,
@@ -943,5 +946,52 @@ describe('ComputeClusterPopup', () => {
 
         expect(await screen.findByText('尚未注册计算节点')).toBeInTheDocument();
         expect(screen.getByText('model-work-node cluster join --control-url <OpenSight URL> --enrollment-token-file <secret file>')).toBeInTheDocument();
+    });
+
+    it('creates an OTA batch only after a matching signed manifest and node are selected', async () => {
+        const user = userEvent.setup();
+        const manifest = {
+            version: 1 as const,
+            purpose: 'model-work-node.ota-release.v1' as const,
+            release_version: '1.0.5', minimum_node_version: '1.0.4', source_revision: 'b'.repeat(40),
+            platform: 'linux' as const, architecture: 'x86_64' as const,
+            artifact_url: 'https://releases.example/model-work-node-1.0.5-linux-x86_64.zip',
+            sha256: 'c'.repeat(64), size_bytes: 4096, signature: `${'A'.repeat(86)}==`,
+        };
+        service.createUpgradeBatch.mockResolvedValue({
+            batch_id: 'batch-1', release_version: '1.0.5', state: 'awaiting_authorization',
+            current_index: 0, created_at: 1, updated_at: 1, error_code: null,
+            drain_timeout_seconds: 300, ttl_seconds: 14400, expires_at: Date.now() / 1000 + 14400,
+            user: {user_id: 'user-1', user_name: 'law', user_public_key: 'A'.repeat(43) + '='},
+            nodes: [{
+                node_id: 'node-12345678', job_id: 'job-1', manifest,
+                authorization_id: 'authorization-1', authorization: null,
+                state: 'awaiting_authorization', error_code: null, result: null,
+            }],
+        });
+
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+        await user.click(await screen.findByRole('button', {name: '节点升级 1'}));
+        const releaseFile = new File([JSON.stringify(manifest)], 'release.json', {type: 'application/json'});
+        Object.defineProperty(releaseFile, 'text', {value: async () => JSON.stringify(manifest)});
+        await user.upload(screen.getByLabelText('选择签名发布清单'), releaseFile);
+        await user.click(screen.getByRole('checkbox', {name: /edge-01/}));
+        await user.click(screen.getByRole('button', {name: '创建升级批次'}));
+
+        await waitFor(() => expect(service.createUpgradeBatch).toHaveBeenCalledWith([
+            {node_id: 'node-12345678', manifest},
+        ]));
+        expect((await screen.findAllByText('等待批次确认')).length).toBeGreaterThan(0);
+        const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+        service.approveUpgradeBatch.mockResolvedValue({
+            ...(await service.createUpgradeBatch.mock.results[0].value), state: 'authorized',
+        });
+        await user.click(screen.getByRole('button', {name: '确认整个升级批次'}));
+        await waitFor(() => expect(service.approveUpgradeBatch).toHaveBeenCalledTimes(1));
+        expect(confirm).toHaveBeenCalledTimes(1);
+        expect(confirm.mock.calls[0][0]).toContain('edge-01');
+        expect(confirm.mock.calls[0][0]).toContain(manifest.sha256);
+        expect(confirm.mock.calls[0][0]).toContain('授权截止');
+        confirm.mockRestore();
     });
 });

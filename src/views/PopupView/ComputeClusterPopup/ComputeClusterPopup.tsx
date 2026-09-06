@@ -22,6 +22,7 @@ import {AppState} from '../../../store';
 import './ComputeClusterPopup.scss';
 import {ResourceKnowledgeGraph} from './ResourceKnowledgeGraph';
 import {ComputeTerminalPanel} from './ComputeTerminalPanel';
+import {ComputeUpgradePanel} from './ComputeUpgradePanel';
 
 interface IProps {
     language: Language;
@@ -31,7 +32,7 @@ interface IProps {
 }
 
 const AUTO_PLACEMENT = '__automatic__';
-type ComputeWorkspace = 'graph' | 'tasks' | 'network' | 'nodes' | 'terminal';
+type ComputeWorkspace = 'graph' | 'tasks' | 'network' | 'nodes' | 'terminal' | 'upgrade';
 
 const bytes = (value: number | null, zh: boolean): string => {
     if (value === null || !Number.isFinite(value)) return zh ? '未知' : 'Unknown';
@@ -676,6 +677,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                     ['network', zh ? '网络资产' : 'Network assets', lanAssets?.summary.total ?? 0],
                     ['nodes', zh ? '节点详情' : 'Node details', nodes.length],
                     ['terminal', zh ? '终端连接' : 'Terminal', nodes.filter(node => node.online && node.network.ssh_available).length],
+                    ['upgrade', zh ? '节点升级' : 'Node upgrade', nodes.filter(node => node.capabilities.includes('control.node.upgrade.v1')).length],
                 ] as Array<[ComputeWorkspace, string, number]>).map(([workspace, label, count]) => <button
                     type='button'
                     key={workspace}
@@ -944,6 +946,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                     <span>{nodes.length}</span>
                 </div>}
                 {!loading && activeWorkspace === 'nodes' && sortedNodes.map(node => <NodeCard key={node.node_id} node={node} zh={zh}/>)}
+                {!loading && activeWorkspace === 'upgrade' && <ComputeUpgradePanel nodes={nodes} zh={zh}/>}
             </div>
         </section>
     </div>;

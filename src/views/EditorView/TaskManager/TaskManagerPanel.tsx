@@ -1,7 +1,7 @@
 import React, {useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
 import {connect} from 'react-redux';
 import {AppState} from '../../../store';
-import {ManagedTask, TaskPriority} from '../../../store/tasks/types';
+import {ManagedTask, TaskPriority, TaskStatus, TaskType} from '../../../store/tasks/types';
 import {Language, LanguageConfig} from '../../../data/LanguageConfig';
 import {TaskRow} from './TaskRow';
 import {getEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
@@ -12,6 +12,20 @@ interface ResourceStats {
     ram_used_gb?: number;
     ram_total_gb?: number;
     gpu_percent?: number;
+}
+
+interface TrainingJobSummary {
+    job_id: string;
+    state: string;
+    name?: string;
+    dataset_id?: string;
+    started_at?: string;
+    finished_at?: string;
+    error?: string;
+    progress?: {
+        epoch?: number;
+        total_epochs?: number;
+    };
 }
 
 interface OwnProps {
@@ -31,11 +45,27 @@ type IProps = OwnProps & StateProps;
 const PRIORITIES: TaskPriority[] = ['P0', 'P1', 'P2'];
 
 const FINISHED: Set<string> = new Set(['completed', 'cancelled', 'error']);
+const TRAINING_TASK_PREFIX = 'training:';
+const TRAINING_STATUS: Record<string, TaskStatus> = {
+    completed: 'completed',
+    failed: 'error',
+    cancelled: 'cancelled',
+};
 
 // 模块级缓存：面板关闭再打开时立刻显示上次数据，不等首次 poll 返回。
 let _cachedResources: ResourceStats = {};
 
-const TaskManagerPanelComponent: React.FC<IProps> = ({tasks, language, onClose, excludeRef, anchorRef, pinned}) => {
+const ResourceChip: React.FC<{label: string; value: string; pct: number}> = ({label, value, pct}) => {
+    const color = pct >= 80 ? '#e05c5c' : pct >= 50 ? '#e0a85c' : '#5cc98a';
+    return (
+        <span className='TaskManagerPanel__resourceChip'>
+            <span className='TaskManagerPanel__resourceLabel'>{label}</span>
+            <span className='TaskManagerPanel__resourceValue' style={{color}}>{value}</span>
+        </span>
+    );
+};
+
+export const TaskManagerPanelComponent: React.FC<IProps> = ({tasks, language, onClose, excludeRef, anchorRef, pinned}) => {
     const panelRef = useRef<HTMLDivElement>(null);
     const t = LanguageConfig[language].taskManager;
 
@@ -56,12 +86,63 @@ const TaskManagerPanelComponent: React.FC<IProps> = ({tasks, language, onClose, 
                         setResources(data.resources);
                     }
                 })
-                .catch(() => {});
+                .catch(() => undefined);
         };
         poll();
         const id = setInterval(poll, 1000);
         return () => clearInterval(id);
     }, []);
+
+    const [trainingTasks, setTrainingTasks] = useState<ManagedTask[]>([]);
+    const refreshTrainingTasks = useCallback(() => {
+        return fetch(`${getEngineBaseUrl()}/training/jobs`)
+            .then(response => response.json())
+            .then(data => {
+                if (!Array.isArray(data.jobs)) return;
+                const mapped = data.jobs.map(
+                    (job: TrainingJobSummary): ManagedTask => {
+                        const epoch = job.progress?.epoch ?? 0;
+                        const totalEpochs = job.progress?.total_epochs ?? 0;
+                        const status = TRAINING_STATUS[job.state] ?? 'running';
+                        const startedAt = job.started_at ? Date.parse(job.started_at) : Date.now();
+                        const finishedAt = job.finished_at ? Date.parse(job.finished_at) : undefined;
+                        const progress = totalEpochs > 0 ? Math.round((epoch / totalEpochs) * 100) : undefined;
+                        const details = [
+                            job.dataset_id,
+                            totalEpochs > 0 ? `${epoch}/${totalEpochs} epochs` : undefined,
+                        ].filter(Boolean).join(' · ');
+                        return {
+                            id: `${TRAINING_TASK_PREFIX}${job.job_id}`,
+                            type: TaskType.TRAINING,
+                            priority: 'P1',
+                            title: job.name && job.name !== job.job_id ? job.name : t.types.training,
+                            subtitle: details || undefined,
+                            progress,
+                            status,
+                            startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(),
+                            finishedAt: finishedAt !== undefined && Number.isFinite(finishedAt) ? finishedAt : undefined,
+                            cancellable: job.state === 'running' || job.state === 'queued',
+                            errorMessage: job.error,
+                        };
+                    },
+                );
+                setTrainingTasks(mapped);
+            })
+            .catch(() => undefined);
+    }, [t.types.training]);
+
+    useEffect(() => {
+        refreshTrainingTasks();
+        const id = setInterval(refreshTrainingTasks, 3000);
+        return () => clearInterval(id);
+    }, [refreshTrainingTasks]);
+
+    const cancelTrainingTask = useCallback((task: ManagedTask) => {
+        const jobId = task.id.slice(TRAINING_TASK_PREFIX.length);
+        fetch(`${getEngineBaseUrl()}/training/jobs/${encodeURIComponent(jobId)}/cancel`, {method: 'POST'})
+            .then(() => refreshTrainingTasks())
+            .catch(() => undefined);
+    }, [refreshTrainingTasks]);
 
     // 面板的右下角贴在 anchor（按钮）的左上角。
     // 用 inline style 覆盖 SCSS 里的 bottom/right 默认值。anchor 缺失时退回默认右下角。
@@ -107,8 +188,9 @@ const TaskManagerPanelComponent: React.FC<IProps> = ({tasks, language, onClose, 
     }, [onClose]);
 
     // 过滤掉已完成的任务（当开关关闭时）
-    const visibleTasks = showCompleted ? tasks : tasks.filter(task => !FINISHED.has(task.status));
-    const completedCount = tasks.filter(task => FINISHED.has(task.status)).length;
+    const allTasks = [...tasks, ...trainingTasks];
+    const visibleTasks = showCompleted ? allTasks : allTasks.filter(task => !FINISHED.has(task.status));
+    const completedCount = allTasks.filter(task => FINISHED.has(task.status)).length;
 
     const grouped = PRIORITIES.map(p => ({
         priority: p,
@@ -150,7 +232,12 @@ const TaskManagerPanelComponent: React.FC<IProps> = ({tasks, language, onClose, 
                                 <span className='TaskManagerPanel__sectionCount'>({group.items.length})</span>
                             </div>
                             {group.items.map(task => (
-                                <TaskRow key={task.id} task={task} texts={t}/>
+                                <TaskRow
+                                    key={task.id}
+                                    task={task}
+                                    texts={t}
+                                    onCancel={task.type === TaskType.TRAINING ? cancelTrainingTask : undefined}
+                                />
                             ))}
                         </div>
                     )
@@ -187,16 +274,6 @@ const TaskManagerPanelComponent: React.FC<IProps> = ({tasks, language, onClose, 
                 </label>
             </div>
         </div>
-    );
-};
-
-const ResourceChip: React.FC<{label: string; value: string; pct: number}> = ({label, value, pct}) => {
-    const color = pct >= 80 ? '#e05c5c' : pct >= 50 ? '#e0a85c' : '#5cc98a';
-    return (
-        <span className='TaskManagerPanel__resourceChip'>
-            <span className='TaskManagerPanel__resourceLabel'>{label}</span>
-            <span className='TaskManagerPanel__resourceValue' style={{color}}>{value}</span>
-        </span>
     );
 };
 

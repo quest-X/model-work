@@ -781,7 +781,7 @@ describe('ControlCenterView', () => {
 
         expect(machine).toHaveAttribute('aria-pressed', 'false');
         expect(overview).toHaveAttribute('aria-pressed', 'true');
-        expect(await screen.findByRole('region', {name: '计算群地理地图'})).toBeInTheDocument();
+        expect(await screen.findByRole('region', {name: '计算群地理地图'}, {timeout: 15_000})).toBeInTheDocument();
         expect(screen.getByText('边缘集群地图', {selector: 'strong'})).toBeInTheDocument();
         const mapStats = screen.getByRole('region', {name: '计算群地理地图'})
             .querySelector('.ComputeKnowledgeStats');

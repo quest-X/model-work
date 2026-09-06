@@ -74,6 +74,9 @@ type TaskHistoryItem = {
     state: string;
     updatedAt: number;
 };
+
+const deterministicTextCompare = (left: string, right: string): number =>
+    left < right ? -1 : left > right ? 1 : 0;
 type ResourceMetricId = 'cpu' | 'memory' | 'gpu' | 'disk' | 'network';
 type ResourceSample = {
     nodeId: string;
@@ -783,13 +786,14 @@ export const ControlCenterView: React.FC<IProps> = ({
             .some(value => value.toLocaleLowerCase().includes(query));
     }).sort((left, right) => {
         const comparison = startupSort.key === 'name'
-            ? startupServiceName(left, zh).localeCompare(startupServiceName(right, zh))
+            ? deterministicTextCompare(startupServiceName(left, zh), startupServiceName(right, zh))
             : startupSort.key === 'identifier'
-                ? startupServiceIdentifier(left).localeCompare(startupServiceIdentifier(right))
+                ? deterministicTextCompare(startupServiceIdentifier(left), startupServiceIdentifier(right))
                 : startupSort.key === 'state'
-                    ? left.state.localeCompare(right.state)
-                    : left.start_type.localeCompare(right.start_type);
-        return (startupSort.direction === 'asc' ? comparison : -comparison) || left.name.localeCompare(right.name);
+                    ? deterministicTextCompare(left.state, right.state)
+                    : deterministicTextCompare(left.start_type, right.start_type);
+        return (startupSort.direction === 'asc' ? comparison : -comparison)
+            || deterministicTextCompare(left.name, right.name);
     }), [runtimeInventory, startupQuery, startupSort, zh]);
 
     const sortStartupServices = (key: StartupSortKey) => {

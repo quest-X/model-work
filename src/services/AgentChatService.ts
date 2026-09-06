@@ -12,6 +12,14 @@ export type AgentChatResponse = {
     message: string;
     model: string;
     degraded: boolean;
+    tool_calls?: Array<{
+        name: string;
+        ok: boolean;
+        result?: {
+            kind?: string;
+            node_name?: string;
+        };
+    }>;
 };
 
 export type AgentTraceTask = {

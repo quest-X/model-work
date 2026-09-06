@@ -104,7 +104,8 @@ export const signAuthorization = async (request: ApprovalRequest, selected = get
         || !/^[0-9a-f]{64}$/.test(request.nonce)
         || !Number.isFinite(request.issued_at) || !Number.isFinite(request.expires_at)
         || request.issued_at > now + 60 || request.expires_at <= now
-        || request.expires_at <= request.issued_at || request.expires_at - request.issued_at > 300) {
+        || request.expires_at <= request.issued_at
+        || request.expires_at - request.issued_at > (request.operation === 'node.upgrade' ? 28800 : 300)) {
         throw new Error('授权身份或有效期不匹配 / Authorization identity or lifetime mismatch');
     }
     return bytesToBase64(await crypto.subtle.sign('Ed25519', selected.privateKey,

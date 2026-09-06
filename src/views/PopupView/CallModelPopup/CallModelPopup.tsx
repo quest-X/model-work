@@ -57,7 +57,7 @@ interface IProps {
     activeAIModelId: string | null;
 }
 
-const CallModelPopup: React.FC<IProps> = ({
+export const CallModelPopup: React.FC<IProps> = ({
     updateActivePopupType,
     language,
     aiModels,
@@ -117,6 +117,10 @@ const CallModelPopup: React.FC<IProps> = ({
     };
 
     const onAccept = () => {
+        if (selectedId === 'ocr') {
+            updateActivePopupType(PopupWindowType.OCR);
+            return;
+        }
         // 自定义 .pt / .onnx / .mlpackage 上传 —— 统一进二级页 LoadDetectionModelPopup
         if (selectedId === 'custom-pt' || selectedId === 'custom-onnx' || selectedId === 'custom-mlpackage') {
             _selectedModelFamily = null;
@@ -226,12 +230,29 @@ const CallModelPopup: React.FC<IProps> = ({
         );
     };
 
+    // Existing model-family rendering intentionally keeps all platform branches together.
+    // eslint-disable-next-line complexity
     const renderContent = () => {
         return <div className='CallModelPopupContent'>
             <div className='ModelSection'>
                 <div className='SectionHeader'>{zhTexts ? '推理流程' : 'Pipeline'}</div>
                 <PipelineCanvas zh={zhTexts} onOpenPopup={updateActivePopupType} />
             </div>
+            {hasCoreEngine && (
+                <div className='ModelSection'>
+                    <div className='SectionHeader'>{zhTexts ? '推理能力' : 'Inference Capabilities'}</div>
+                    <div className='Options'>
+                        <div className='OptionsItem' onClick={() => onSelect('ocr')}>
+                            <img
+                                draggable={false}
+                                src={selectedId === 'ocr' ? 'ico/checkbox-checked.png' : 'ico/checkbox-unchecked.png'}
+                                alt={selectedId === 'ocr' ? 'checked' : 'unchecked'}
+                            />
+                            {zhTexts ? '文字识别 OCR' : 'Text Recognition OCR'}
+                        </div>
+                    </div>
+                </div>
+            )}
             <div className='ModelSection'>
                 <div className='SectionHeader CustomSectionHeader'>
                     <span>{zhTexts ? '自定义' : 'Custom'}</span>

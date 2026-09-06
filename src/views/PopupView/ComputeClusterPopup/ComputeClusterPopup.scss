@@ -1315,6 +1315,57 @@
   .ssh-ready { color: #7bd694; }
 }
 
+.ComputeUpgradePanel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: #17181a;
+  padding: 16px;
+  > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+  > header div { display: flex; align-items: baseline; gap: 8px; }
+  > header span { color: #79c9f8; font-size: 9px; }
+  > header h3 { margin: 0; font-size: 14px; }
+  > header p { max-width: 520px; margin: 0; color: rgba(255, 255, 255, 0.48); font-size: 9px; }
+  button { border: 1px solid rgba(51, 174, 247, 0.34); border-radius: 4px; background: rgba(51, 174, 247, 0.13); padding: 7px 12px; color: #a9ddfb; }
+  button:disabled { opacity: 0.4; }
+  button.danger { border-color: rgba(255, 93, 93, 0.35); background: rgba(255, 93, 93, 0.1); color: #ff9b9b; }
+}
+
+.ComputeUpgradeManifestInput {
+  display: grid;
+  gap: 5px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  padding: 12px;
+  span { font-size: 10px; }
+  small { color: rgba(255, 255, 255, 0.42); font-size: 8px; }
+}
+
+.ComputeUpgradeNodes,
+.ComputeUpgradeBatch { display: grid; gap: 7px; }
+
+.ComputeUpgradeNodes > label,
+.ComputeUpgradeBatch > article {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  background: #1b1c1e;
+  padding: 9px 10px;
+  div { display: flex; flex-direction: column; gap: 2px; }
+  strong { font-size: 10px; }
+  small { color: rgba(255, 255, 255, 0.4); font-size: 8px; }
+  span, code { color: #79c9f8; font-size: 8px; }
+}
+
+.ComputeUpgradeBatch > article.current { border-color: rgba(51, 174, 247, 0.38); }
+.ComputeUpgradeBatch > div:first-child,
+.ComputeUpgradeActions { display: flex; align-items: center; gap: 10px; }
+.ComputeUpgradeBatch > div:first-child code { color: rgba(255, 255, 255, 0.35); }
+
 @keyframes compute-spin { to { transform: rotate(360deg); } }
 @keyframes compute-status-pulse {
   50% { box-shadow: 0 0 0 6px transparent; opacity: 0.72; }

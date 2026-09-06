@@ -496,16 +496,17 @@ export interface LanguageTexts {
         statusError: string;
         statusCancelled: string;
         cancel: string;
-            types: {
-                autoSave: string;
-                frameExtraction: string;
-                batchDetect: string;
-                batchSegment: string;
-                tracking: string;
-                export: string;
-                queueLoad: string;
-                dataSync: string;
-            };
+        types: {
+            autoSave: string;
+            frameExtraction: string;
+            batchDetect: string;
+            batchSegment: string;
+            tracking: string;
+            training: string;
+            export: string;
+            queueLoad: string;
+            dataSync: string;
+        };
         subtitleFrames: string; // "{done}/{total} 帧"
         showCompleted: string; // "显示已完成"
     };
@@ -673,7 +674,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
                 rejectButton: '取消'
             },
             callModel: {
-                title: '模型设置',
+                title: '推理系统',
                 selectModel: '选择要加载的模型：',
                 acceptButton: '进入',
                 rejectButton: '关闭',
@@ -877,11 +878,11 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
         modelManagement: {
             coreServices: '核心引擎',
             extensionServices: '拓展引擎',
-            callModels: '推理设置',
+            callModels: '推理系统',
             providedServices: '提供服务',
             modelEngines: '引擎管理',
             dataCenter: '资源中心',
-            trainingTask: '训练设置',
+            trainingTask: '训练系统',
             taskCenter: '任务中心',
             vectorDb: '向量数据库',
             l2gRetrieval: '视觉检索',
@@ -1009,6 +1010,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
                 batchDetect: '批量检测',
                 batchSegment: '批量分割',
                 tracking: '检索跟踪',
+                training: '训练任务',
                 export: '导出标注',
                 queueLoad: '加载队列项',
                 dataSync: '同步数据批次'
@@ -1178,7 +1180,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
                 rejectButton: 'Cancel'
             },
             callModel: {
-                title: 'Call Model',
+                title: 'Inference System',
                 selectModel: 'Select model to load:',
                 acceptButton: 'Next',
                 rejectButton: 'Close',
@@ -1382,11 +1384,11 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
         modelManagement: {
             coreServices: 'Core Engines',
             extensionServices: 'Extension Engines',
-            callModels: 'Inference Settings',
+            callModels: 'Inference System',
             providedServices: 'Provided Services',
             modelEngines: 'Engine Management',
             dataCenter: 'Resource Center',
-            trainingTask: 'Training Settings',
+            trainingTask: 'Training System',
             taskCenter: 'Task Center',
             vectorDb: 'Vector Database',
             l2gRetrieval: 'Visual Retrieval',
@@ -1514,6 +1516,7 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
                 batchDetect: 'Batch detection',
                 batchSegment: 'Batch segmentation',
                 tracking: 'Retrieval',
+                training: 'Training job',
                 export: 'Export annotations',
                 queueLoad: 'Load queue item',
                 dataSync: 'Sync data batch'

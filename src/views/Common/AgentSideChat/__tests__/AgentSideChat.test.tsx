@@ -443,14 +443,14 @@ describe('AgentSideChat', () => {
         expect(allDevicesOption).toHaveAttribute('aria-selected', 'true');
         fireEvent.keyDown(composer, {key: 'ArrowDown'});
         fireEvent.keyDown(composer, {key: 'Enter'});
-        expect(composer).toHaveValue('@baoxin-166-windows ');
+        expect(composer).toHaveValue('@baoxin-166-windows  ');
         expect(document.querySelector('.AgentChatSelectedNode')).toHaveTextContent('@baoxin-166-windows');
         fireEvent.change(composer, {target: {value: '@baoxin-166-windows 查'}});
         expect(screen.queryByRole('button', {name: '测试连通'})).not.toBeInTheDocument();
         expect(document.querySelector('.AgentChatSelectedNode')).toBeInTheDocument();
         fireEvent.change(composer, {target: {value: '@baoxin-166-windows '}});
         fireEvent.click(screen.getByRole('button', {name: '测试连通'}));
-        expect(composer).toHaveValue('@baoxin-166-windows 测试连通');
+        expect(composer).toHaveValue('@baoxin-166-windows  测试连通');
         fireEvent.click(screen.getByRole('button', {name: '发送'}));
 
         expect(await screen.findByText(/@baoxin-166-windows 连通测试完成/)).toHaveTextContent('延迟：12.5 ms');
@@ -475,7 +475,17 @@ describe('AgentSideChat', () => {
 
     it('pins an all-devices mention and sends every device snapshot to the LLM', async () => {
         const nodes = [
-            {node_id: 'node-166', name: 'baoxin-166-windows', online: true},
+            {
+                node_id: 'node-166', name: 'baoxin-166-windows', online: true,
+                device_inventory: {
+                    state: 'ready',
+                    devices: Array.from({length: 9}, (_, index) => ({
+                        device_id: `camera-${index}`,
+                        kind: 'camera', provider: 'camera-connect', name: `Camera ${index}`,
+                        status: 'online', channels: 3, capabilities: ['camera.stream.v1'],
+                    })),
+                },
+            },
             {node_id: 'node-151', name: 'shanghai-151-linux', online: false},
         ] as ComputeClusterNode[];
         jest.spyOn(ComputeClusterService, 'nodes').mockResolvedValue(nodes);
@@ -506,6 +516,10 @@ describe('AgentSideChat', () => {
         await screen.findByText(/已汇总全部设备。/);
         expect(send.mock.calls[0][0]).toContain('"node_id":"node-166"');
         expect(send.mock.calls[0][0]).toContain('"node_id":"node-151"');
+        expect(send.mock.calls[0][0]).toContain('"device_count":9');
+        expect(send.mock.calls[0][0]).toContain('"name":"Camera 7"');
+        expect(send.mock.calls[0][0]).not.toContain('"name":"Camera 8"');
+        expect(send.mock.calls[0][0]).not.toContain('camera.stream.v1');
         expect(send.mock.calls[0][0]).toContain('用户消息：@全部节点 汇总状态');
     });
 
@@ -776,6 +790,42 @@ describe('AgentSideChat', () => {
             'succeeded',
             expect.objectContaining({authorization_id: 'authorization-1'}),
         ));
+    });
+
+    it('lets the LLM route a natural-language desktop request into authorization', async () => {
+        const {create} = mockDesktopAuthorizationFlow();
+        const send = jest.spyOn(AgentChatService, 'send').mockResolvedValue({
+            conversation_id: 'natural-language-desktop',
+            message: '请确认授权。',
+            model: 'Qwen3-Coder',
+            degraded: false,
+            tool_calls: [{
+                name: 'node_public_desktop_request',
+                ok: true,
+                result: {
+                    kind: 'node_public_desktop_authorization',
+                    node_name: 'baoxin-166-windows',
+                },
+            }],
+        });
+        render(<AgentSideChat language={Language.CHINESE}/>);
+
+        act(() => { window.dispatchEvent(new Event(AGENT_CHAT_TOGGLE_EVENT)); });
+        const composer = await screen.findByRole('textbox', {name: '发送给 Agent'});
+        fireEvent.change(composer, {target: {value: '@baoxin-166-windows 帮我瞅瞅桌面上都有啥'}});
+        fireEvent.click(screen.getByRole('button', {name: '发送'}));
+
+        expect(await screen.findByRole('region', {name: '节点操作授权'})).toHaveTextContent('baoxin-166-windows');
+        expect(send).toHaveBeenCalledWith(
+            expect.stringContaining('@baoxin-166-windows 帮我瞅瞅桌面上都有啥'),
+            undefined,
+            'trace-1',
+        );
+        expect(create).toHaveBeenCalledWith('node-166', expect.objectContaining({
+            operation: 'filesystem.list',
+            target: {kind: 'known_folder', id: 'public_desktop'},
+        }));
+        expect(AgentChatService.finishTrace).not.toHaveBeenCalled();
     });
 
     it('rejects a desktop authorization once without executing it', async () => {

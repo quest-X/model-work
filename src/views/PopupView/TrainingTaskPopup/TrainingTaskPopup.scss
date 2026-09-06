@@ -82,6 +82,12 @@
     }
   }
 
+  .DatasetReadiness {
+    margin: 0 0 4px 112px;
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 12px;
+  }
+
   .JobListSection {
     margin-top: 18px;
     max-height: min(300px, 34vh);
@@ -224,6 +230,7 @@
     }
 
     .StartButton,
+    .DatasetReadiness,
     .FormSection > .errorMessage {
       margin-left: 0;
     }

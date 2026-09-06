@@ -268,7 +268,7 @@ describe('ControlCenterView', () => {
         expect(screen.queryByText('图形处理器')).not.toBeInTheDocument();
     });
 
-    it('shows a disconnected path as abnormal and mixed paths as faulty', async () => {
+    it('shows a disconnected path and mixed paths as faulty', async () => {
         const remoteNode = node('山东节点', true, false, null, 'Windows', 'tailscale');
         remoteNode.network.lan_ssh_available = false;
         remoteNode.network.tailscale_ssh_available = true;
@@ -277,8 +277,8 @@ describe('ControlCenterView', () => {
 
         const lan = await screen.findByRole('button', {name: /SSH 局域网/});
         const remote = screen.getByRole('button', {name: /Tailscale 远程/});
-        expect(lan).toHaveTextContent('异常');
-        expect(lan.querySelector('.ControlStatusDot')).toHaveClass('offline');
+        expect(lan).toHaveTextContent('故障');
+        expect(lan.querySelector('.ControlStatusDot')).toHaveClass('warning');
         expect(remote).toHaveTextContent('正常');
         expect(remote.querySelector('.ControlStatusDot')).toHaveClass('healthy');
         const machineState = screen.getByRole('button', {name: /山东节点/})
@@ -790,8 +790,8 @@ describe('ControlCenterView', () => {
             .querySelector('.ComputeKnowledgeStats');
         expect(mapStats).toHaveTextContent('3主节点');
         expect(mapStats?.querySelector('.online')).toHaveTextContent('0正常');
-        expect(mapStats?.querySelector('.warning')).toHaveTextContent('2故障');
-        expect(mapStats?.querySelector('.offline')).toHaveTextContent('1异常');
+        expect(mapStats?.querySelector('.warning')).toHaveTextContent('3故障');
+        expect(mapStats?.querySelector('.offline')).not.toBeInTheDocument();
         expect(container.querySelector('.ControlGeoMapMarker')).toHaveTextContent('3/1');
         expect(container.querySelector('.ControlGeoMapMarker')).toHaveClass('warning');
         expect(screen.queryByRole('heading', {name: '在线节点'})).not.toBeInTheDocument();
@@ -812,14 +812,14 @@ describe('ControlCenterView', () => {
         expect(shandong).toBeInTheDocument();
         expect(screen.getByRole('button', {name: '进入上海市下一级地图'})).toHaveClass('warning');
         const shandongMarker = screen.getByRole('button', {name: '进入山东省下一级地图'});
-        expect(shandongMarker).toHaveClass('offline');
+        expect(shandongMarker).toHaveClass('warning');
         fireEvent.click(shandongMarker);
         expect(screen.getByText('山东省市级地图')).toBeInTheDocument();
         expect(container.querySelector('[data-map-prefecture="日照市"]')).toHaveTextContent('1/0');
-        expect(screen.getByText('正常 0 · 故障 0 · 异常 1 · 日照市')).toBeInTheDocument();
+        expect(screen.getByText('正常 0 · 故障 1 · 日照市')).toBeInTheDocument();
         expect(screen.getByText('正常节点')).toBeInTheDocument();
         expect(screen.getByText('故障节点')).toBeInTheDocument();
-        expect(screen.getByText('异常节点')).toBeInTheDocument();
+        expect(screen.queryByText('异常节点')).not.toBeInTheDocument();
         expect(screen.queryByText('在线节点', {selector: '.ComputeKnowledgeLegend span'})).not.toBeInTheDocument();
         expect(screen.queryByText('离线节点', {selector: '.ComputeKnowledgeLegend span'})).not.toBeInTheDocument();
         const jinan = container.querySelector('[data-map-feature="济南市"]');
@@ -841,13 +841,13 @@ describe('ControlCenterView', () => {
         expect(graphPanel.querySelector('.ComputeGraphViewport')).toHaveClass('fit-window');
         const graphStats = graphPanel.querySelector('.ComputeKnowledgeStats');
         expect(graphStats?.querySelector('.online')).toHaveTextContent('0正常');
-        expect(graphStats?.querySelector('.warning')).toHaveTextContent('2故障');
-        expect(graphStats?.querySelector('.offline')).toHaveTextContent('1异常');
+        expect(graphStats?.querySelector('.warning')).toHaveTextContent('3故障');
+        expect(graphStats?.querySelector('.offline')).not.toBeInTheDocument();
         expect(within(graphPanel).getByText('0/2 正常节点')).toBeInTheDocument();
         expect(within(graphPanel).getByText('0/1 正常节点')).toBeInTheDocument();
         const graphNode = within(graphPanel).getByRole('button', {name: '查看 在线节点 节点信息'});
         expect(graphNode).toHaveClass('node-warning');
-        expect(within(graphPanel).getByRole('button', {name: '查看 日照节点 节点信息'})).toHaveClass('node-offline');
+        expect(within(graphPanel).getByRole('button', {name: '查看 日照节点 节点信息'})).toHaveClass('node-warning');
         fireEvent.mouseEnter(graphNode);
         expect(within(graphPanel).getByText('故障 · 心跳 刚刚')).toHaveClass('warning');
         expect(screen.getByText('边缘集群图谱', {selector: 'strong'})).toBeInTheDocument();
@@ -894,6 +894,7 @@ describe('ControlCenterView', () => {
         machines[1].communication_state = 'fault';
         machines[1].network.tailscale_ssh_available = false;
         machines[1].network.lan_ssh_available = false;
+        machines[2].communication_state = 'abnormal';
         const regionGraph = graph(machines[0]);
         regionGraph.entities = [
             {...regionGraph.entities[0], entity_id: 'region:shanghai', label: '上海', region_id: 'shanghai', region_name: '上海'},
@@ -912,6 +913,8 @@ describe('ControlCenterView', () => {
 
         await screen.findByRole('heading', {name: 'Charlie'});
         const list = screen.getByRole('complementary', {name: '机器列表'});
+        expect(within(screen.getByRole('combobox', {name: '节点状态'})).getAllByRole('option')
+            .map(option => option.textContent)).toEqual(['所有状态', '仅正常', '仅故障']);
         expect(screen.getByRole('combobox', {name: '节点分组'})).toHaveValue('region');
         expect(list.querySelector('.ControlMachineGroupHeading strong')?.textContent).toBe('上海市');
         fireEvent.change(screen.getByRole('combobox', {name: '节点排序'}), {target: {value: 'name'}});

@@ -116,30 +116,26 @@ export const computeSshAvailability = (node: ComputeClusterNode): {lan: boolean;
 
 export type ComputeCommunicationState = 'normal' | 'fault' | 'abnormal';
 
-export const aggregateCommunicationStates = (states: ComputeCommunicationState[]): ComputeCommunicationState =>
-    states.length && states.every(state => state === 'normal') ? 'normal'
-        : states.length && states.every(state => state === 'abnormal') ? 'abnormal' : 'fault';
+export const aggregateCommunicationStates = (states: ComputeCommunicationState[]): 'normal' | 'fault' =>
+    states.length && states.every(state => state === 'normal') ? 'normal' : 'fault';
 
 export const computeLinkStates = (node?: ComputeClusterNode): {lan: ComputeCommunicationState; tailscale: ComputeCommunicationState} => {
-    if (node?.communication_state === 'abnormal') return {lan: 'abnormal', tailscale: 'abnormal'};
-    if (!node || !node.online || node.network.error || node.communication_state === 'fault') {
+    if (!node || !node.online || node.network.error
+        || node.communication_state === 'fault' || node.communication_state === 'abnormal') {
         return {lan: 'fault', tailscale: 'fault'};
     }
     const ssh = computeSshAvailability(node);
-    const state = (available: boolean, observed?: boolean | null): ComputeCommunicationState =>
-        available ? 'normal' : observed === false ? 'abnormal' : 'fault';
     return {
-        lan: state(ssh.lan, node.network.lan_ssh_available),
-        tailscale: state(ssh.tailscale, node.network.tailscale_ssh_available),
+        lan: ssh.lan ? 'normal' : 'fault',
+        tailscale: ssh.tailscale ? 'normal' : 'fault',
     };
 };
 
-export const computeNodeState = (node?: ComputeClusterNode): ComputeCommunicationState =>
+export const computeNodeState = (node?: ComputeClusterNode): 'normal' | 'fault' =>
     aggregateCommunicationStates(Object.values(computeLinkStates(node)));
 
-export const communicationStateLabel = (state: ComputeCommunicationState, zh: boolean): string => ({
-    normal: zh ? '正常' : 'Normal', fault: zh ? '故障' : 'Fault', abnormal: zh ? '异常' : 'Abnormal',
-}[state]);
+export const communicationStateLabel = (state: ComputeCommunicationState, zh: boolean): string =>
+    state === 'normal' ? (zh ? '正常' : 'Normal') : (zh ? '故障' : 'Fault');
 
 export const computeNodeNormal = (node: ComputeClusterNode): boolean => computeNodeState(node) === 'normal';
 

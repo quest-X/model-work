@@ -662,7 +662,6 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                 <div><span>{zh ? '主节点' : 'Main nodes'}</span><strong>{totals.total}</strong></div>
                 <div><span>{zh ? '正常' : 'Normal'}</span><strong className='online'>{totals.online}</strong></div>
                 <div><span>{zh ? '故障' : 'Fault'}</span><strong>{nodes.filter(node => computeNodeState(node) === 'fault').length}</strong></div>
-                <div><span>{zh ? '异常' : 'Abnormal'}</span><strong>{nodes.filter(node => computeNodeState(node) === 'abnormal').length}</strong></div>
             </div>
             </>}
 

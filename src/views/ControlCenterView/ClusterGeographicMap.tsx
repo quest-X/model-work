@@ -15,7 +15,7 @@ import {
 
 type MapLevel = 'world' | 'china' | 'province';
 type MapTransform = {x: number; y: number; scale: number};
-type MapMarkerTone = 'healthy' | 'warning' | 'offline';
+type MapMarkerTone = 'healthy' | 'warning';
 type MapStatusCounts = Record<MapMarkerTone, number>;
 type WorldProperties = {name: string};
 type ProvinceProperties = {'地名': string; name: string; id: string};
@@ -77,11 +77,11 @@ const prefectureMatches = (
     .filter((value): value is string => Boolean(value)));
 
 const mapNodeTone = (node: ComputeClusterNode): MapMarkerTone =>
-    computeNodeState(node) === 'abnormal' ? 'offline' : computeNodeState(node) === 'normal' ? 'healthy' : 'warning';
+    computeNodeState(node) === 'normal' ? 'healthy' : 'warning';
 
 const mapStatusCounts = (markerNodes: ComputeClusterNode[]): MapStatusCounts => markerNodes.reduce(
     (counts, node) => ({...counts, [mapNodeTone(node)]: counts[mapNodeTone(node)] + 1}),
-    {healthy: 0, warning: 0, offline: 0},
+    {healthy: 0, warning: 0},
 );
 
 // Geographic gestures, drill-down, and cluster overlays intentionally share one local state owner.
@@ -136,13 +136,13 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
     };
     const markerTone = (markerNodes: ComputeClusterNode[]): MapMarkerTone => {
         const state = aggregateCommunicationStates(markerNodes.map(computeNodeState));
-        return state === 'normal' ? 'healthy' : state === 'abnormal' ? 'offline' : 'warning';
+        return state === 'normal' ? 'healthy' : 'warning';
     };
     const markerStatusLabel = (markerNodes: ComputeClusterNode[]): string => {
         const counts = mapStatusCounts(markerNodes);
         return zh
-            ? `正常 ${counts.healthy} · 故障 ${counts.warning} · 异常 ${counts.offline}`
-            : `Normal ${counts.healthy} · Fault ${counts.warning} · Abnormal ${counts.offline}`;
+            ? `正常 ${counts.healthy} · 故障 ${counts.warning}`
+            : `Normal ${counts.healthy} · Fault ${counts.warning}`;
     };
     // ponytail: The graph currently exposes province-level regions only; add country/coordinates to the API before placing non-China nodes.
     const chinaNodes = useMemo(() => [...new Map(regionStats
@@ -243,7 +243,6 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
                 <div><strong>{nodes.length}</strong><span>{zh ? '主节点' : 'main nodes'}</span></div>
                 <div className='online'><strong>{statusCounts.healthy}</strong><span>{zh ? '正常' : 'Normal'}</span></div>
                 <div className='warning'><strong>{statusCounts.warning}</strong><span>{zh ? '故障' : 'Fault'}</span></div>
-                <div className='offline'><strong>{statusCounts.offline}</strong><span>{zh ? '异常' : 'Abnormal'}</span></div>
             </div>
         </div>
 
@@ -265,7 +264,6 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
             </div>
             <span><i className='ControlGeoMapDot online'/>{zh ? '正常节点' : 'Normal node'}</span>
             <span><i className='ControlGeoMapDot warning'/>{zh ? '故障节点' : 'Fault node'}</span>
-            <span><i className='ControlGeoMapDot offline'/>{zh ? '异常节点' : 'Abnormal node'}</span>
             <small>{zh ? '边界数据仅用于节点位置展示' : 'Boundaries are for node location display only'}</small>
         </div>
 

@@ -103,7 +103,7 @@ export const AuthPreview: React.FC<IProps> = ({children}) => {
             </header>
             <div className='AuthPreviewIntro'>
                 <div className='AuthPreviewDevice'><span aria-hidden='true'/>本地边缘计算集群后台</div>
-                <h1 id='auth-preview-title'>登录到 OpenSight 16</h1>
+                <h1 id='auth-preview-title'>登录到 OpenSight</h1>
                 <p>进入设备工作台，管理视觉任务、模型与边缘节点。</p>
             </div>
             <form className='AuthPreviewForm' onSubmit={async event => {

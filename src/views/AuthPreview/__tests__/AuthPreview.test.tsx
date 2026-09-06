@@ -50,7 +50,7 @@ describe('AuthPreview', () => {
 
     it('uses backend login without persisting the password', async () => {
         render(<AuthPreview><div>workspace preview</div></AuthPreview>);
-        await screen.findByRole('heading', {name: '登录到 OpenSight 16'});
+        await screen.findByRole('heading', {name: '登录到 OpenSight'});
         fireEvent.change(screen.getByLabelText('账号'), {target: {value: 'admin'}});
         fireEvent.change(screen.getByLabelText('密码'), {target: {value: 'wrong'}});
         (loginAccount as jest.Mock).mockRejectedValueOnce(new Error('账号或密码错误'));
@@ -65,7 +65,7 @@ describe('AuthPreview', () => {
 
         act(() => { window.dispatchEvent(new Event(AUTH_PREVIEW_SIGN_OUT_EVENT)); });
         await waitFor(() => expect(logoutAccount).toHaveBeenCalledTimes(1));
-        expect(await screen.findByRole('heading', {name: '登录到 OpenSight 16'})).toBeInTheDocument();
+        expect(await screen.findByRole('heading', {name: '登录到 OpenSight'})).toBeInTheDocument();
         expect(screen.getByLabelText('密码')).toHaveValue('');
     });
 

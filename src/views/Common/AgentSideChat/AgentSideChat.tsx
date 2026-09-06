@@ -15,7 +15,7 @@ import {
 } from '../../../services/ComputeClusterService';
 import {AppState} from '../../../store';
 import {authorizationChallenge, canonicalAuthorizationJson, getApprovalIdentity, signAuthorization} from '../../../services/ApprovalIdentityService';
-import {ApprovalIdentityPanel} from '../ApprovalIdentityPanel';
+import {useEscapeToClose} from '../../../hooks/useEscapeToClose';
 import './AgentSideChat.scss';
 
 export {canonicalAuthorizationJson};
@@ -562,6 +562,7 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
     const authorizationFinalizedRef = useRef(new Set<string>());
     const authorizationTimersRef = useRef(new Map<string, number>());
     const endRef = useRef<HTMLDivElement>(null);
+    const panelRef = useRef<HTMLElement>(null);
 
     useEffect(() => {
         const toggle = () => {
@@ -611,19 +612,38 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
         return () => controller.abort();
     }, [nodeError, nodes, open]);
 
+    const reset = () => {
+        historyRequestRef.current += 1;
+        conversationIdRef.current = undefined;
+        queuedMessagesRef.current = [];
+        setHistoryOpen(false);
+        setHistoryQuery('');
+        setMessages([]);
+        setAuthorizationCards({});
+        setSendError('');
+        setDraft('');
+        setSelectedNode(undefined);
+        setNodeOperation(undefined);
+    };
+
+    const closeWindow = () => {
+        reset();
+        setOpen(false);
+        setExpanded(false);
+        setMinimized(false);
+    };
+    useEscapeToClose(closeWindow, open, 10);
+
     useEffect(() => {
-        if (!open) return;
-        const close = (event: globalThis.KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                setOpen(false);
-                setExpanded(false);
-                setMinimized(false);
-                setHistoryOpen(false);
-                historyRequestRef.current += 1;
-            }
+        if (!open) return undefined;
+        const closeOutside = (event: MouseEvent) => {
+            const target = event.target as Node;
+            if (panelRef.current?.contains(target)) return;
+            if ((target as Element).closest?.('.AgentChatTrigger')) return;
+            closeWindow();
         };
-        document.addEventListener('keydown', close);
-        return () => document.removeEventListener('keydown', close);
+        document.addEventListener('mousedown', closeOutside);
+        return () => document.removeEventListener('mousedown', closeOutside);
     }, [open]);
 
     useEffect(() => {
@@ -931,20 +951,6 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
         void sendMessage(message);
     };
 
-    const reset = () => {
-        historyRequestRef.current += 1;
-        conversationIdRef.current = undefined;
-        queuedMessagesRef.current = [];
-        setHistoryOpen(false);
-        setHistoryQuery('');
-        setMessages([]);
-        setAuthorizationCards({});
-        setSendError('');
-        setDraft('');
-        setSelectedNode(undefined);
-        setNodeOperation(undefined);
-    };
-
     const loadHistory = async () => {
         const requestId = ++historyRequestRef.current;
         setHistoryLoading(true);
@@ -1079,6 +1085,7 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
         return groups;
     }, new Map<string, AgentConversation[]>()));
     const panel = <aside
+        ref={panelRef}
         className={`AgentSideChat${expanded ? ' expanded' : ''}${minimized ? ' minimized' : ''}`}
         role='dialog'
         aria-label={zh ? 'Agent 对话' : 'Agent chat'}
@@ -1142,17 +1149,6 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
                         setMinimized(true);
                     }}
                 ><svg viewBox='0 0 12 12' aria-hidden='true'><path d='M3 6h6'/></svg></button>
-                <button
-                    type='button'
-                    className='AgentSideChatWindowControl close'
-                    aria-label={zh ? '关闭 Agent 对话' : 'Close Agent chat'}
-                    onClick={() => {
-                        reset();
-                        setOpen(false);
-                        setExpanded(false);
-                        setMinimized(false);
-                    }}
-                ><svg viewBox='0 0 12 12' aria-hidden='true'><path d='m3 3 6 6m0-6-6 6'/></svg></button>
             </div>
         </header>
         <div className='AgentSideChatBody'>
@@ -1200,7 +1196,6 @@ export const AgentSideChat: React.FC<IProps> = ({language}) => {
             </div>})}
         </section>}
         {(!historyOpen || expanded) && <div className='AgentSideChatConversation'>
-        <ApprovalIdentityPanel zh={zh}/>
         <div className='AgentSideChatMessages' aria-live='polite'>
             {messages.length === 0 && <div className='AgentSideChatWelcome'>
                 <strong>{zh ? '有什么需要处理？' : 'What should I handle?'}</strong>

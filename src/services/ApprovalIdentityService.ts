@@ -1,6 +1,8 @@
 /** Personal approval keys stay in page memory, never in browser storage or requests. */
+import {sha256Bytes} from '../utils/Sha256';
+
 export type ApprovalUser = {user_id: string; user_name: string; user_public_key: string};
-export type ApprovalIdentity = {privateKey: CryptoKey; user: ApprovalUser};
+export type ApprovalIdentity = {privateKey: CryptoKey | null; user: ApprovalUser; source?: 'account'};
 export type ApprovalRequest = {
     version: 1;
     purpose: 'model-work-node.user-authorization.v1';
@@ -68,6 +70,15 @@ export const clearApprovalIdentity = (): void => {
     window.dispatchEvent(new Event(APPROVAL_IDENTITY_CHANGED));
 };
 
+export const useAccountApprovalIdentity = (user: ApprovalUser | null): void => {
+    generation += 1;
+    identity = user ? Object.freeze({privateKey: null, user: Object.freeze({...user}), source: 'account'}) : null;
+    window.dispatchEvent(new Event(APPROVAL_IDENTITY_CHANGED));
+};
+
+export const approvalIdentitySource = (): 'account' | 'file' | null =>
+    identity ? (identity.source === 'account' ? 'account' : 'file') : null;
+
 export const importApprovalIdentity = async (text: string): Promise<ApprovalUser> => {
     if (!globalThis.crypto?.subtle) throw new Error('请通过 HTTPS 或 localhost 打开控制台 / Open the console over HTTPS or localhost');
     const importGeneration = ++generation;
@@ -102,17 +113,21 @@ export const signAuthorization = async (request: ApprovalRequest, selected = get
         || request.user_id !== selected.user.user_id || request.user_name !== selected.user.user_name
         || request.user_public_key !== selected.user.user_public_key
         || !/^[0-9a-f]{64}$/.test(request.nonce)
-        || !Number.isFinite(request.issued_at) || !Number.isFinite(request.expires_at)
+        || ![request.issued_at, request.expires_at].every(Number.isFinite)
         || request.issued_at > now + 60 || request.expires_at <= now
         || request.expires_at <= request.issued_at
         || request.expires_at - request.issued_at > (request.operation === 'node.upgrade' ? 28800 : 300)) {
         throw new Error('授权身份或有效期不匹配 / Authorization identity or lifetime mismatch');
     }
+    if (selected.source === 'account') {
+        const {serverSignAuthorization} = await import('./AccountService');
+        return (await serverSignAuthorization(authorizationChallenge(request))).signature;
+    }
+    if (!selected.privateKey) throw new Error('授权私钥不可用 / Approval key unavailable');
     return bytesToBase64(await crypto.subtle.sign('Ed25519', selected.privateKey,
         new TextEncoder().encode(canonicalAuthorizationJson(authorizationChallenge(request)))));
 };
 
 export const sensitiveRequestDigest = async (payload: object, nonce: string): Promise<string> => {
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalAuthorizationJson({nonce, payload})));
-    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+    return sha256Bytes(new TextEncoder().encode(canonicalAuthorizationJson({nonce, payload})));
 };

@@ -17,7 +17,7 @@
   align-content: flex-start;
 
   &.withPopup {
-    filter: blur(2px) brightness(0.3);
+    filter: blur(2px);
     pointer-events: none;
   }
 }

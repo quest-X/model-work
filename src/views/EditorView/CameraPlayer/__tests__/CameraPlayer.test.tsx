@@ -69,35 +69,41 @@ describe('CameraPlayer', () => {
         expect(container.querySelector('.CameraPlayerMeta')).toHaveTextContent('DS-2CD2686FWDA2-IZS');
     });
 
-    it('uses Smart controls as a panel launcher instead of an on/off switch', () => {
-        render(<CameraPlayer item={item} language={Language.CHINESE}/>);
+    it('uses Smart controls as a panel launcher and closes it from outside', () => {
+        const {container} = render(<CameraPlayer item={item} language={Language.CHINESE}/>);
 
         const openButton = screen.getByRole('button', {name: '智能调参'});
         expect(openButton).toHaveAttribute('aria-expanded', 'false');
-        expect(screen.queryByRole('button', {name: '关闭相机控制'})).not.toBeInTheDocument();
+        expect(container.querySelector('#camera-smart-controls')).not.toBeInTheDocument();
 
         fireEvent.click(openButton);
         expect(openButton).toHaveAttribute('aria-expanded', 'true');
-        expect(screen.getByRole('button', {name: '关闭相机控制'})).toBeInTheDocument();
-
-        fireEvent.click(screen.getByRole('button', {name: '关闭相机控制'}));
-        expect(openButton).toHaveAttribute('aria-expanded', 'false');
+        expect(container.querySelector('#camera-smart-controls')).toBeInTheDocument();
         expect(screen.queryByRole('button', {name: '关闭相机控制'})).not.toBeInTheDocument();
+
+        fireEvent.mouseDown(document.body);
+        expect(openButton).toHaveAttribute('aria-expanded', 'false');
+        expect(container.querySelector('#camera-smart-controls')).not.toBeInTheDocument();
     });
 
     it('opens the camera parameter comparison and closes smart controls', () => {
-        render(<CameraPlayer item={item} language={Language.CHINESE}/>);
+        const {container} = render(<CameraPlayer item={item} language={Language.CHINESE}/>);
 
         fireEvent.click(screen.getByRole('button', {name: '智能调参'}));
-        expect(screen.getByRole('button', {name: '关闭相机控制'})).toBeInTheDocument();
+        expect(container.querySelector('#camera-smart-controls')).toBeInTheDocument();
 
         const parametersButton = screen.getByRole('button', {name: '相机参数'});
         expect(parametersButton).toHaveAttribute('aria-expanded', 'false');
         fireEvent.click(parametersButton);
 
-        expect(screen.queryByRole('button', {name: '关闭相机控制'})).not.toBeInTheDocument();
+        expect(container.querySelector('#camera-smart-controls')).not.toBeInTheDocument();
         expect(parametersButton).toHaveAttribute('aria-expanded', 'true');
-        expect(screen.getByRole('button', {name: '关闭相机参数'})).toBeInTheDocument();
+        expect(container.querySelector('#camera-parameters-panel')).toBeInTheDocument();
+        expect(screen.queryByRole('button', {name: '关闭相机参数'})).not.toBeInTheDocument();
+
+        fireEvent.keyDown(window, {key: 'Escape'});
+        expect(parametersButton).toHaveAttribute('aria-expanded', 'false');
+        expect(container.querySelector('#camera-parameters-panel')).not.toBeInTheDocument();
     });
 
     it('shows two independent LIVE logical branches in comparison mode', () => {

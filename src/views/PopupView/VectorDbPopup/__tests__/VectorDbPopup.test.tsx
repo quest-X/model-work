@@ -498,7 +498,8 @@ describe('VectorDbPopup', () => {
         expect(within(preview).getByText('2/2')).toBeInTheDocument();
         fireEvent.keyDown(window, {key: 'ArrowLeft'});
         expect(within(preview).getByRole('img', {name: 'frame-001.jpg'})).toBeInTheDocument();
-        fireEvent.click(within(preview).getByRole('button', {name: '关闭图片预览'}));
+        expect(within(preview).queryByRole('button', {name: '关闭图片预览'})).not.toBeInTheDocument();
+        fireEvent.mouseDown(preview.closest('.HistoryImagePreviewBackdrop') as HTMLElement);
         expect(screen.queryByRole('dialog', {name: '入库图片预览'})).not.toBeInTheDocument();
     });
 

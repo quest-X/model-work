@@ -6,6 +6,10 @@ import {AutoSaveService} from '../services/AutoSaveService';
 import {ProjectRestoreService} from '../services/ProjectRestoreService';
 
 jest.unmock('../App');
+const mockCurrentAccountSession = jest.fn();
+jest.mock('../services/AccountService', () => ({
+    currentAccountSession: () => mockCurrentAccountSession(),
+}));
 jest.mock('../views/EditorView/EditorView', () => ({
     __esModule: true,
     default: ({platformMode, onPlatformSwitch}: {
@@ -61,9 +65,21 @@ const props = {
 describe('App restore prompt scope', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockCurrentAccountSession.mockReturnValue({user: {role: 'admin'}});
         autoSave.initialize.mockResolvedValue();
         restore.restoreSettings.mockResolvedValue(true);
         restore.checkForStoredData.mockResolvedValue({hasSettings: false, hasProject: false, lastSaved: 0});
+    });
+
+    it.each([
+        ['admin', 'control'],
+        ['member', 'annotation'],
+    ])('defaults %s to %s and allows manual switching', async (role, expected) => {
+        mockCurrentAccountSession.mockReturnValue({user: {role}});
+        render(<App {...props}/>);
+        expect(await screen.findByText(expected)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', {name: '切换平台'}));
+        expect(screen.getByText(expected === 'control' ? 'annotation' : 'control')).toBeInTheDocument();
     });
 
     it('opens a resource in annotation when no recovery is pending', async () => {

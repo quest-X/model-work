@@ -1,4 +1,5 @@
 import {getExtensionEngineBaseUrl} from '../utils/DefaultBackendUrl';
+import {sha256Bytes} from '../utils/Sha256';
 import {ApprovalRequest, authorizationChallenge, canonicalAuthorizationJson, getApprovalIdentity, sensitiveRequestDigest, SignedApproval, signAuthorization} from './ApprovalIdentityService';
 import type {
     CameraConnectionProfile,
@@ -73,6 +74,7 @@ export type ComputeClusterNode = {
     agent_version: string;
     capabilities: string[];
     control_transport?: 'lan' | 'tailscale' | null;
+    communication_state?: 'normal' | 'fault' | 'abnormal' | null;
     network: {
         provider: 'tailscale';
         installed: boolean;
@@ -112,15 +114,37 @@ export const computeSshAvailability = (node: ComputeClusterNode): {lan: boolean;
     };
 };
 
-export const computeNodeNormal = (node: ComputeClusterNode): boolean => {
-    if (!node.online) return false;
+export type ComputeCommunicationState = 'normal' | 'fault' | 'abnormal';
+
+export const aggregateCommunicationStates = (states: ComputeCommunicationState[]): ComputeCommunicationState =>
+    states.length && states.every(state => state === 'normal') ? 'normal'
+        : states.length && states.every(state => state === 'abnormal') ? 'abnormal' : 'fault';
+
+export const computeLinkStates = (node?: ComputeClusterNode): {lan: ComputeCommunicationState; tailscale: ComputeCommunicationState} => {
+    if (node?.communication_state === 'abnormal') return {lan: 'abnormal', tailscale: 'abnormal'};
+    if (!node || !node.online || node.network.error || node.communication_state === 'fault') {
+        return {lan: 'fault', tailscale: 'fault'};
+    }
     const ssh = computeSshAvailability(node);
-    return ssh.lan
-        && ssh.tailscale
-        && node.device_inventory.state !== 'unavailable'
-        && !node.device_inventory.devices.some(device =>
-            device.status === 'offline' || device.status === 'unavailable');
+    const state = (available: boolean, observed?: boolean | null): ComputeCommunicationState =>
+        available ? 'normal' : observed === false ? 'abnormal' : 'fault';
+    return {
+        lan: state(ssh.lan, node.network.lan_ssh_available),
+        tailscale: state(ssh.tailscale, node.network.tailscale_ssh_available),
+    };
 };
+
+export const computeNodeState = (node?: ComputeClusterNode): ComputeCommunicationState =>
+    aggregateCommunicationStates(Object.values(computeLinkStates(node)));
+
+export const communicationStateLabel = (state: ComputeCommunicationState, zh: boolean): string => ({
+    normal: zh ? '正常' : 'Normal', fault: zh ? '故障' : 'Fault', abnormal: zh ? '异常' : 'Abnormal',
+}[state]);
+
+export const computeNodeNormal = (node: ComputeClusterNode): boolean => computeNodeState(node) === 'normal';
+
+export const computeNodeLabel = (node: ComputeClusterNode | undefined, zh: boolean): string =>
+    communicationStateLabel(computeNodeState(node), zh);
 
 export type ComputeRuntimeState = 'healthy' | 'degraded' | 'unavailable' | 'unknown';
 
@@ -323,17 +347,28 @@ export type ComputeUpgradeManifest = {
     signature: string;
 };
 
+export type ComputeUpgradeState = 'queued' | 'draining' | 'downloading' | 'prepared'
+    | 'installing' | 'checking' | 'rolling_back' | 'recovery_required' | 'succeeded'
+    | 'rolled_back' | 'failed' | 'cancelled';
+
+export type ComputeUpgradeEvent = {
+    event_id: number;
+    state: ComputeUpgradeState;
+    created_at: number;
+    error_code: string | null;
+};
+
 export type ComputeUpgradeResult = {
     job_id: string;
-    state: 'queued' | 'draining' | 'downloading' | 'prepared' | 'installing'
-        | 'checking' | 'rolling_back' | 'recovery_required' | 'succeeded'
-        | 'rolled_back' | 'failed' | 'cancelled';
+    state: ComputeUpgradeState;
     created_at: number;
     updated_at: number;
     drain_deadline: number;
     error_code: string | null;
     health_task_id: string | null;
     release_version: string;
+    events?: ComputeUpgradeEvent[];
+    events_truncated?: boolean;
 };
 
 export type ComputeUpgradeAuthorization = ApprovalRequest & {
@@ -363,6 +398,7 @@ export type ComputeUpgradeBatchNode = {
     manifest: ComputeUpgradeManifest;
     authorization_id: string | null;
     authorization: ComputeUpgradeAuthorization | null;
+    delivery_started_at?: number;
     state: 'awaiting_authorization' | 'approval_submitting' | 'rejected'
         | ComputeUpgradeResult['state'];
     error_code: string | null;
@@ -376,6 +412,7 @@ export type ComputeUpgradeBatch = {
     current_index: number;
     created_at: number;
     updated_at: number;
+    delivery_started_at?: number;
     error_code: string | null;
     drain_timeout_seconds: number;
     ttl_seconds: number;
@@ -851,6 +888,21 @@ export class ComputeClusterService {
         );
     }
 
+    public static upgradeReleases(signal?: AbortSignal): Promise<{source: 'main'; releases: ComputeUpgradeManifest[]}> {
+        return request('/upgrade-releases', signal);
+    }
+
+    public static createMainUpgradeBatch(
+        nodeIds: string[], releaseVersion: string, signal?: AbortSignal,
+    ): Promise<ComputeUpgradeBatch> {
+        const identity = getApprovalIdentity();
+        return request('/upgrade-batches/from-main', signal, {
+            method: 'POST',
+            body: JSON.stringify({node_ids: nodeIds, release_version: releaseVersion,
+                drain_timeout_seconds: 300, user: identity.user, ttl_seconds: 14400}),
+        });
+    }
+
     public static createUpgradeBatch(
         nodes: {node_id: string; manifest: ComputeUpgradeManifest}[],
         signal?: AbortSignal,
@@ -909,12 +961,9 @@ export class ComputeClusterService {
                 })) {
                 throw new Error('升级授权范围不匹配 / Upgrade authorization scope mismatch');
             }
-            const digest = await crypto.subtle.digest(
-                'SHA-256',
+            const manifestHash = await sha256Bytes(
                 new TextEncoder().encode(canonicalAuthorizationJson(node.manifest)),
             );
-            const manifestHash = Array.from(new Uint8Array(digest), value =>
-                value.toString(16).padStart(2, '0')).join('');
             if (challenge.parameters.manifest_sha256 !== manifestHash) {
                 throw new Error('升级清单摘要不匹配 / Upgrade manifest digest mismatch');
             }

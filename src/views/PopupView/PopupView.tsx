@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import './PopupView.scss';
 import { PopupWindowType } from '../../data/enums/PopupWindowType';
 import { AppState } from '../../store';
@@ -36,6 +36,7 @@ import CameraConnectPopup from './CameraConnectPopup/CameraConnectPopup';
 import JetsonConnectPopup from './JetsonConnectPopup/JetsonConnectPopup';
 import ComputeClusterPopup from './ComputeClusterPopup/ComputeClusterPopup';
 import {clearDatasetActionSelections} from '../../services/DatasetActionSelection';
+import {useEscapeToClose} from '../../hooks/useEscapeToClose';
 
 
 interface IProps {
@@ -47,42 +48,20 @@ interface IProps {
     activePopupNodeRemote: boolean;
 }
 
-const PopupView: React.FC<IProps> = (
+export const PopupView: React.FC<IProps> = (
     { activePopupType, activePopupNodeId, activePopupNodeName, activePopupNodeRemote,
         onBeforeOpenAnnotation, onOpenAnnotation },
 ) => {
 
-    useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape' && activePopupType) {
-                if (activePopupType === PopupWindowType.MODEL_INSPECTOR) {
-                    const inspectorEscape = new Event(MODEL_INSPECTOR_ESCAPE_EVENT, {cancelable: true});
-                    window.dispatchEvent(inspectorEscape);
-                    if (inspectorEscape.defaultPrevented) {
-                        event.preventDefault();
-                        return;
-                    }
-                }
-                // Only handle if no other element has already handled the event
-                if (!event.defaultPrevented) {
-                    event.preventDefault();
-                    clearDatasetActionSelections();
-                    PopupActions.close();
-                }
-            }
-        };
-
-        // Add event listener when popup is active
-        if (activePopupType) {
-            // Use capture phase to ensure we handle the event early
-            window.addEventListener('keydown', handleKeyDown, true);
+    useEscapeToClose(() => {
+        if (activePopupType === PopupWindowType.MODEL_INSPECTOR) {
+            const inspectorEscape = new Event(MODEL_INSPECTOR_ESCAPE_EVENT, {cancelable: true});
+            window.dispatchEvent(inspectorEscape);
+            if (inspectorEscape.defaultPrevented) return;
         }
-
-        // Cleanup event listener
-        return () => {
-            window.removeEventListener('keydown', handleKeyDown, true);
-        };
-    }, [activePopupType]);
+        clearDatasetActionSelections();
+        PopupActions.close();
+    }, Boolean(activePopupType));
 
     const popupComponents: Partial<Record<PopupWindowType, () => any>> = {
         [PopupWindowType.LOAD_LABEL_NAMES]: () => <LoadLabelsPopup />,
@@ -135,7 +114,12 @@ const PopupView: React.FC<IProps> = (
     };
 
     return (
-        activePopupType && <div className='PopupView'>
+        activePopupType && <div className='PopupView' onMouseDown={event => {
+            const target = event.target as HTMLElement;
+            if (target !== event.currentTarget && !target.hasAttribute('data-popup-backdrop')) return;
+            clearDatasetActionSelections();
+            PopupActions.close();
+        }}>
             {selectPopup()}
         </div>
     );

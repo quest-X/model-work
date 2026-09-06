@@ -160,7 +160,7 @@ describe('AgentSideChat', () => {
         expect(dialog).not.toHaveClass('expanded');
         expect(await screen.findByText(/Qwen3-Coder · 正常/)).toBeInTheDocument();
         expect(Array.from(dialog.querySelectorAll('.AgentSideChatWindowControl')).map(button => button.getAttribute('aria-label')))
-            .toEqual(['扩大 Agent 对话', '最小化 Agent 对话', '关闭 Agent 对话']);
+            .toEqual(['扩大 Agent 对话', '最小化 Agent 对话']);
         expect(screen.getByRole('button', {name: '扩大 Agent 对话'})).toHaveTextContent('↗');
 
         fireEvent.click(screen.getByRole('button', {name: '最小化 Agent 对话'}));
@@ -221,12 +221,15 @@ describe('AgentSideChat', () => {
             {error: 'LLM unavailable'},
         ));
 
-        fireEvent.click(screen.getByRole('button', {name: '关闭 Agent 对话'}));
+        expect(screen.queryByRole('button', {name: '关闭 Agent 对话'})).not.toBeInTheDocument();
+        fireEvent.keyDown(window, {key: 'Escape'});
         expect(screen.queryByRole('dialog', {name: 'Agent 对话'})).not.toBeInTheDocument();
         expect(document.body).not.toHaveClass('AgentChatOpen');
         act(() => window.dispatchEvent(new Event(AGENT_CHAT_TOGGLE_EVENT)));
         expect(await screen.findByText('有什么需要处理？')).toBeInTheDocument();
         expect(screen.queryByText(/当前有 2 个运行任务。/)).not.toBeInTheDocument();
+        fireEvent.mouseDown(document.body);
+        expect(screen.queryByRole('dialog', {name: 'Agent 对话'})).not.toBeInTheDocument();
         embeddedHost.remove();
     });
 
@@ -381,7 +384,7 @@ describe('AgentSideChat', () => {
         await waitFor(() => expect(send).toHaveBeenCalledWith('继续检查', 'conversation-old', 'trace-1'));
         await screen.findByText(/继续检查完成/);
 
-        fireEvent.click(newConversationButton);
+        fireEvent.click(screen.getByRole('button', {name: '新对话'}));
         expect(screen.getByText('有什么需要处理？')).toBeInTheDocument();
         expect(screen.queryByText('检查节点')).not.toBeInTheDocument();
     });

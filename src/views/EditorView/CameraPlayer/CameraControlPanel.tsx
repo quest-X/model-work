@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Language} from '../../../data/LanguageConfig';
 import {
     CameraPreviewAutoAction,
@@ -8,6 +8,7 @@ import {
     CameraPreviewState,
 } from '../../../services/CameraPreviewService';
 import './CameraControlPanel.scss';
+import {useEscapeToClose} from '../../../hooks/useEscapeToClose';
 
 interface IProps {
     resourceId: string;
@@ -55,6 +56,19 @@ const CameraControlPanel: React.FC<IProps> = ({
     } | null>(null);
     const [error, setError] = useState('');
     const [message, setMessage] = useState('');
+    const panelRef = useRef<HTMLElement>(null);
+    const closePanel = () => {
+        if (!saving) onClose();
+    };
+    useEscapeToClose(closePanel, true, 20);
+
+    useEffect(() => {
+        const closeOutside = (event: MouseEvent) => {
+            if (!panelRef.current?.contains(event.target as Node)) closePanel();
+        };
+        document.addEventListener('mousedown', closeOutside);
+        return () => document.removeEventListener('mousedown', closeOutside);
+    }, [saving]);
 
     useEffect(() => {
         let active = true;
@@ -215,7 +229,7 @@ const CameraControlPanel: React.FC<IProps> = ({
                 ? (chinese ? '正在分析高亮与暗部…' : 'Analyzing software WDR…')
                 : (chinese ? '正在判断日夜场景…' : 'Detecting day/night scene…');
 
-    return <aside className='CameraControlPanel CameraPreviewControlPanel' id='camera-smart-controls'>
+    return <aside ref={panelRef} className='CameraControlPanel CameraPreviewControlPanel' id='camera-smart-controls'>
         <div className='CameraControlTitle'>
             <div>
                 <div className='CameraControlTitleHeading'>
@@ -228,7 +242,6 @@ const CameraControlPanel: React.FC<IProps> = ({
                     ? '调参先预览于 1012，确认后可应用到物理相机'
                     : 'Preview adjustments on 1012, then apply them to the physical camera'}</span>
             </div>
-            <button type='button' disabled={saving} onClick={onClose} aria-label={chinese ? '关闭相机控制' : 'Close camera controls'}>×</button>
         </div>
 
         {loading && <div className='CameraControlLoading'><span/>{chinese ? '正在读取预览方案…' : 'Reading preview preset…'}</div>}

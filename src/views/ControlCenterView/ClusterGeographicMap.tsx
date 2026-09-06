@@ -9,7 +9,8 @@ import {
     ComputeClusterNode,
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
-    computeNodeNormal,
+    computeNodeState,
+    aggregateCommunicationStates,
 } from '../../services/ComputeClusterService';
 
 type MapLevel = 'world' | 'china' | 'province';
@@ -76,7 +77,7 @@ const prefectureMatches = (
     .filter((value): value is string => Boolean(value)));
 
 const mapNodeTone = (node: ComputeClusterNode): MapMarkerTone =>
-    !node.online ? 'offline' : computeNodeNormal(node) ? 'healthy' : 'warning';
+    computeNodeState(node) === 'abnormal' ? 'offline' : computeNodeState(node) === 'normal' ? 'healthy' : 'warning';
 
 const mapStatusCounts = (markerNodes: ComputeClusterNode[]): MapStatusCounts => markerNodes.reduce(
     (counts, node) => ({...counts, [mapNodeTone(node)]: counts[mapNodeTone(node)] + 1}),
@@ -134,9 +135,8 @@ export const ClusterGeographicMap: React.FC<ClusterGeographicMapProps> = ({graph
         return `${markerNodes.length}/${childCount}`;
     };
     const markerTone = (markerNodes: ComputeClusterNode[]): MapMarkerTone => {
-        const counts = mapStatusCounts(markerNodes);
-        return (['offline', 'warning', 'healthy'] as const)
-            .reduce((most, tone) => counts[tone] > counts[most] ? tone : most);
+        const state = aggregateCommunicationStates(markerNodes.map(computeNodeState));
+        return state === 'normal' ? 'healthy' : state === 'abnormal' ? 'offline' : 'warning';
     };
     const markerStatusLabel = (markerNodes: ComputeClusterNode[]): string => {
         const counts = mapStatusCounts(markerNodes);

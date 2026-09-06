@@ -7,6 +7,7 @@ import {
 } from '../../../services/ComputeClusterService';
 import {QueueDataSyncStatus, QueueItemStatus, QueueItemType} from '../../../store/queue/types';
 import CameraPlayer from '../../EditorView/CameraPlayer/CameraPlayer';
+import {useEscapeToClose} from '../../../hooks/useEscapeToClose';
 import '../DeviceManagementPopup/DeviceManagementPopup.scss';
 
 interface IProps {
@@ -21,6 +22,7 @@ export const CameraLiveViewPopup: React.FC<IProps> = ({
     language, node, cameras, initialCameraId, onClose,
 }) => {
     const zh = language === Language.CHINESE;
+    useEscapeToClose(onClose, true, 20);
     const [selectedId, setSelectedId] = useState(initialCameraId);
     const selected = cameras.find(camera => camera.device_id === selectedId) || cameras[0];
 
@@ -37,9 +39,6 @@ export const CameraLiveViewPopup: React.FC<IProps> = ({
             role='dialog'
             aria-modal='true'
             aria-label={zh ? '相机实时画面' : 'Camera live view'}
-            onKeyDown={event => {
-                if (event.key === 'Escape') onClose();
-            }}
         >
             <header className='DeviceManagementHeader'>
                 <div>
@@ -47,12 +46,6 @@ export const CameraLiveViewPopup: React.FC<IProps> = ({
                     <h2>{zh ? '相机设备' : 'Camera devices'}</h2>
                     <p>{zh ? '左侧选择设备，右侧查看实时画面' : 'Choose a device on the left and view its live stream on the right'}</p>
                 </div>
-                <button
-                    type='button'
-                    className='DeviceManagementClose'
-                    aria-label={zh ? '关闭相机实时画面' : 'Close camera live view'}
-                    onClick={onClose}
-                ><svg viewBox='0 0 12 12' aria-hidden='true'><path d='m3 3 6 6m0-6-6 6'/></svg></button>
             </header>
 
             <div className='DeviceManagementWorkspace'>
@@ -72,7 +65,7 @@ export const CameraLiveViewPopup: React.FC<IProps> = ({
                             onClick={() => setSelectedId(camera.device_id)}
                         >
                             <span>{camera.name}</span>
-                            <strong>{available ? (zh ? '正常' : 'Normal') : (zh ? '故障' : 'Fault')}</strong>
+                            <span className={`DeviceManagementStatus ${available ? 'normal' : 'fault'}`}><i/> {available ? (zh ? '正常' : 'Normal') : (zh ? '故障' : 'Fault')}</span>
                             <small>{camera.model || camera.device_id} · {camera.channels} {zh ? '通道' : 'channels'}</small>
                         </button>;
                     })}

@@ -3,13 +3,15 @@ import {
     ComputeClusterNode,
     ComputeResourceGraph,
     ComputeResourceGraphEntity,
-    computeNodeNormal,
+    computeNodeState,
+    aggregateCommunicationStates,
 } from '../../../services/ComputeClusterService';
 
 interface ResourceKnowledgeGraphProps {
     graph: ComputeResourceGraph;
     nodes: ComputeClusterNode[];
     zh: boolean;
+    fitWindow?: boolean;
     selectedTaskType?: string;
     onSelectWorkAgent: (
         agent: ComputeResourceGraphEntity,
@@ -260,6 +262,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     graph,
     nodes: clusterNodes,
     zh,
+    fitWindow = false,
 }) => {
     const [hoveredEntityId, setHoveredEntityId] = useState<string | null>(null);
     const [pinnedEntityId, setPinnedEntityId] = useState<string | null>(null);
@@ -302,13 +305,9 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
     );
     const nodeTones = new Map(graphNodes.map(entity => {
         const node = entity.node_id ? nodeIndex.get(entity.node_id) : undefined;
-        return [entity.entity_id, !node?.online ? 'offline' : computeNodeNormal(node) ? 'online' : 'warning'];
+        return [entity.entity_id, computeNodeState(node) === 'abnormal' ? 'offline' : computeNodeState(node) === 'normal' ? 'online' : 'warning'];
     }));
     const nodeToneCounts = [...nodeTones.values()];
-    const sshReachableNodes = graphNodes.filter(entity => {
-        const node = entity.node_id ? nodeIndex.get(entity.node_id) : undefined;
-        return node?.online && node.network.ssh_available;
-    }).length;
     const inspectedEntityId = pinnedEntityId || hoveredEntityId;
     const inspectedEntity = inspectedEntityId ? index.get(inspectedEntityId) : undefined;
     const inspectedPoint = inspectedEntityId ? points.get(inspectedEntityId) : undefined;
@@ -348,15 +347,14 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                     ? '计算群按地域归组主节点，主节点连接边缘计算设备，边缘设备再连接对应摄像头。'
                     : 'The cluster groups main nodes by region, then links them to edge devices and each edge device to its cameras.'}</p>
             </div>
-            <div className='ComputeKnowledgeStats'>
-                <div><strong>{topology.regions.length}</strong><span>{zh ? '地域' : 'regions'}</span></div>
-                <div><strong>{graphNodes.length}</strong><span>{zh ? '主节点' : 'main nodes'}</span></div>
+            <div className='ComputeKnowledgeStats graph-summary'>
+                <div className='edge-devices'><strong>{edgeDevices.length}</strong><span>{zh ? '边缘计算设备' : 'Edge devices'}</span></div>
+                <div className='cameras'><strong>{sensors.length}</strong><span>{zh ? '摄像头' : 'Cameras'}</span></div>
+                <div><strong>{visibleEntities.length}</strong><span>{zh ? '总数' : 'Total'}</span></div>
+                <div><strong>{graphNodes.length}</strong><span>{zh ? '主节点' : 'Main nodes'}</span></div>
                 <div className='online'><strong>{nodeToneCounts.filter(tone => tone === 'online').length}</strong><span>{zh ? '正常' : 'Normal'}</span></div>
                 <div className='warning'><strong>{nodeToneCounts.filter(tone => tone === 'warning').length}</strong><span>{zh ? '故障' : 'Fault'}</span></div>
                 <div className='offline'><strong>{nodeToneCounts.filter(tone => tone === 'offline').length}</strong><span>{zh ? '异常' : 'Abnormal'}</span></div>
-                <div><strong>{sshReachableNodes}</strong><span>{zh ? 'SSH 正常' : 'SSH Normal'}</span></div>
-                <div><strong>{edgeDevices.length}</strong><span>{zh ? '边缘设备' : 'edge devices'}</span></div>
-                <div><strong>{sensors.length}</strong><span>{zh ? '摄像头' : 'cameras'}</span></div>
             </div>
         </div>
 
@@ -367,11 +365,15 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
             <span><i className='entity-shape rounded-rectangle sensor'/>{zh ? '摄像头' : 'Camera'}</span>
         </div>
 
-        <div className='ComputeGraphViewport'>
+        <div className={`ComputeGraphViewport${fitWindow ? ' fit-window' : ''}`}>
+            <div className='ComputeGraphFit'>
             <div
                 className='ComputeGraphScene operations-only'
                 data-layout='radial'
-                style={{minWidth: topology.minWidth, minHeight: topology.minHeight}}
+                style={{
+                    minWidth: fitWindow ? 0 : topology.minWidth,
+                    minHeight: fitWindow ? 0 : topology.minHeight,
+                }}
                 role='figure'
                 aria-label={zh ? '主节点、边缘设备与摄像头关系图' : 'Main node, edge device, and camera graph'}
                 onClick={event => {
@@ -379,16 +381,18 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                     if (!target.closest('[data-testid="resource-graph-node"]')) setPinnedEntityId(null);
                 }}
             >
-                {topology.regions.map(region => <div
-                    key={region.entityId}
-                    className={`ComputeGraphRegion state-${region.state}`}
-                    style={{left: `${region.left}%`, width: `${region.width}%`}}
-                    data-testid='resource-graph-region'
-                >
-                    <span>{zh ? '地域' : 'Region'}</span>
-                    <strong>{zh ? region.regionName : region.regionId}</strong>
-                    <small>{region.nodeIds.filter(id => nodeTones.get(id) === 'online').length}/{region.nodeIds.length} {zh ? '正常节点' : 'Normal nodes'}</small>
-                </div>)}
+                <div className='ComputeGraphRegions'>
+                    {topology.regions.map(region => <div
+                        key={region.entityId}
+                        className={`ComputeGraphRegion state-${aggregateCommunicationStates(region.nodeIds.map(id => nodeTones.get(id) === 'online' ? 'normal' : nodeTones.get(id) === 'offline' ? 'abnormal' : 'fault'))}`}
+                        style={{flexGrow: region.width}}
+                        data-testid='resource-graph-region'
+                    >
+                        <span>{zh ? '地域' : 'Region'}</span>
+                        <strong>{zh ? region.regionName : region.regionId}</strong>
+                        <small>{region.nodeIds.filter(id => nodeTones.get(id) === 'online').length}/{region.nodeIds.length} {zh ? '正常节点' : 'Normal nodes'}</small>
+                    </div>)}
+                </div>
                 <svg className='ComputeGraphEdges' viewBox='0 0 1000 440' preserveAspectRatio='none' data-testid='resource-node-link-graph' aria-hidden='true'>
                     {visibleRelations.map(relation => {
                         const source = points.get(relation.source_id);
@@ -530,6 +534,7 @@ export const ResourceKnowledgeGraph: React.FC<ResourceKnowledgeGraphProps> = ({
                         </div>
                     </>}
                 </aside>}
+            </div>
             </div>
         </div>
     </section>;

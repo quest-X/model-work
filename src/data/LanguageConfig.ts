@@ -15,9 +15,9 @@ export interface LanguageTexts {
         role: string;
         uploadAvatar: string;
         avatarUploadError: string;
+        personalCenter: string;
         switchToControlPlatform: string;
         switchToAnnotationPlatform: string;
-        changePassword: string;
         signOut: string;
     };
     
@@ -525,9 +525,9 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
             role: '管理员账户',
             uploadAvatar: '上传头像',
             avatarUploadError: '请选择不超过 2 MB 的 JPG、PNG 或 WebP 图片',
-            switchToControlPlatform: '切换到控制后台',
-            switchToAnnotationPlatform: '切换到标注平台',
-            changePassword: '修改密码',
+            personalCenter: '个人中心',
+            switchToControlPlatform: '切换到管理平台',
+            switchToAnnotationPlatform: '切换到生产平台',
             signOut: '退出登录',
         },
         
@@ -1031,9 +1031,9 @@ export const LanguageConfig: Record<Language, LanguageTexts> = {
             role: 'Administrator account',
             uploadAvatar: 'Upload avatar',
             avatarUploadError: 'Choose a JPG, PNG, or WebP image up to 2 MB',
-            switchToControlPlatform: 'Switch to Control Center',
-            switchToAnnotationPlatform: 'Switch to Annotation Platform',
-            changePassword: 'Change password',
+            personalCenter: 'Account center',
+            switchToControlPlatform: 'Switch to Management Platform',
+            switchToAnnotationPlatform: 'Switch to Production Platform',
             signOut: 'Sign out',
         },
         

@@ -21,6 +21,31 @@ const node = {
 describe('DeviceManagementPopup remote camera management', () => {
     afterEach(() => jest.restoreAllMocks());
 
+    it('closes from outside or Escape without rendering an X button', () => {
+        const onClose = jest.fn();
+        const {container} = render(<DeviceManagementPopup
+            language={Language.CHINESE}
+            node={node}
+            cameras={[]}
+            edgeDevices={[]}
+            initialTab='camera'
+            onClose={onClose}
+            onAddCamera={jest.fn()}
+            onDiscoverEdge={jest.fn()}
+            onOpenCamera={jest.fn()}
+            onOpenEdgeDevice={jest.fn()}
+            onCamerasChanged={jest.fn()}
+        />);
+
+        expect(screen.queryByRole('button', {name: '关闭设备管理'})).not.toBeInTheDocument();
+        fireEvent.mouseDown(screen.getByRole('dialog', {name: '设备管理'}));
+        expect(onClose).not.toHaveBeenCalled();
+        fireEvent.mouseDown(container.querySelector('.DeviceManagementBackdrop') as HTMLElement);
+        expect(onClose).toHaveBeenCalledTimes(1);
+        fireEvent.keyDown(window, {key: 'Escape'});
+        expect(onClose).toHaveBeenCalledTimes(2);
+    });
+
     it('edits and deletes through the owning node', async () => {
         const update = jest.spyOn(ComputeClusterService, 'updateCameraResource').mockResolvedValue({} as never);
         const remove = jest.spyOn(ComputeClusterService, 'deleteCameraResource').mockResolvedValue();

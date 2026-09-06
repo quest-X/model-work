@@ -3,6 +3,10 @@ import {
     ComputeClusterService,
     ComputeTask,
     computeSshAvailability,
+    computeNodeState,
+    computeLinkStates,
+    aggregateCommunicationStates,
+    computeNodeLabel,
 } from '../ComputeClusterService';
 
 const task = {
@@ -210,5 +214,42 @@ describe('computeSshAvailability', () => {
     it('falls back to the v0.9.1 control route when split SSH fields are absent', () => {
         expect(computeSshAvailability(node('lan'))).toEqual({lan: true, tailscale: true});
         expect(computeSshAvailability(node('tailscale'))).toEqual({lan: false, tailscale: true});
+    });
+});
+
+describe('node communication state', () => {
+    const node = (online = true): ComputeClusterNode => ({
+        online,
+        network: {online: false, lan_ssh_available: true, tailscale_ssh_available: false},
+        network_dependencies: [{dependency_id: 'control_ssh', state: 'healthy'}],
+        device_inventory: {state: 'unavailable', devices: [{status: 'offline'}]},
+    } as ComputeClusterNode);
+    it('marks mixed paths faulty even though one control route works', () => {
+        expect(computeNodeState(node())).toBe('fault');
+        expect(computeLinkStates(node())).toEqual({lan: 'normal', tailscale: 'abnormal'});
+    });
+    it('treats missing or legacy offline evidence as uncertain', () => {
+        expect(computeNodeState()).toBe('fault');
+        expect(computeNodeState(node(false))).toBe('fault');
+        expect(computeNodeState({...node(), network: {...node().network, error: 'refresh failed'}})).toBe('fault');
+    });
+    it.each([['normal', '正常'], ['fault', '故障'], ['abnormal', '异常']] as const)(
+        'uses authoritative %s state even with cached online flags', (state, label) => {
+            expect(computeNodeLabel({...node(), network: {...node().network, tailscale_ssh_available: true}, communication_state: state}, true)).toBe(label);
+        },
+    );
+});
+
+describe('communication aggregation', () => {
+    it.each([
+        [['normal', 'normal'], 'normal'],
+        [['abnormal', 'abnormal'], 'abnormal'],
+        [['normal', 'abnormal'], 'fault'],
+        [['normal', 'normal', 'abnormal'], 'fault'],
+        [['normal', 'fault'], 'fault'],
+        [['abnormal', 'fault'], 'fault'],
+        [[], 'fault'],
+    ])('aggregates %j as %s without majority voting', (states, expected) => {
+        expect(aggregateCommunicationStates(states as ('normal' | 'fault' | 'abnormal')[])).toBe(expected);
     });
 });

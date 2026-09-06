@@ -10,6 +10,7 @@ import {
     CameraPreviewSettingsUpdate,
 } from '../../../services/CameraPreviewService';
 import './CameraParametersPanel.scss';
+import {useEscapeToClose} from '../../../hooks/useEscapeToClose';
 
 interface IProps {
     resourceId: string;
@@ -374,6 +375,7 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose,
     const [confirmDispatch, setConfirmDispatch] = useState(false);
     const requestTokenRef = useRef(0);
     const pausePollingRef = useRef(false);
+    const panelRef = useRef<HTMLElement>(null);
 
     const refresh = useCallback(async () => {
         const requestToken = ++requestTokenRef.current;
@@ -477,6 +479,15 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose,
     const closePanel = () => {
         if (!saving && !trialAction) onClose();
     };
+    useEscapeToClose(closePanel, true, 20);
+
+    useEffect(() => {
+        const closeOutside = (event: MouseEvent) => {
+            if (!panelRef.current?.contains(event.target as Node)) closePanel();
+        };
+        document.addEventListener('mousedown', closeOutside);
+        return () => document.removeEventListener('mousedown', closeOutside);
+    }, [saving, trialAction]);
 
     const sections = useMemo(
         () => comparison ? rows(comparison, chinese) : [],
@@ -502,7 +513,7 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose,
         ? Array.from(changed).some(item => item.startsWith('connection.'))
         : changed.has(candidate) || Array.from(changed).some(item => item.startsWith(`${candidate}.`)));
 
-    return <aside className='CameraParametersPanel' id='camera-parameters-panel'>
+    return <aside ref={panelRef} className='CameraParametersPanel' id='camera-parameters-panel'>
         <header className='CameraParametersHeader'>
             <div>
                 <strong>{chinese ? '相机参数' : 'Camera parameters'}</strong>
@@ -514,7 +525,6 @@ const CameraParametersPanel: React.FC<IProps> = ({resourceId, language, onClose,
                 <span className={`CameraParametersAutoRefresh${loading ? ' loading' : ''}`} role='status'>
                     <i/>{loading ? (chinese ? '正在刷新' : 'Refreshing') : (chinese ? '自动刷新' : 'Auto refresh')}
                 </span>
-                <button type='button' className='close' disabled={saving || !!trialAction} onClick={closePanel} aria-label={chinese ? '关闭相机参数' : 'Close camera parameters'}>×</button>
             </div>
         </header>
 

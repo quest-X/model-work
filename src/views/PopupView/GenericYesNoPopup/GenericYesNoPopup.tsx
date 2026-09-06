@@ -47,7 +47,7 @@ export const GenericYesNoPopup: React.FC<IProps> = (
     const texts = LanguageConfig[language];
 
     return (
-        <div className='GenericYesNoPopup'>
+        <div className='GenericYesNoPopup' data-popup-surface>
             <div className='Header'>
                 {title}
             </div>

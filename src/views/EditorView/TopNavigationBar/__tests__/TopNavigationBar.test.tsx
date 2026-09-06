@@ -23,6 +23,28 @@ jest.mock('../DropDownMenu/DropDownMenu', () => ({
         return <div data-testid='actions-menu'/>;
     },
 }));
+jest.mock('../../../../services/AccountService', () => {
+    const user = {
+        account_id: '11111111-1111-4111-8111-111111111111',
+        username: 'admin', display_name: '本地管理员', role: 'admin',
+        password_change_required: false, avatar_url: null,
+        approval: {
+            user_id: '11111111-1111-4111-8111-111111111111',
+            user_name: 'admin', user_public_key: `${'A'.repeat(43)}=`,
+        },
+        permissions: ['node.upgrade'],
+    };
+    return {
+        ACCOUNT_SESSION_CHANGED: 'opensight:account-session-changed',
+        currentAccountSession: jest.fn(() => ({user, csrf_token: 'csrf', expires_at: 2_000_000_000})),
+        uploadAccountAvatar: jest.fn(async () => ({...user, avatar_url: '/core_service/account/avatar?v=2'})),
+        accountSessions: jest.fn(async () => ({sessions: []})),
+        accountAudit: jest.fn(async () => ({events: []})),
+        updateAccountProfile: jest.fn(async () => user),
+        changeAccountPassword: jest.fn(async () => undefined),
+        revokeOtherAccountSessions: jest.fn(async () => ({revoked: 0})),
+    };
+});
 
 const queueItem = (id: string, dataSyncStatus: QueueDataSyncStatus): QueueItem => ({
     id,
@@ -218,10 +240,13 @@ describe('TopNavigationBar account preview', () => {
         expect(avatar).toHaveAttribute('aria-expanded', 'true');
         expect(screen.getByRole('menu', {name: '账户菜单'})).toBeInTheDocument();
         expect(screen.getByText('本地管理员')).toBeInTheDocument();
-        const platformSwitch = screen.getByRole('menuitem', {name: '切换到控制后台'});
+        const platformSwitch = screen.getByRole('menuitem', {name: '切换到管理平台'});
         expect(platformSwitch).not.toHaveAttribute('href');
-        expect(screen.getByRole('menuitem', {name: '修改密码'})).toBeInTheDocument();
-        expect(screen.getByRole('menuitem', {name: '退出登录'})).toBeInTheDocument();
+        expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([
+            '切换到管理平台',
+            '个人中心',
+            '退出登录',
+        ]);
 
         fireEvent.click(platformSwitch);
         expect(switchPlatform).toHaveBeenCalledTimes(1);
@@ -234,10 +259,10 @@ describe('TopNavigationBar account preview', () => {
         expect(screen.getByText('项目名称:')).toBeInTheDocument();
         expect(screen.getByText('核心引擎')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', {name: '打开账户菜单'}));
-        expect(screen.getByRole('menuitem', {name: '切换到标注平台'})).toBeInTheDocument();
+        expect(screen.getByRole('menuitem', {name: '切换到生产平台'})).toBeInTheDocument();
     });
 
-    it('uploads and persists an account avatar from the account summary', async () => {
+    it('uploads an account avatar through the authenticated account API', async () => {
         const {container} = renderNavigation([], Language.CHINESE);
         fireEvent.click(screen.getByRole('button', {name: '打开账户菜单'}));
 
@@ -247,8 +272,9 @@ describe('TopNavigationBar account preview', () => {
         });
 
         await waitFor(() => expect(container.querySelector('.AccountAvatarButton img'))
-            .toHaveAttribute('src', expect.stringContaining('data:image/png;base64,')));
-        expect(window.localStorage.getItem('opensight.account.avatar'))
-            .toContain('data:image/png;base64,');
+            .toHaveAttribute('src', '/core_service/account/avatar?v=2'));
+        const accountService = jest.requireMock('../../../../services/AccountService');
+        expect(accountService.uploadAccountAvatar).toHaveBeenCalledWith(expect.any(File));
+        expect(window.localStorage.length).toBe(0);
     });
 });

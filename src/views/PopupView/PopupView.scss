@@ -7,6 +7,13 @@
   margin: 0;
   padding: 0;
   z-index: 1000;
+  background: rgba(0, 0, 0, 0.6);
+
+  // The popup host supplies the backdrop; avoid a second layer on its child.
+  > .ComputeClusterBackdrop,
+  > .model-inspector-backdrop {
+    background: transparent;
+  }
 
   display: flex;
   flex-direction: column;
@@ -14,4 +21,9 @@
   justify-content: center;
   align-items: center;
   align-content: center;
+}
+
+// Portal dialogs provide their own backdrop while they cover a popup.
+body:has(.DatasetImagePreviewBackdrop, .HistoryImagePreviewBackdrop, .HistoryDeleteDialogBackdrop, .AccountCenterBackdrop, .DeviceManagementBackdrop) .PopupView {
+  background: transparent;
 }

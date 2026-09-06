@@ -3,7 +3,7 @@ import {fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {generateKeyPairSync, webcrypto} from 'crypto';
 import {saveAs} from 'file-saver';
 import {ApprovalIdentityPanel} from '../ApprovalIdentityPanel';
-import {clearApprovalIdentity, currentApprovalUser} from '../../../services/ApprovalIdentityService';
+import {clearApprovalIdentity, currentApprovalUser, useAccountApprovalIdentity} from '../../../services/ApprovalIdentityService';
 
 jest.mock('file-saver', () => ({saveAs: jest.fn()}));
 
@@ -13,6 +13,11 @@ describe('approval identity panel', () => {
         jest.clearAllMocks();
         Object.defineProperty(crypto, 'subtle', {configurable: true, value: webcrypto.subtle});
         Object.defineProperty(crypto, 'getRandomValues', {configurable: true, value: webcrypto.getRandomValues.bind(webcrypto)});
+    });
+
+    it('stays hidden for the signed-in account identity', () => {
+        useAccountApprovalIdentity({user_id: '00000000-0000-4000-8000-000000000099', user_name: 'admin', user_public_key: 'A'.repeat(43) + '='});
+        expect(render(<ApprovalIdentityPanel zh={true}/>).container.firstChild).not.toBeVisible();
     });
 
     it('imports a real identity, exports public fields only and removes the page identity', async () => {

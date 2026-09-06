@@ -245,8 +245,8 @@ describe('ControlCenterView', () => {
         expect(offlineTailscale).toBeDisabled();
         expect(offlineSsh).toHaveTextContent('故障');
         expect(offlineTailscale).toHaveTextContent('故障');
-        expect(offlineSsh.querySelector('.ControlStatusDot')).toHaveClass('offline');
-        expect(offlineTailscale.querySelector('.ControlStatusDot')).toHaveClass('offline');
+        expect(offlineSsh.querySelector('.ControlStatusDot')).toHaveClass('warning');
+        expect(offlineTailscale.querySelector('.ControlStatusDot')).toHaveClass('warning');
 
         rerender(<ControlCenterView language={Language.ENGLISH}/>);
         expect(screen.getByText('CPU')).toBeInTheDocument();
@@ -268,7 +268,7 @@ describe('ControlCenterView', () => {
         expect(screen.queryByText('图形处理器')).not.toBeInTheDocument();
     });
 
-    it('marks a node and overview faulty when either SSH path fails', async () => {
+    it('shows a disconnected path as abnormal and mixed paths as faulty', async () => {
         const remoteNode = node('山东节点', true, false, null, 'Windows', 'tailscale');
         remoteNode.network.lan_ssh_available = false;
         remoteNode.network.tailscale_ssh_available = true;
@@ -277,7 +277,7 @@ describe('ControlCenterView', () => {
 
         const lan = await screen.findByRole('button', {name: /SSH 局域网/});
         const remote = screen.getByRole('button', {name: /Tailscale 远程/});
-        expect(lan).toHaveTextContent('故障');
+        expect(lan).toHaveTextContent('异常');
         expect(lan.querySelector('.ControlStatusDot')).toHaveClass('offline');
         expect(remote).toHaveTextContent('正常');
         expect(remote.querySelector('.ControlStatusDot')).toHaveClass('healthy');
@@ -286,7 +286,7 @@ describe('ControlCenterView', () => {
         expect(machineState).toHaveTextContent('故障');
         expect(machineState).toHaveClass('warning');
         expect(screen.getByRole('button', {name: /总览/}).querySelector('.ControlMachineState'))
-            .toHaveClass('offline');
+            .toHaveClass('warning');
     });
 
     it('does not guess a version when the node reports unknown', async () => {
@@ -300,11 +300,11 @@ describe('ControlCenterView', () => {
         expect(within(information).queryByText('unknown')).not.toBeInTheDocument();
     });
 
-    it('marks an online node faulty until every machine-level fault is repaired', async () => {
+    it('recovers an uncertain node when bidirectional communication returns', async () => {
         const faultyNode = node('异常节点', true);
         faultyNode.network.lan_ssh_available = false;
         faultyNode.network.tailscale_ssh_available = false;
-        faultyNode.network_dependencies[0].state = 'unavailable';
+        faultyNode.communication_state = 'fault';
         const repairedNode = node('异常节点', true);
         repairedNode.network_dependencies.push({
             dependency_id: 'public_http',
@@ -575,7 +575,7 @@ describe('ControlCenterView', () => {
         expect(ComputeClusterService.tasks).toHaveBeenCalled();
         expect(AgentChatService.conversation).toHaveBeenCalledWith('conversation-1');
 
-        fireEvent.click(within(monitor).getByRole('button', {name: '关闭资源监视器'}));
+        fireEvent.mouseDown(monitor.closest('.ControlResourceMonitorBackdrop') as HTMLElement);
         expect(screen.queryByRole('dialog', {name: '节点甲 资源监视器'})).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', {name: /节点乙/}));
@@ -680,7 +680,7 @@ describe('ControlCenterView', () => {
 
         await screen.findByRole('heading', {name: '在线节点'});
         const tags = screen.getByLabelText('节点标签');
-        expect(within(tags).getByText('地域(上海市)')).toBeInTheDocument();
+        expect(within(tags).getByText('地域 (上海市)')).toBeInTheDocument();
         expect(within(tags).getByText('作业区(办公室)')).toBeInTheDocument();
         expect(within(tags).queryByText('宝山区')).not.toBeInTheDocument();
         expect(tags.children).toHaveLength(2);
@@ -714,6 +714,7 @@ describe('ControlCenterView', () => {
         Object.defineProperty(global, 'fetch', {configurable: true, writable: true, value: districtFetch});
         const onlineNode = node('在线节点', true);
         onlineNode.network.lan_ssh_available = false;
+        onlineNode.communication_state = 'fault';
         onlineNode.labels = {
             region: '310000',
             region_name: '上海市',
@@ -724,8 +725,10 @@ describe('ControlCenterView', () => {
         };
         const backupNode = node('上海备用节点', true);
         backupNode.network.lan_ssh_available = false;
+        backupNode.communication_state = 'fault';
         backupNode.labels = {...onlineNode.labels};
         const rizhaoNode = node('日照节点', false);
+        rizhaoNode.communication_state = 'abnormal';
         rizhaoNode.labels = {
             region: '370000',
             region_name: '山东省',
@@ -835,6 +838,7 @@ describe('ControlCenterView', () => {
         expect(screen.queryByRole('button', {name: '刷新机器状态'})).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', {name: '图谱'}));
         const graphPanel = screen.getByRole('region', {name: '主节点、边缘设备与摄像头拓扑'});
+        expect(graphPanel.querySelector('.ComputeGraphViewport')).toHaveClass('fit-window');
         const graphStats = graphPanel.querySelector('.ComputeKnowledgeStats');
         expect(graphStats?.querySelector('.online')).toHaveTextContent('0正常');
         expect(graphStats?.querySelector('.warning')).toHaveTextContent('2故障');
@@ -887,6 +891,7 @@ describe('ControlCenterView', () => {
             site: 'shanghai-baoshan-office',
             site_name: '办公室',
         }}));
+        machines[1].communication_state = 'fault';
         machines[1].network.tailscale_ssh_available = false;
         machines[1].network.lan_ssh_available = false;
         const regionGraph = graph(machines[0]);
@@ -945,7 +950,8 @@ describe('ControlCenterView', () => {
             'src',
             expect.stringContaining('/nodes/%E5%9C%A8%E7%BA%BF%E8%8A%82%E7%82%B9-id/cameras/camera-1/mjpeg'),
         );
-        fireEvent.click(within(dialog).getByRole('button', {name: '关闭相机实时画面'}));
+        expect(within(dialog).queryByRole('button', {name: '关闭相机实时画面'})).not.toBeInTheDocument();
+        fireEvent.mouseDown(dialog.closest('.DeviceManagementBackdrop') as HTMLElement);
         expect(screen.queryByRole('dialog', {name: '相机实时画面'})).not.toBeInTheDocument();
     });
 
@@ -1157,7 +1163,9 @@ describe('ControlCenterView', () => {
         await waitFor(() => expect(terminalInput).toHaveBeenCalledWith(
             'terminal-edge-1', 'ssh nvidia@10.168.10.24\r',
         ));
-        fireEvent.click(screen.getByRole('button', {name: '关闭边缘设备终端'}));
+        expect(screen.queryByRole('button', {name: '关闭边缘设备终端'})).not.toBeInTheDocument();
+        fireEvent.keyDown(window, {key: 'Escape'});
+        expect(screen.queryByRole('dialog', {name: '边缘设备终端'})).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', {name: '1 个相关设备'}));
         expect(screen.getByRole('dialog', {name: '设备管理'})).toBeInTheDocument();
@@ -1338,5 +1346,28 @@ describe('ControlCenterView', () => {
         expect(within(list).getByText('中央控制群')).toBeInTheDocument();
         expect(within(list).getByText('factory-a')).toBeInTheDocument();
         expect(within(list).getByText('group-1')).toBeInTheDocument();
+
+        fireEvent.click(within(list).getByRole('button', {name: /中央控制群/}));
+        const members = screen.getByRole('dialog', {name: /群成员/});
+        expect(within(members).getByText('成员身份：中央控制端（Master）')).toBeInTheDocument();
+        expect(within(members).getByText(/当前安装暂时无法查询此群的成员/)).toBeInTheDocument();
+        expect(within(members).queryByText('在线节点')).not.toBeInTheDocument();
+        fireEvent.keyDown(members, {key: 'Escape', code: 'Escape', keyCode: 27});
+
+        fireEvent.click(await within(list).findByRole('button', {name: /factory-a/}));
+        const localMembers = await screen.findByRole('dialog', {name: '群成员'});
+        expect(within(localMembers).getByText('在线节点')).toBeInTheDocument();
+        expect(within(localMembers).getByText('本机')).toBeInTheDocument();
+        expect(within(localMembers).getByText('成员身份：计算节点（Node）')).toBeInTheDocument();
+        expect(within(localMembers).getByText('成员身份：主控制端（Main）')).toBeInTheDocument();
+        expect(within(localMembers).getByText('成员状态：已启用')).toBeInTheDocument();
+        expect(within(localMembers).getAllByText('操作权限：暂不可查询')).toHaveLength(2);
+        expect(within(localMembers).getAllByRole('region').map(region => region.getAttribute('aria-label')))
+            .toEqual(['Master', 'Main', 'Node']);
+        expect(within(within(localMembers).getByRole('region', {name: 'Main'})).getByText('main-250')).toBeInTheDocument();
+        expect(within(within(localMembers).getByRole('region', {name: 'Main'})).queryByText('在线节点')).not.toBeInTheDocument();
+        expect(within(within(localMembers).getByRole('region', {name: 'Node'})).getByText('在线节点')).toBeInTheDocument();
+        fireEvent.click(within(localMembers).getByRole('button', {name: /在线节点/}));
+        expect(await screen.findByRole('heading', {name: '在线节点'})).toBeInTheDocument();
     });
 });

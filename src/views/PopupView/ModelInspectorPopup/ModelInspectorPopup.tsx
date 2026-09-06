@@ -6,7 +6,6 @@ import {Language} from '../../../data/LanguageConfig';
 import {ImageData} from '../../../store/labels/types';
 import {ImageRepository} from '../../../logic/imageRepository/ImageRepository';
 import {EditorModel} from '../../../staticModels/EditorModel';
-import {PopupActions} from '../../../logic/actions/PopupActions';
 import {
     CatalogDetail,
     HeatmapKind,
@@ -117,6 +116,7 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
     const slot: InspectorSlot = activeModelTask === 'segment' ? 'segmentation' : 'detection';
     const [status, setStatus] = useState<InspectorStatus | null>(null);
     const [statusLoading, setStatusLoading] = useState(true);
+    const [maximized, setMaximized] = useState(false);
     const [detail, setDetail] = useState<CatalogDetail>('stages');
     const [catalog, setCatalog] = useState<InspectorLayer[]>([]);
     const [catalogLoading, setCatalogLoading] = useState(false);
@@ -565,8 +565,12 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
         ? t('检测模型', 'Detection model')
         : t('分割模型', 'Segmentation model');
 
-    return <div className='model-inspector-backdrop'>
-        <section className='model-inspector-shell' aria-label={t('模型透视', 'Model Inspector')}>
+    const windowToggleLabel = maximized
+        ? t('还原透视窗口', 'Restore inspector window')
+        : t('放大透视窗口', 'Maximize inspector window');
+
+    return <div className={`model-inspector-backdrop${maximized ? ' maximized' : ''}`} data-popup-backdrop>
+        <section className={`model-inspector-shell${maximized ? ' maximized' : ''}`} aria-label={t('模型透视', 'Model Inspector')} data-popup-surface>
             <header className='mi-header'>
                 <div className='mi-brand'>
                     <span className='mi-brand-mark' aria-hidden='true'><i/><i/><i/></span>
@@ -579,7 +583,14 @@ export const ModelInspectorPopup: React.FC<IProps> = ({language, activeImage, ac
                     <span>{activeImage?.fileData?.name || t('当前帧', 'Current frame')}</span>
                     {session && <><b>{session.model}</b><small>{session.elapsed_ms.toFixed(0)} ms</small></>}
                 </div>
-                <button className='mi-close' onClick={() => PopupActions.close()} aria-label={t('关闭', 'Close')}>×</button>
+                <button
+                    type='button'
+                    className={`mi-window-toggle ${maximized ? 'restore' : 'maximize'}`}
+                    aria-label={windowToggleLabel}
+                    aria-pressed={maximized}
+                    title={windowToggleLabel}
+                    onClick={() => setMaximized(value => !value)}
+                ><i aria-hidden='true'/></button>
             </header>
 
             {statusLoading ? <div className='mi-state-page'><div className='mi-spinner'/><h3>{t('正在连接模型透视插件', 'Connecting to Model Inspector')}</h3></div>

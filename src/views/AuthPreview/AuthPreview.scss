@@ -3,11 +3,11 @@
 .AuthPreview {
   position: relative;
   box-sizing: border-box;
+  display: grid;
+  place-items: center;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  display: grid;
-  place-items: center;
   padding: 32px;
   background:
     linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
@@ -38,6 +38,11 @@
     padding: 24px;
   }
 
+  .AuthPreviewChecking {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 13px;
+  }
+
   .AuthPreviewHeader,
   .AuthPreviewBrand,
   .AuthPreviewDevice {
@@ -45,16 +50,8 @@
     align-items: center;
   }
 
-  .AuthPreviewHeader {
-    justify-content: space-between;
-  }
-
-  .AuthPreviewBrand {
-    gap: 9px;
-    font-size: 16px;
-    font-weight: 700;
-    letter-spacing: 0.01em;
-  }
+  .AuthPreviewHeader { justify-content: space-between; }
+  .AuthPreviewBrand { gap: 9px; font-size: 16px; font-weight: 700; }
 
   .AuthPreviewLogo {
     display: grid;
@@ -64,11 +61,7 @@
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 8px;
     background: #202428;
-
-    img {
-      width: 17px;
-      height: 17px;
-    }
+    img { width: 17px; height: 17px; }
   }
 
   .AuthPreviewEdition {
@@ -85,20 +78,8 @@
 
   .AuthPreviewIntro {
     margin: 40px 0 28px;
-
-    h1 {
-      margin: 12px 0 7px;
-      font-size: 25px;
-      font-weight: 600;
-      letter-spacing: -0.015em;
-    }
-
-    p {
-      margin: 0;
-      color: rgba(255, 255, 255, 0.48);
-      font-size: 13px;
-      line-height: 1.6;
-    }
+    h1 { margin: 12px 0 7px; font-size: 25px; font-weight: 600; letter-spacing: -0.015em; }
+    p { margin: 0; color: rgba(255, 255, 255, 0.48); font-size: 13px; line-height: 1.6; }
   }
 
   .AuthPreviewDevice {
@@ -106,7 +87,6 @@
     color: rgba(255, 255, 255, 0.62);
     font-size: 11px;
     font-weight: 600;
-
     span {
       width: 7px;
       height: 7px;
@@ -119,16 +99,14 @@
   .AuthPreviewForm {
     display: flex;
     flex-direction: column;
-
-    label {
+    > label:not(.AuthPreviewRemember) {
       margin: 0 0 7px;
       color: rgba(255, 255, 255, 0.66);
       font-size: 12px;
       font-weight: 600;
     }
-
-    input[type='text'],
-    input[type='password'] {
+    > input[type='text'],
+    > input[type='password'] {
       box-sizing: border-box;
       width: 100%;
       height: 43px;
@@ -142,93 +120,10 @@
       font: inherit;
       font-size: 13px;
       transition: border-color 0.15s ease, box-shadow 0.15s ease;
-
-      &::placeholder {
-        color: rgba(255, 255, 255, 0.24);
-      }
-
-      &:focus {
-        border-color: rgba(0, 158, 253, 0.68);
-        box-shadow: 0 0 0 3px rgba(0, 158, 253, 0.1);
-      }
+      &::placeholder { color: rgba(255, 255, 255, 0.24); }
+      &:focus { border-color: rgba(0, 158, 253, 0.68); box-shadow: 0 0 0 3px rgba(0, 158, 253, 0.1); }
     }
-
-    .AuthPreviewError {
-      margin: -7px 0 12px;
-      color: #ff7d83;
-      font-size: 11px;
-    }
-
-    .AuthPreviewPreferences {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      margin: -2px 0 8px;
-
-      label {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        box-sizing: border-box;
-        height: 34px;
-        margin: 0;
-        border: 1px solid transparent;
-        border-radius: 8px;
-        background: transparent;
-        padding: 0 10px;
-        color: rgba(255, 255, 255, 0.58);
-        font-size: 11px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: border-color 0.15s ease, background 0.15s ease;
-
-        &:hover {
-          border-color: rgba(255, 255, 255, 0.16);
-          background: rgba(255, 255, 255, 0.04);
-        }
-      }
-
-      input {
-        display: grid;
-        place-items: center;
-        appearance: none;
-        flex: 0 0 auto;
-        width: 13px;
-        height: 13px;
-        margin: 0;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        border-radius: 4px;
-        background: #121517;
-        cursor: pointer;
-
-        &::after {
-          width: 5px;
-          height: 3px;
-          border-bottom: 1.5px solid #fff;
-          border-left: 1.5px solid #fff;
-          content: '';
-          transform: translateY(-1px) rotate(-45deg) scale(0);
-          transition: transform 0.12s ease;
-        }
-
-        &:checked {
-          border-color: #009efd;
-          background: #009efd;
-        }
-
-        &:checked::after {
-          transform: translateY(-1px) rotate(-45deg) scale(1);
-        }
-
-        &:focus-visible {
-          outline: 2px solid rgba(94, 194, 255, 0.75);
-          outline-offset: 2px;
-        }
-      }
-    }
-
-    button {
+    > button {
       height: 43px;
       margin-top: 5px;
       border: 0;
@@ -239,31 +134,29 @@
       font-size: 13px;
       font-weight: 700;
       cursor: pointer;
-      transition: background 0.15s ease, transform 0.15s ease;
-
-      &:hover {
-        background: #ffffff;
-      }
-
-      &:active {
-        transform: translateY(1px);
-      }
-
-      &:focus-visible {
-        outline: 2px solid #5ec2ff;
-        outline-offset: 3px;
-      }
+      &:hover:not(:disabled) { background: #fff; transform: translateY(-1px); }
+      &:disabled { cursor: progress; opacity: 0.65; }
     }
   }
 
+  .AuthPreviewError { margin: -7px 0 12px; color: #ff7d83; font-size: 11px; }
+  .AuthPreviewPreferences {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .AuthPreviewPreferences label, .AuthPreviewRemember {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: -2px 0 12px;
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 11px;
+    cursor: pointer;
+    input { accent-color: #009efd; }
+  }
 }
 
-@media (max-width: 520px) {
-  .AuthPreview {
-    padding: 18px;
-
-    .AuthPreviewCard {
-      padding: 21px;
-    }
-  }
+@media (max-width: 560px) {
+  .AuthPreview { padding: 18px; .AuthPreviewCard { padding: 20px; } .AuthPreviewIntro { margin: 32px 0 24px; } }
 }

@@ -499,12 +499,20 @@ span.ControlMachineIcon {
   display: flex;
   height: 100%;
   flex-direction: column;
+  padding: 24px;
 
   > .ComputeKnowledgePanel {
     display: flex;
     flex: 1;
     flex-direction: column;
+    margin: 0;
   }
+
+  .ComputeKnowledgeHeading,
+  .ComputeKnowledgeLegend,
+  .ComputeGraphViewport { padding: 16px; }
+
+  .ControlGeoMapViewport { margin: 16px; }
 
   .ComputeGraphViewport,
   .ControlGeoMapViewport {
@@ -794,6 +802,7 @@ button.ControlServiceCard {
   cursor: pointer;
 
   &:hover:not(:disabled),
+  &[aria-pressed='true'],
   &:focus-visible {
     border-color: rgba(0, 154, 255, 0.65);
     background: rgba(0, 154, 255, 0.08);
@@ -804,6 +813,41 @@ button.ControlServiceCard {
 }
 
 .ControlRuntimeService { width: 100%; }
+
+.ControlGroupMemberName {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  .ControlGroupLocalBadge {
+    color: #69bfff;
+    background: rgba(0, 154, 255, 0.12);
+    border: 1px solid rgba(0, 154, 255, 0.35);
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 10px;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+}
+
+.ControlGroupSummary {
+  margin: 0 0 24px;
+  color: #eee;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ControlGroupRoleSection {
+  margin-bottom: 24px;
+  h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 16px; }
+  h3 > span { color: #aaa; font-size: 12px; background: #333; padding: 2px 8px; border-radius: 4px; }
+  .ControlServiceGrid:empty { display: none; }
+}
+.ControlGroupRoleNotice { color: #aaa; font-size: 13px; margin: 0 0 16px; }
+
 
 .ControlRuntimeIdentity {
   span,

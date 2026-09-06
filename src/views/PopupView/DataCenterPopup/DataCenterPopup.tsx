@@ -29,6 +29,7 @@ import {
 } from '../../../services/DatasetActionSelection';
 import {PendingImportFiles} from '../../../utils/PendingImportFiles';
 import {CameraResource, CameraResourceService} from '../../../services/CameraResourceService';
+import {useEscapeToClose} from '../../../hooks/useEscapeToClose';
 import './DataCenterPopup.scss';
 
 interface DatasetVersionSummary {
@@ -384,6 +385,7 @@ export const DataCenterPopup: React.FC<IProps> = ({
     const [datasetPreviewError, setDatasetPreviewError] = useState<string | null>(null);
     const [datasetPreviewFailures, setDatasetPreviewFailures] = useState<Set<number>>(new Set());
     const [datasetImagePreview, setDatasetImagePreview] = useState<DatasetImagePreview | null>(null);
+    useEscapeToClose(() => setDatasetImagePreview(null), Boolean(datasetImagePreview), 50);
     const [datasetActionId, setDatasetActionId] = useState<string | null>(null);
     const [datasetActionError, setDatasetActionError] = useState<string | null>(null);
     const [datasetQuery, setDatasetQuery] = useState('');
@@ -745,7 +747,6 @@ export const DataCenterPopup: React.FC<IProps> = ({
     useEffect(() => {
         if (!datasetImagePreview) return undefined;
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') setDatasetImagePreview(null);
             if (event.key === 'ArrowLeft') moveDatasetImagePreview(-1);
             if (event.key === 'ArrowRight') moveDatasetImagePreview(1);
         };
@@ -1906,7 +1907,10 @@ export const DataCenterPopup: React.FC<IProps> = ({
             <div
                 className='DatasetImagePreviewBackdrop'
                 role='presentation'
-                onMouseDown={() => setDatasetImagePreview(null)}
+                onMouseDown={event => {
+                    event.stopPropagation();
+                    setDatasetImagePreview(null);
+                }}
             >
                 <div
                     className='DatasetImagePreviewDialog'
@@ -1915,12 +1919,6 @@ export const DataCenterPopup: React.FC<IProps> = ({
                     aria-label={zh ? '数据集图片预览' : 'Dataset image preview'}
                     onMouseDown={event => event.stopPropagation()}
                 >
-                    <button
-                        type='button'
-                        className='DatasetImagePreviewClose'
-                        aria-label={zh ? '关闭图片预览' : 'Close image preview'}
-                        onClick={() => setDatasetImagePreview(null)}
-                    >×</button>
                     <button
                         type='button'
                         className='DatasetImagePreviewNav previous'

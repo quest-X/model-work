@@ -5,9 +5,10 @@ import {
     ComputeClusterService,
     ComputeLanAsset,
     ComputeManagedDevice,
-    computeNodeNormal,
+    computeNodeState,
 } from '../../../services/ComputeClusterService';
 import './DeviceManagementPopup.scss';
+import {useEscapeToClose} from '../../../hooks/useEscapeToClose';
 
 type DeviceTab = 'camera' | 'edge';
 type DeviceTone = 'normal' | 'fault' | 'abnormal';
@@ -51,7 +52,8 @@ export const DeviceManagementPopup: React.FC<IProps> = (
     },
 ) => {
     const zh = language === Language.CHINESE;
-    const nodeTone: DeviceTone = !node.online ? 'abnormal' : computeNodeNormal(node) ? 'normal' : 'fault';
+    useEscapeToClose(onClose, true, 20);
+    const nodeTone: DeviceTone = computeNodeState(node);
     const [tab, setTab] = useState<DeviceTab>(initialTab);
     const [query, setQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<DeviceStatusFilter>('all');
@@ -160,9 +162,6 @@ export const DeviceManagementPopup: React.FC<IProps> = (
             role='dialog'
             aria-modal='true'
             aria-label={zh ? '设备管理' : 'Device management'}
-            onKeyDown={event => {
-                if (event.key === 'Escape') onClose();
-            }}
         >
             <header className='DeviceManagementHeader'>
                 <div>
@@ -170,12 +169,6 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                     <h2>{node.name}</h2>
                     <p>{zh ? '管理节点的关联设备、连接状态与设备信息' : 'Manage associated devices, connectivity, and device details'}</p>
                 </div>
-                <button
-                    type='button'
-                    className='DeviceManagementClose'
-                    aria-label={zh ? '关闭设备管理' : 'Close device management'}
-                    onClick={onClose}
-                ><svg viewBox='0 0 12 12' aria-hidden='true'><path d='m3 3 6 6m0-6-6 6'/></svg></button>
             </header>
 
             <div className='DeviceManagementWorkspace'>

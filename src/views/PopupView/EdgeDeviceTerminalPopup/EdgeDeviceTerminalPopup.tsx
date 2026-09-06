@@ -2,6 +2,7 @@ import React, {useState} from 'react';
 import {Language} from '../../../data/LanguageConfig';
 import {ComputeLanAsset} from '../../../services/ComputeClusterService';
 import {ComputeTerminalPanel} from '../ComputeClusterPopup/ComputeTerminalPanel';
+import {useEscapeToClose} from '../../../hooks/useEscapeToClose';
 import '../ComputeClusterPopup/ComputeClusterPopup.scss';
 import '../DeviceManagementPopup/DeviceManagementPopup.scss';
 
@@ -19,6 +20,7 @@ export const EdgeDeviceTerminalPopup: React.FC<IProps> = ({
     language, devices, initialDeviceId, onClose,
 }) => {
     const zh = language === Language.CHINESE;
+    useEscapeToClose(onClose, true, 20);
     const [selectedId, setSelectedId] = useState(initialDeviceId);
     const [terminalActive, setTerminalActive] = useState(false);
     const selected = devices.find(device => device.asset_id === selectedId) || devices[0];
@@ -38,9 +40,6 @@ export const EdgeDeviceTerminalPopup: React.FC<IProps> = ({
             role='dialog'
             aria-modal='true'
             aria-label={zh ? '边缘设备终端' : 'Edge device terminal'}
-            onKeyDown={event => {
-                if (event.key === 'Escape') onClose();
-            }}
         >
             <header className='DeviceManagementHeader'>
                 <div>
@@ -48,12 +47,6 @@ export const EdgeDeviceTerminalPopup: React.FC<IProps> = ({
                     <h2>{zh ? '边缘计算设备' : 'Edge computing devices'}</h2>
                     <p>{zh ? '左侧选择设备，右侧连接并使用终端' : 'Choose a device on the left and use its terminal on the right'}</p>
                 </div>
-                <button
-                    type='button'
-                    className='DeviceManagementClose'
-                    aria-label={zh ? '关闭边缘设备终端' : 'Close edge device terminal'}
-                    onClick={onClose}
-                ><svg viewBox='0 0 12 12' aria-hidden='true'><path d='m3 3 6 6m0-6-6 6'/></svg></button>
             </header>
 
             <div className='DeviceManagementWorkspace'>

@@ -7,6 +7,7 @@ import {PopupActions} from '../../../logic/actions/PopupActions';
 import {AppState} from '../../../store';
 import {Language} from '../../../data/LanguageConfig';
 import {getEngineBaseUrl, getExtensionEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
+import {useEscapeToClose} from '../../../hooks/useEscapeToClose';
 import './VectorDbPopup.scss';
 
 type Granularity = 'image' | 'bbox' | 'mask';
@@ -321,6 +322,16 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
     const [expandedJobIds, setExpandedJobIds] = useState<Set<string>>(() => new Set());
     const [jobImages, setJobImages] = useState<Record<string, JobImageState>>({});
     const [imagePreview, setImagePreview] = useState<ImagePreview | null>(null);
+    useEscapeToClose(() => {
+        if (!deleting) setDeleteConfirm(false);
+    }, deleteConfirm, 40);
+    useEscapeToClose(() => {
+        if (deletingJobId) return;
+        setDeleteJobConfirmId(null);
+        setDeleteJobConfirmationText('');
+        setJobDeleteError(null);
+    }, Boolean(deleteJobConfirmId), 40);
+    useEscapeToClose(() => setImagePreview(null), Boolean(imagePreview), 50);
 
     const selected = collections.find(collection => collection.name === selectedName) || null;
     const desiredGranularity = strategyGranularity(ingestStrategy);
@@ -604,7 +615,6 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
     useEffect(() => {
         if (!imagePreview) return undefined;
         const closeOnEscape = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') setImagePreview(null);
             if (event.key === 'ArrowLeft') {
                 event.preventDefault();
                 moveImagePreview(-1);
@@ -617,18 +627,6 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
         window.addEventListener('keydown', closeOnEscape);
         return () => window.removeEventListener('keydown', closeOnEscape);
     }, [imagePreview, moveImagePreview]);
-
-    useEffect(() => {
-        if (!deleteJobConfirmId || deletingJobId) return undefined;
-        const closeOnEscape = (event: KeyboardEvent) => {
-            if (event.key !== 'Escape') return;
-            setDeleteJobConfirmId(null);
-            setDeleteJobConfirmationText('');
-            setJobDeleteError(null);
-        };
-        window.addEventListener('keydown', closeOnEscape);
-        return () => window.removeEventListener('keydown', closeOnEscape);
-    }, [deleteJobConfirmId, deletingJobId]);
 
     const warmup = async () => {
         setWarmingUp(true);
@@ -1318,6 +1316,7 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             className='HistoryDeleteDialogBackdrop'
             role='presentation'
             onMouseDown={event => {
+                event.stopPropagation();
                 if (event.target !== event.currentTarget || deletingJobId) return;
                 closeDeleteHistoryDialog();
             }}
@@ -1335,12 +1334,6 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                             ? t(`删除版本 ${deleteConfirmationToken}`, `Delete version ${deleteConfirmationToken}`)
                             : t(`删除任务 ${deleteConfirmationToken}`, `Delete job ${deleteConfirmationToken}`)}
                     </strong>
-                    <button
-                        type='button'
-                        aria-label={t('关闭删除确认', 'Close delete confirmation')}
-                        disabled={deletingJobId === item.job_id}
-                        onClick={closeDeleteHistoryDialog}
-                    >×</button>
                 </header>
                 <div className='HistoryDeleteDialogBody'>
                     <div className='HistoryDeleteTarget' aria-hidden='true'>
@@ -1586,7 +1579,10 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
             <div
                 className='HistoryImagePreviewBackdrop'
                 role='presentation'
-                onMouseDown={() => setImagePreview(null)}
+                onMouseDown={event => {
+                    event.stopPropagation();
+                    setImagePreview(null);
+                }}
             >
                 <div
                     className='HistoryImagePreviewDialog'
@@ -1595,12 +1591,6 @@ export const VectorDbPopup: React.FC<IProps> = ({language}) => {
                     aria-label={t('入库图片预览', 'Ingest image preview')}
                     onMouseDown={event => event.stopPropagation()}
                 >
-                    <button
-                        type='button'
-                        className='HistoryImagePreviewClose'
-                        aria-label={t('关闭图片预览', 'Close image preview')}
-                        onClick={() => setImagePreview(null)}
-                    >×</button>
                     <button
                         type='button'
                         className='HistoryImagePreviewNav previous'

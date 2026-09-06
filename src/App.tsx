@@ -16,6 +16,7 @@ import { RoboflowAPIDetails } from './store/ai/types';
 import { AutoSaveService } from './services/AutoSaveService';
 import { ProjectRestoreService } from './services/ProjectRestoreService';
 import {IndexedDBManager, RecoveryStorageReadError} from './utils/IndexedDBManager';
+import {currentAccountSession} from './services/AccountService';
 
 interface IProps {
     projectType: ProjectType;
@@ -48,7 +49,9 @@ export const App: React.FC<IProps> = (
     const [restoreError, setRestoreError] = useState<string | null>(null);
     const [restoreStatus, setRestoreStatus] = useState<string>('正在加载...');
     const [storageUnavailable, setStorageUnavailable] = useState(false);
-    const [platformMode, setPlatformMode] = useState<PlatformMode>('control');
+    const [platformMode, setPlatformMode] = useState<PlatformMode>(
+        () => currentAccountSession()?.user.role === 'admin' ? 'control' : 'annotation',
+    );
 
     const beforeOpenAnnotationResource = () => {
         if (storedDataInfo?.hasProject || storageUnavailable) {

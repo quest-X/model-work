@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {connect} from 'react-redux';
+import {Dialog, DialogTitle, DialogContent} from '@mui/material';
 import {Language} from '../../data/LanguageConfig';
 import {Direction} from '../../data/enums/Direction';
 import {PopupWindowType} from '../../data/enums/PopupWindowType';
@@ -9,13 +10,15 @@ import {
     ComputeGroupMembership,
     ComputeLanAsset,
     ComputeManagedDevice,
-    ComputeNetworkDependency,
     ComputeResourceGraph,
     ComputeRuntimeInventory,
     ComputeClusterService,
     cameraStreamingAvailable,
-    computeNodeNormal,
-    computeSshAvailability,
+    computeNodeState,
+    computeLinkStates,
+    communicationStateLabel,
+    aggregateCommunicationStates,
+    computeNodeLabel,
 } from '../../services/ComputeClusterService';
 import {
     AgentChatService,
@@ -32,6 +35,7 @@ import {EdgeDeviceTerminalPopup} from '../PopupView/EdgeDeviceTerminalPopup/Edge
 import {CameraLiveViewPopup} from '../PopupView/CameraLiveViewPopup/CameraLiveViewPopup';
 import {ComputeTerminalPanel} from '../PopupView/ComputeClusterPopup/ComputeTerminalPanel';
 import {ResourceKnowledgeGraph} from '../PopupView/ComputeClusterPopup/ResourceKnowledgeGraph';
+import {useEscapeToClose} from '../../hooks/useEscapeToClose';
 import '../EditorView/EditorContainer/EditorContainer.scss';
 import '../EditorView/EditorTopNavigationBar/EditorTopNavigationBar.scss';
 import '../PopupView/ComputeClusterPopup/ComputeClusterPopup.scss';
@@ -60,7 +64,7 @@ type Workspace = 'node' | 'network' | 'terminal' | 'groups';
 type MachineIconKind = 'jetson' | 'windows' | 'linux' | 'macos' | 'computer';
 type NodeGrouping = 'none' | 'region' | 'platform';
 type NodeOrdering = 'status' | 'activity' | 'name';
-type NodeVisibility = 'all' | 'normal' | 'fault';
+type NodeVisibility = 'all' | 'normal' | 'fault' | 'abnormal';
 type OverviewView = 'map' | 'graph';
 type MonitorView = 'performance' | 'processes' | 'startup' | 'tasks' | 'conversations';
 type ProcessSortKey = 'name' | 'pid' | 'cpu' | 'memory' | 'state';
@@ -300,22 +304,9 @@ const regionDisplayName = (name: string, zh: boolean): string => zh
     ? (REGION_DISPLAY_NAMES[name] || name)
     : name;
 
-const dependency = (
-    node: ComputeClusterNode,
-    id: ComputeNetworkDependency['dependency_id'],
-): ComputeNetworkDependency['state'] => node.network_dependencies.find(item => item.dependency_id === id)?.state || 'unknown';
-
-const dependencyTone = (state: ComputeNetworkDependency['state']): Tone => state === 'healthy'
-    ? 'healthy'
-    : 'offline';
-
-const dependencyLabel = (state: ComputeNetworkDependency['state'], zh: boolean): string =>
-    toneLabel(dependencyTone(state), zh);
-
-const machineTone = (node: ComputeClusterNode): Tone => {
-    if (!node.online) return 'offline';
-    return computeNodeNormal(node) ? 'healthy' : 'warning';
-};
+const communicationTone = (state: 'normal' | 'fault' | 'abnormal'): Tone =>
+    state === 'normal' ? 'healthy' : state === 'abnormal' ? 'offline' : 'warning';
+const machineTone = (node: ComputeClusterNode): Tone => communicationTone(computeNodeState(node));
 
 const cameraTone = (status: ComputeManagedDevice['status']): Tone =>
     status === 'registered' || status === 'online' ? 'healthy' : 'offline';
@@ -379,6 +370,7 @@ export const ControlCenterView: React.FC<IProps> = ({
     const [terminalTransport, setTerminalTransport] = useState<'lan' | 'tailscale'>();
     const [nodes, setNodes] = useState<ComputeClusterNode[]>([]);
     const [groupMemberships, setGroupMemberships] = useState<ComputeGroupMembership[]>([]);
+    const [selectedGroupId, setSelectedGroupId] = useState('');
     const [lanAssets, setLanAssets] = useState<ComputeLanAsset[]>([]);
     const [resourceGraph, setResourceGraph] = useState<ComputeResourceGraph | null>(null);
     const [selectedNodeId, setSelectedNodeId] = useState('');
@@ -390,6 +382,7 @@ export const ControlCenterView: React.FC<IProps> = ({
     const [runtimeInventoryError, setRuntimeInventoryError] = useState('');
     const [dismissedRefreshWarningKey, setDismissedRefreshWarningKey] = useState('');
     const [inspectedServiceId, setInspectedServiceId] = useState('');
+    useEscapeToClose(() => setInspectedServiceId(''), Boolean(inspectedServiceId), 20);
     const [monitorMaximized, setMonitorMaximized] = useState(false);
     const [monitorView, setMonitorView] = useState<MonitorView>('performance');
     const [deviceManagementTab, setDeviceManagementTab] = useState<'camera' | 'edge' | null>(null);
@@ -567,16 +560,15 @@ export const ControlCenterView: React.FC<IProps> = ({
     const organizedNodes = useMemo(() => {
         const visible = nodes.filter(node => {
             if (nodeVisibility === 'all') return true;
-            const tone = machineTone(node);
-            if (nodeVisibility === 'normal') return tone === 'healthy';
-            return tone !== 'healthy';
+            return computeNodeState(node) === nodeVisibility;
         });
         visible.sort((left, right) => {
             if (nodeOrdering === 'activity') {
                 return left.heartbeat_age_seconds - right.heartbeat_age_seconds || left.name.localeCompare(right.name);
             }
             if (nodeOrdering === 'name') return left.name.localeCompare(right.name);
-            return Number(right.online) - Number(left.online) || left.name.localeCompare(right.name);
+            const rank = {normal: 0, fault: 1, abnormal: 2};
+            return rank[computeNodeState(left)] - rank[computeNodeState(right)] || left.name.localeCompare(right.name);
         });
         if (nodeGrouping === 'none') return [['', visible] as [string, ComputeClusterNode[]]];
         const groups = new Map<string, ComputeClusterNode[]>();
@@ -610,8 +602,15 @@ export const ControlCenterView: React.FC<IProps> = ({
             credential_types: [],
         }] : [];
     const currentGroupTone: Tone = currentGroup?.state === 'available' ? 'healthy' : 'offline';
+    const selectedGroup = visibleGroups.find(group => group.group_id === selectedGroupId);
+    // Membership scope is derived from the signed owner identity/trust role.
+    const groupControllerRole = selectedGroup?.owner_name
+        && selectedGroup.credential_types.some(type => type === 'owner_identity' || type === 'owner_trust')
+        ? selectedGroup.scope === 'central' ? 'Master' : 'Main'
+        : null;
+    const groupMembersAvailable = selectedGroup?.group_id === resourceGraph?.group_id && !error && !graphError;
     const normalCount = nodes.filter(node => machineTone(node) === 'healthy').length;
-    const allNodesNormal = nodes.length > 0 && normalCount === nodes.length;
+    const overviewTone = communicationTone(aggregateCommunicationStates(nodes.map(computeNodeState)));
     const terminalAvailable = Boolean(selectedNode?.online && selectedNode.network.ssh_available);
     const toolbarTone: Tone | null = workspace === 'groups'
         ? visibleGroups.length ? currentGroupTone : null
@@ -621,7 +620,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                 ? (terminalAvailable ? 'healthy' : 'offline')
                 : selectedNode
                     ? machineTone(selectedNode)
-                    : nodes.length ? (allNodesNormal ? 'healthy' : 'offline') : null;
+                    : nodes.length ? overviewTone : null;
     const refreshWarningKey = error ? `nodes:${error}` : graphError ? `graph:${graphError}` : '';
 
     useEffect(() => {
@@ -904,6 +903,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                 <option value='all'>{zh ? '所有状态' : 'All states'}</option>
                 <option value='normal'>{zh ? '仅正常' : 'Normal only'}</option>
                 <option value='fault'>{zh ? '仅故障' : 'Fault only'}</option>
+                <option value='abnormal'>{zh ? '仅异常' : 'Abnormal only'}</option>
             </select>
         </div>
         <div className='ControlMachineList'>
@@ -921,7 +921,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                     <strong>{zh ? '总览' : 'Overview'}</strong>
                     <small>{zh ? '地图 / 图谱' : 'Map / graph'}</small>
                 </span>
-                <span className={`ControlMachineState ${allNodesNormal ? 'healthy' : 'offline'}`}>
+                <span className={`ControlMachineState ${overviewTone}`}>
                     {normalCount} / {nodes.length}
                 </span>
             </button>
@@ -949,7 +949,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                             <small>{zh ? '活跃于 ' : 'Active '}{lastSeen(node.heartbeat_age_seconds, zh)}</small>
                         </span>
                         <span className={`ControlMachineState ${tone}`}>
-                            {toneLabel(tone, zh)}
+                            {computeNodeLabel(node, zh)}
                         </span>
                     </button>;
                 })}
@@ -1047,8 +1047,8 @@ export const ControlCenterView: React.FC<IProps> = ({
 
     // eslint-disable-next-line complexity
     const renderResourceMonitorCard = () => {
-        const monitorTone = selectedNode?.online ? 'healthy' : 'offline';
-        const monitorStatus = toneLabel(monitorTone, zh);
+        const monitorTone = selectedNode ? machineTone(selectedNode) : 'warning';
+        const monitorStatus = computeNodeLabel(selectedNode, zh);
         return <button
             type='button'
             className='ControlServiceCard ControlRuntimeService'
@@ -1069,11 +1069,7 @@ export const ControlCenterView: React.FC<IProps> = ({
     const renderNode = (node: ComputeClusterNode) => {
         // Dependency health belongs to the latest node snapshot. Once that
         // snapshot expires, an old green state is no longer current evidence.
-        const ssh = computeSshAvailability(node);
-        const lanState = node.online && ssh.lan
-            ? 'healthy' : 'unavailable';
-        const tailscaleState = node.online && ssh.tailscale
-            ? 'healthy' : 'unavailable';
+        const {lan: lanState, tailscale: tailscaleState} = computeLinkStates(node);
         const cameras = node.device_inventory.devices.filter(device => device.kind === 'camera');
         const edgeDevices = lanAssets.filter(asset =>
             asset.node_id === node.node_id
@@ -1108,7 +1104,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                     <p>{zh ? '最后检查' : 'Last check'} {runtimeTime(node.resources.captured_at, zh)} · {zh ? '最近心跳' : 'Last heartbeat'} {lastSeen(node.heartbeat_age_seconds, zh)}</p>
                     <div className='ControlNodeTags' aria-label={zh ? '节点标签' : 'Node tags'}>
                         {locationTag && <span className='ControlNodeTag location'>
-                            {zh ? `地域(${locationTag})` : `Region (${locationTag})`}
+                            {zh ? `地域 (${locationTag})` : `Region (${locationTag})`}
                         </span>}
                         {workAreaTag && <span className={`ControlNodeTag work-area${customWorkArea ? '' : ' static'}`}>
                             {zh ? `作业区(${workAreaTag})` : `Work area (${workAreaTag})`}
@@ -1178,10 +1174,10 @@ export const ControlCenterView: React.FC<IProps> = ({
                 </div>
                 <div className='ControlServiceGrid'>
                     {renderServiceCard(
-                        dependencyLabel(lanState, zh),
+                        communicationStateLabel(lanState, zh),
                         zh ? 'SSH 局域网' : 'LAN SSH',
                         zh ? '仅使用局域网地址建立 SSH 连接' : 'Uses only the LAN address for SSH',
-                        dependencyTone(lanState),
+                        communicationTone(lanState),
                         () => {
                             setTerminalAutoConnect(true);
                             setTerminalTransport('lan');
@@ -1189,10 +1185,10 @@ export const ControlCenterView: React.FC<IProps> = ({
                         },
                     )}
                     {renderServiceCard(
-                        dependencyLabel(tailscaleState, zh),
+                        communicationStateLabel(tailscaleState, zh),
                         zh ? 'Tailscale 远程' : 'Remote Tailscale',
                         zh ? '仅使用 Tailscale 地址建立 SSH 连接' : 'Uses only the Tailscale address for SSH',
-                        dependencyTone(tailscaleState),
+                        communicationTone(tailscaleState),
                         () => {
                             setTerminalAutoConnect(true);
                             setTerminalTransport('tailscale');
@@ -1427,11 +1423,8 @@ export const ControlCenterView: React.FC<IProps> = ({
             .filter((value): value is number => Number.isFinite(value))),
         Number.NEGATIVE_INFINITY,
     );
-    const controlNetworkState = selectedNode?.online ? dependency(selectedNode, 'control_ssh') : 'unknown';
-    const remoteNetworkState = selectedNode?.online ? dependency(selectedNode, 'tailscale') : 'unknown';
-    const networkValue = controlNetworkState === 'healthy' && remoteNetworkState === 'healthy'
-        ? (zh ? '正常' : 'Normal')
-        : (zh ? '故障' : 'Fault');
+    const {lan: controlNetworkState, tailscale: remoteNetworkState} = computeLinkStates(selectedNode);
+    const networkValue = computeNodeLabel(selectedNode, zh);
     const selectedResourceHistory = resourceHistory.filter(sample => sample.nodeId === selectedNode?.node_id);
     const resourceMetrics: {
         id: ResourceMetricId;
@@ -1503,8 +1496,8 @@ export const ControlCenterView: React.FC<IProps> = ({
         label: zh ? '网络' : 'Network',
         value: networkValue,
         detail: zh
-            ? `下载 ${bytesPerSecond(selectedNode?.resources.network_receive_bytes_per_second ?? null, true)} · 上传 ${bytesPerSecond(selectedNode?.resources.network_send_bytes_per_second ?? null, true)} · SSH ${dependencyLabel(controlNetworkState, true)} · Tailscale ${dependencyLabel(remoteNetworkState, true)}`
-            : `Receive ${bytesPerSecond(selectedNode?.resources.network_receive_bytes_per_second ?? null, false)} · Send ${bytesPerSecond(selectedNode?.resources.network_send_bytes_per_second ?? null, false)} · SSH ${dependencyLabel(controlNetworkState, false)} · Tailscale ${dependencyLabel(remoteNetworkState, false)}`,
+            ? `下载 ${bytesPerSecond(selectedNode?.resources.network_receive_bytes_per_second ?? null, true)} · 上传 ${bytesPerSecond(selectedNode?.resources.network_send_bytes_per_second ?? null, true)} · SSH ${communicationStateLabel(controlNetworkState, true)} · Tailscale ${communicationStateLabel(remoteNetworkState, true)}`
+            : `Receive ${bytesPerSecond(selectedNode?.resources.network_receive_bytes_per_second ?? null, false)} · Send ${bytesPerSecond(selectedNode?.resources.network_send_bytes_per_second ?? null, false)} · SSH ${communicationStateLabel(controlNetworkState, false)} · Tailscale ${communicationStateLabel(remoteNetworkState, false)}`,
         values: selectedResourceHistory.map(sample => sample.networkReceive),
         secondaryValues: selectedResourceHistory.map(sample => sample.networkSend),
         color: '#55b7ff',
@@ -1607,7 +1600,13 @@ export const ControlCenterView: React.FC<IProps> = ({
                         </div>
                         {visibleGroups.length
                             ? <div className='ControlServiceGrid' aria-label={zh ? '当前群列表' : 'Current groups'}>
-                                {visibleGroups.map(group => <article className='ControlServiceCard' key={group.group_id}>
+                                {visibleGroups.map(group => <button
+                                    type='button'
+                                    className='ControlServiceCard'
+                                    key={group.group_id}
+                                    aria-pressed={selectedGroupId === group.group_id}
+                                    onClick={() => setSelectedGroupId(group.group_id)}
+                                >
                                     <span className={`ControlStatusDot ${currentGroupTone}`} aria-hidden='true'/>
                                     <div>
                                         <span>{zh ? `序号 ${group.index}` : `Index ${group.index}`} · {group.scope === 'central'
@@ -1615,11 +1614,94 @@ export const ControlCenterView: React.FC<IProps> = ({
                                             : (zh ? '本地群' : 'Local')}</span>
                                         <strong>{group.group_name || group.group_id}</strong>
                                         <small>{group.group_id}</small>
+                                        <small>{zh ? '查看群成员 →' : 'View members →'}</small>
                                     </div>
-                                </article>)}
+                                </button>)}
                             </div>
                             : <div className='ControlEmptyBlock'>{graphError || (zh ? '当前没有可查询的群' : 'No queryable groups')}</div>}
                     </section>
+                    <Dialog open={Boolean(selectedGroup)} onClose={() => setSelectedGroupId('')}
+                        fullWidth maxWidth='md' aria-labelledby='group-members-title'
+                        PaperProps={{sx: {backgroundColor: '#242424', color: '#eee'}}}>
+                        <DialogTitle id='group-members-title' sx={{
+                            minHeight: 40, boxSizing: 'border-box', flexShrink: 0,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            flexWrap: 'wrap', gap: '0 8px', px: 3, py: 1,
+                            backgroundColor: '#171717', color: '#fff', textAlign: 'center',
+                            fontSize: 18, fontWeight: 900,
+                            boxShadow: '0px 2px 15px 0px rgba(0,0,0,0.4)', zIndex: 1,
+                        }}>
+                            {zh ? '群成员' : 'Group members'}
+                        </DialogTitle>
+                        <DialogContent sx={{pt: '24px !important'}}>
+                            <h2 id='group-members-summary' className='ControlGroupSummary'>
+                                {selectedGroup?.group_name || selectedGroup?.group_id}{zh ? ' 群，' : ' group, '}
+                                {groupMembersAvailable
+                                    ? (zh ? `${nodes.length + Number(Boolean(groupControllerRole))} 名成员`
+                                        : `${nodes.length + Number(Boolean(groupControllerRole))} members`)
+                                    : (zh ? '成员数量暂不可查询' : 'member count unavailable')}
+                            </h2>
+                            {/* Role sections retain bilingual labels and unavailable-member fallbacks. */}
+                            {['Master', 'Main', 'Node'].map(role => { // eslint-disable-line complexity
+                                const members = groupMembersAvailable ? nodes.filter(member =>
+                                    role === 'Main' ? member.role === 'main' : role === 'Node' && member.role !== 'main') : [];
+                                const hasController = groupControllerRole === role;
+                                const count = members.length + Number(hasController);
+                                return <section className='ControlGroupRoleSection' key={role} aria-label={role}>
+                                    <h3>{role} <span>{groupMembersAvailable ? count : (hasController ? '1+' : '—')}</span></h3>
+                                    <div className='ControlServiceGrid'>
+                            {hasController &&
+                                <article className='ControlServiceCard'>
+                                    <div>
+                                        <span>{zh ? '群控制端' : 'Group controller'} · {groupControllerRole}</span>
+                                        <div className='ControlGroupMemberName'>
+                                            <strong>{selectedGroup?.owner_name}</strong>
+                                            {selectedGroup?.relationship === 'owner' && <span className='ControlGroupLocalBadge'>{zh ? '本机' : 'This machine'}</span>}
+                                        </div>
+                                        <small>{zh ? '成员身份：' : 'Role: '}{groupControllerRole === 'Master'
+                                            ? (zh ? '中央控制端（Master）' : 'Central controller (Master)')
+                                            : (zh ? '主控制端（Main）' : 'Group controller (Main)')}</small>
+                                        <small>{zh ? '群内身份：群主' : 'Membership: owner'}</small>
+                                        <small>{zh ? '在线状态：未提供' : 'Online status: not provided'}</small>
+                                        <small>{zh ? '操作权限：暂不可查询' : 'Permissions: unavailable'}</small>
+                                    </div>
+                                </article>
+                            }
+                                {members.map(member => <button
+                                    type='button'
+                                    className='ControlServiceCard'
+                                    key={member.node_id}
+                                    onClick={() => {
+                                        setSelectedGroupId('');
+                                        overviewSelected.current = false;
+                                        setSelectedNodeId(member.node_id);
+                                        setWorkspace('node');
+                                    }}
+                                >
+                                    <span className={`ControlStatusDot ${machineTone(member)}`} aria-hidden='true'/>
+                                    <div>
+                                        <span>{computeNodeLabel(member, zh)}</span>
+                                        <strong>{member.name}</strong>
+                                        <small>{zh ? '成员身份：' : 'Role: '}{member.role === 'main'
+                                            ? (zh ? '主节点（Main）' : 'Main') : (zh ? '计算节点（Node）' : 'Node')}</small>
+                                        <small>{zh ? '成员状态：' : 'Membership: '}{member.enabled
+                                            ? (zh ? '已启用' : 'Enabled') : (zh ? '已停用' : 'Disabled')}</small>
+                                        <small>{zh ? '操作权限：暂不可查询' : 'Permissions: unavailable'}</small>
+                                        {member.network.addresses.length > 0 && <small>{member.network.addresses.join(' · ')}</small>}
+                                        <small>{member.node_id}</small>
+                                    </div>
+                                </button>)}
+                                    </div>
+                                    {!count && <p className='ControlGroupRoleNotice'>{groupMembersAvailable
+                                        ? (zh ? `暂无 ${role} 成员` : `No ${role} members`)
+                                        : (zh ? '当前无法查询' : 'Currently unavailable')}</p>}
+                                </section>;
+                            })}
+                            {!groupMembersAvailable && <div className='ControlEmptyBlock'>{error || graphError || (zh
+                                ? '当前安装暂时无法查询此群的成员，请在该群的控制端查看。'
+                                : 'Members are unavailable on this installation. Open this group’s controller to view them.')}</div>}
+                        </DialogContent>
+                    </Dialog>
                 </div>}
                 {workspace === 'network' && <div className='ControlFeatureWorkspace'>
                     <ComputeClusterPopup
@@ -1672,6 +1754,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                                 graph={resourceGraph}
                                 nodes={nodes}
                                 zh={zh}
+                                fitWindow
                                 onSelectWorkAgent={() => undefined}
                             />
                             : <div className='ControlCenterMessage error'>
@@ -1725,13 +1808,6 @@ export const ControlCenterView: React.FC<IProps> = ({
                             aria-pressed={monitorMaximized}
                             onClick={() => setMonitorMaximized(current => !current)}
                         ><i aria-hidden='true'/></button>
-                        <button
-                            type='button'
-                            className='close'
-                            autoFocus
-                            aria-label={zh ? '关闭资源监视器' : 'Close resource monitor'}
-                            onClick={() => setInspectedServiceId('')}
-                        >×</button>
                     </div>
                 </header>
 

@@ -129,7 +129,8 @@ describe('CameraParametersPanel', () => {
         const brightnessRow = screen.getByRole('button', {name: '编辑亮度'}).closest('.CameraParameterRow')!;
         expect(brightnessRow).toHaveTextContent('0.00');
         expect(brightnessRow).toHaveTextContent('0.25');
-        fireEvent.click(screen.getByRole('button', {name: '关闭相机参数'}));
+        expect(screen.queryByRole('button', {name: '关闭相机参数'})).not.toBeInTheDocument();
+        fireEvent.keyDown(window, {key: 'Escape'});
         expect(onClose).toHaveBeenCalledTimes(1);
         expect(CameraPreviewService.revert).not.toHaveBeenCalled();
     });

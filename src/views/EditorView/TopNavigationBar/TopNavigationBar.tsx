@@ -14,6 +14,11 @@ import {QueueDataSyncStatus, QueueItem} from '../../../store/queue/types';
 import {updateQueueItem} from '../../../store/queue/actionCreators';
 import {getEngineBaseUrl, getExtensionEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
 import {AUTH_PREVIEW_SIGN_OUT_EVENT} from '../../AuthPreview/AuthPreview';
+import {
+    ACCOUNT_SESSION_CHANGED, AccountUser, currentAccountSession,
+    uploadAccountAvatar as saveAccountAvatar,
+} from '../../../services/AccountService';
+import {AccountCenter} from '../../AccountCenter/AccountCenter';
 
 interface IProps {
     updateActivePopupTypeAction: (activePopupType: PopupWindowType | null) => any;
@@ -31,7 +36,6 @@ interface IProps {
 }
 
 type ServicesDropdown = 'core' | 'extension' | null;
-const ACCOUNT_AVATAR_KEY = 'opensight.account.avatar';
 const ACCOUNT_AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 const ACCOUNT_AVATAR_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
@@ -42,17 +46,16 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
     const controlMode = props.platformMode === 'control';
     const [showActionsDropdown, setShowActionsDropdown] = useState(false);
     const [showAccountDropdown, setShowAccountDropdown] = useState(false);
+    const [showAccountCenter, setShowAccountCenter] = useState(
+        () => Boolean(currentAccountSession()?.user.password_change_required),
+    );
+    const [account, setAccount] = useState<AccountUser | null>(() => currentAccountSession()?.user || null);
     const [activeServicesDropdown, setActiveServicesDropdown] = useState<ServicesDropdown>(null);
     const [cameraConnectAvailable, setCameraConnectAvailable] = useState(false);
     const [computeClusterAvailable, setComputeClusterAvailable] = useState(false);
     const extensionEngineBaseUrl = getExtensionEngineBaseUrl();
-    const [accountAvatar, setAccountAvatar] = useState(() => {
-        try {
-            return window.localStorage.getItem(ACCOUNT_AVATAR_KEY) || '';
-        } catch {
-            return '';
-        }
-    });
+    const accountAvatar = account?.avatar_url || '';
+    const accountAvatarText = account?.role === 'admin' ? '管' : (account?.display_name?.[0] || 'A').toUpperCase();
     const renameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const avatarInputRef = useRef<HTMLInputElement | null>(null);
     const activeQueueItem = props.queueItems.find(item => item.id === props.activeQueueItemId);
@@ -218,7 +221,7 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
         setShowAccountDropdown(open => !open);
     };
 
-    const uploadAccountAvatar = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const uploadAccountAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         event.target.value = '';
         if (!file) return;
@@ -226,19 +229,19 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
             window.alert(currentTexts.account.avatarUploadError);
             return;
         }
-        const reader = new FileReader();
-        reader.onload = () => {
-            if (typeof reader.result !== 'string') return;
-            try {
-                window.localStorage.setItem(ACCOUNT_AVATAR_KEY, reader.result);
-                setAccountAvatar(reader.result);
-            } catch {
-                window.alert(currentTexts.account.avatarUploadError);
-            }
-        };
-        reader.onerror = () => window.alert(currentTexts.account.avatarUploadError);
-        reader.readAsDataURL(file);
+        try { setAccount(await saveAccountAvatar(file)); }
+        catch { window.alert(currentTexts.account.avatarUploadError); }
     };
+
+    useEffect(() => {
+        const update = () => {
+            const user = currentAccountSession()?.user || null;
+            setAccount(user);
+            if (user?.password_change_required) setShowAccountCenter(true);
+        };
+        window.addEventListener(ACCOUNT_SESSION_CHANGED, update);
+        return () => window.removeEventListener(ACCOUNT_SESSION_CHANGED, update);
+    }, []);
 
     // 点击外部关闭下拉菜单
     useEffect(() => {
@@ -456,7 +459,7 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                             aria-expanded={showAccountDropdown}
                             onClick={toggleAccountDropdown}
                         >
-                            {accountAvatar ? <img src={accountAvatar} alt=''/> : 'L'}
+                            {accountAvatar ? <img src={accountAvatar} alt=''/> : accountAvatarText}
                         </button>
                         <input
                             ref={avatarInputRef}
@@ -479,11 +482,11 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                                     title={currentTexts.account.uploadAvatar}
                                     onClick={() => avatarInputRef.current?.click()}
                                 >
-                                    {accountAvatar ? <img src={accountAvatar} alt=''/> : 'L'}
+                                    {accountAvatar ? <img src={accountAvatar} alt=''/> : accountAvatarText}
                                 </button>
                                 <span className='AccountSummaryText'>
-                                    <strong>{currentTexts.account.displayName}</strong>
-                                    <small>{currentTexts.account.role}</small>
+                                    <strong>{account?.display_name || currentTexts.account.displayName}</strong>
+                                    <small>{account?.role === 'admin' ? currentTexts.account.role : account?.username}</small>
                                 </span>
                             </div>
                             <div className='AccountMenuDivider'/>
@@ -501,14 +504,12 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                                     ? currentTexts.account.switchToAnnotationPlatform
                                     : currentTexts.account.switchToControlPlatform}
                             </button>
-                            <button
-                                type='button'
-                                role='menuitem'
-                                className='AccountMenuItem'
-                                onClick={() => setShowAccountDropdown(false)}
-                            >
+                            <button type='button' role='menuitem' className='AccountMenuItem' onClick={() => {
+                                setShowAccountDropdown(false);
+                                setShowAccountCenter(true);
+                            }}>
                                 <img src='/ico/secure.png' alt=''/>
-                                {currentTexts.account.changePassword}
+                                {currentTexts.account.personalCenter}
                             </button>
                             <button
                                 type='button'
@@ -526,6 +527,12 @@ export const TopNavigationBar: React.FC<IProps> = (props) => {
                     </div>
                 </div>
             </div>
+            {showAccountCenter && account && <AccountCenter
+                user={account}
+                zh={props.language === Language.CHINESE}
+                onClose={() => setShowAccountCenter(false)}
+                onUserChanged={setAccount}
+            />}
         </div>
     );
 };

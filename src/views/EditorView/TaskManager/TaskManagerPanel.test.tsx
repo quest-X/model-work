@@ -19,6 +19,24 @@ const jsonResponse = (body: unknown): Response => ({
 } as unknown as Response);
 
 describe('TaskManagerPanel training jobs', () => {
+    it('closes from outside or Escape without rendering an X button', () => {
+        global.fetch = jest.fn().mockResolvedValue(jsonResponse({jobs: []}));
+        const onClose = jest.fn();
+        const {container} = render(<TaskManagerPanelComponent
+            tasks={[]}
+            language={Language.CHINESE}
+            onClose={onClose}
+        />);
+
+        expect(container.querySelector('.TaskManagerPanel__close')).not.toBeInTheDocument();
+        fireEvent.mouseDown(container.querySelector('.TaskManagerPanel') as HTMLElement);
+        expect(onClose).not.toHaveBeenCalled();
+        fireEvent.mouseDown(document.body);
+        expect(onClose).toHaveBeenCalledTimes(1);
+        fireEvent.keyDown(window, {key: 'Escape'});
+        expect(onClose).toHaveBeenCalledTimes(2);
+    });
+
     it('shows and cancels backend training jobs', async () => {
         global.fetch = jest.fn((input: RequestInfo | URL, options?: RequestInit) => {
             const url = String(input);

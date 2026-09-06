@@ -9,7 +9,9 @@
   padding: 18px;
   box-sizing: border-box;
   color: white;
-  background: rgba(0, 0, 0, 0.75);
+  background: transparent;
+
+  &.maximized { padding: 8px; }
 }
 
 .model-inspector-shell {
@@ -18,8 +20,9 @@
   --mi-panel: #{$darkThemeFirstColor};
   --mi-panel-soft: #{$darkThemeSecondColor};
   --mi-border: rgba(255, 255, 255, 0.15);
-  width: min(1680px, 100%);
-  height: min(980px, 100%);
+  width: min(1440px, 100%);
+  height: min(860px, 100%);
+  &.maximized { width: 100%; height: 100%; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -33,6 +36,45 @@
 
   button {
     color: inherit;
+  }
+}
+
+.mi-window-toggle {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.74);
+  cursor: pointer;
+
+  &:hover, &:focus-visible { border-color: var(--mi-accent); color: white; }
+
+  i {
+    position: relative;
+    display: block;
+    width: 10px;
+    height: 10px;
+    margin: auto;
+    border: 1px solid currentColor;
+    box-sizing: border-box;
+  }
+
+  &.maximize i {
+    transform: translate(2px, -2px);
+    &::before {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 8px;
+      height: 8px;
+      border: 1px solid currentColor;
+      background: var(--mi-panel);
+      box-sizing: border-box;
+      content: '';
+      transform: translate(-4px, 4px);
+    }
   }
 }
 

@@ -2,7 +2,7 @@ import React from 'react';
 import {act, render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Language} from '../../../../data/LanguageConfig';
-import {ComputeClusterService} from '../../../../services/ComputeClusterService';
+import {ComputeClusterService, ComputeUpgradeBatch} from '../../../../services/ComputeClusterService';
 import {ComputeClusterPopup} from '../ComputeClusterPopup';
 import {ResourceKnowledgeGraph} from '../ResourceKnowledgeGraph';
 
@@ -18,7 +18,7 @@ jest.mock('../../../../services/ComputeClusterService', () => ({
         lanSchedules: jest.fn(), createLanSchedule: jest.fn(), controlLanSchedule: jest.fn(),
         terminalTargets: jest.fn(), startTerminal: jest.fn(), terminal: jest.fn(),
         terminalInput: jest.fn(), terminalControl: jest.fn(),
-        createUpgradeBatch: jest.fn(), upgradeBatch: jest.fn(), refreshUpgradeBatch: jest.fn(),
+        upgradeReleases: jest.fn(), createMainUpgradeBatch: jest.fn(), createUpgradeBatch: jest.fn(), upgradeBatch: jest.fn(), refreshUpgradeBatch: jest.fn(),
         approveUpgradeBatch: jest.fn(), rejectUpgradeBatch: jest.fn(),
         submitTask: jest.fn(), controlTask: jest.fn(),
     },
@@ -30,8 +30,9 @@ describe('ComputeClusterPopup', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         localStorage.clear();
+        service.upgradeReleases.mockResolvedValue({source: 'main', releases: []});
         service.status.mockResolvedValue({
-            state: 'ready', version: '0.1.0', protocol_version: 1,
+            state: 'ready', version: '9.9.9', protocol_version: 1,
             admin_configured: true, nodes: {total: 1, online: 1, gpu_total: 1, device_total: 1},
         });
         service.nodes.mockResolvedValue([{
@@ -249,10 +250,13 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('SSH: 正常')).toBeInTheDocument();
         expect(screen.getByText('Tailscale: 正常')).toBeInTheDocument();
         expect(screen.getByText('统一查看资源关系、工作调度、网络资产、节点状态与终端连接。')).toBeInTheDocument();
-        expect(screen.getAllByText('16')).toHaveLength(2);
-        const availability = screen.getByText('正常节点 / 总节点').closest('div');
-        expect(availability).not.toBeNull();
-        expect(within(availability as HTMLElement).getByText('1 / 1')).toHaveClass('online');
+        expect(screen.getByText('16')).toBeInTheDocument();
+        const summary = Array.from(document.querySelectorAll('.ComputeClusterSummary > div'));
+        expect(summary.map(item => item.querySelector('span')?.textContent))
+            .toEqual(['地域', '主节点', '正常', '故障', '异常']);
+        expect(summary.map(item => item.querySelector('strong')?.textContent))
+            .toEqual(['0', '1', '1', '0', '0']);
+        expect(summary[2].querySelector('strong')).toHaveClass('online');
         expect(screen.queryByRole('button', {name: '刷新'})).not.toBeInTheDocument();
         expect(screen.getByRole('status', {name: '正常 · v0.1.0'})).toBeInTheDocument();
         await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
@@ -403,7 +407,7 @@ describe('ComputeClusterPopup', () => {
                 memory_available_bytes: 12 * 1024 ** 3,
             },
             device_inventory: {state: 'ready', devices: []},
-            online: false, heartbeat_age_seconds: 20 * 3600,
+            online: false, communication_state: 'abnormal', heartbeat_age_seconds: 20 * 3600,
         }]);
 
         const currentGraph = await service.resourceGraph();
@@ -491,6 +495,10 @@ describe('ComputeClusterPopup', () => {
         expect(graphStats?.querySelector('.online')).toHaveTextContent('正常');
         expect(graphStats?.querySelector('.warning')).toHaveTextContent('0故障');
         expect(graphStats?.querySelector('.offline')).toHaveTextContent('异常');
+        expect(Array.from(graphStats?.querySelectorAll(':scope > div > span') || []).map(item => item.textContent))
+            .toEqual(['边缘计算设备', '摄像头', '总数', '主节点', '正常', '故障', '异常']);
+        expect(Array.from(graphStats?.querySelectorAll(':scope > div > strong') || []).map(item => item.textContent))
+            .toEqual(['1', '1', '4', '2', '1', '0', '1']);
         const offlineNode = screen.getByRole('button', {name: '查看 edge-offline 节点信息'});
         expect(offlineNode).toHaveClass('node-offline');
         expect(offlineNode).toHaveAttribute('data-entity-kind', 'compute_node');
@@ -643,7 +651,8 @@ describe('ComputeClusterPopup', () => {
 
         rerender(<ComputeClusterPopup language={Language.ENGLISH}/>);
 
-        expect(screen.getByText('Normal / Total nodes')).toBeInTheDocument();
+        expect(Array.from(document.querySelectorAll('.ComputeClusterSummary span')).map(item => item.textContent))
+            .toEqual(['Regions', 'Main nodes', 'Normal', 'Fault', 'Abnormal']);
         expect(await screen.findByText('shanghai')).toBeInTheDocument();
         expect(screen.queryByText('上海')).not.toBeInTheDocument();
     });
@@ -948,17 +957,136 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('model-work-node cluster join --control-url <OpenSight URL> --enrollment-token-file <secret file>')).toBeInTheDocument();
     });
 
-    it('creates an OTA batch only after a matching signed manifest and node are selected', async () => {
+    it('shows the durable OTA phase history and the legacy controller fallback', async () => {
         const user = userEvent.setup();
         const manifest = {
             version: 1 as const,
             purpose: 'model-work-node.ota-release.v1' as const,
-            release_version: '1.0.5', minimum_node_version: '1.0.4', source_revision: 'b'.repeat(40),
-            platform: 'linux' as const, architecture: 'x86_64' as const,
-            artifact_url: 'https://releases.example/model-work-node-1.0.5-linux-x86_64.zip',
+            release_version: '1.0.7', minimum_node_version: '1.0.4', source_revision: 'b'.repeat(40),
+            platform: 'windows' as const, architecture: 'x86_64' as const,
+            artifact_url: 'https://releases.example/model-work-node-1.0.7-windows-x86_64.zip',
             sha256: 'c'.repeat(64), size_bytes: 4096, signature: `${'A'.repeat(86)}==`,
         };
-        service.createUpgradeBatch.mockResolvedValue({
+        localStorage.setItem('opensight.compute-upgrade-batch.v1', 'batch-log');
+        const loggedBatch: ComputeUpgradeBatch = {
+            batch_id: 'batch-log', release_version: '1.0.7', state: 'failed', current_index: 1,
+            created_at: 1000, updated_at: 1006, delivery_started_at: 1005,
+            error_code: 'upgrade_delivery_unconfirmed', drain_timeout_seconds: 300,
+            ttl_seconds: 14400, expires_at: 20000,
+            user: {user_id: 'user-1', user_name: 'law', user_public_key: 'A'.repeat(43) + '='},
+            nodes: [{
+                node_id: 'node-complete', job_id: 'job-complete', manifest,
+                authorization_id: 'authorization-complete', authorization: null,
+                state: 'succeeded', error_code: null,
+                result: {
+                    job_id: 'job-complete', state: 'succeeded', created_at: 1002, updated_at: 1004,
+                    drain_deadline: 1302, error_code: null, health_task_id: null,
+                    release_version: '1.0.7', events: [
+                        {event_id: 1, state: 'queued', created_at: 1002, error_code: null},
+                        {event_id: 2, state: 'downloading', created_at: 1003, error_code: null},
+                        {event_id: 3, state: 'succeeded', created_at: 1004, error_code: null},
+                    ],
+                },
+            }, {
+                node_id: 'node-12345678', job_id: 'job-legacy', manifest,
+                authorization_id: 'authorization-legacy', authorization: null,
+                state: 'failed', error_code: 'upgrade_delivery_unconfirmed', result: null,
+            }],
+        };
+        service.upgradeBatch.mockResolvedValue(loggedBatch);
+
+        const view = render(<ComputeClusterPopup language={Language.CHINESE}/>);
+        await user.click(await screen.findByRole('button', {name: '节点升级 1'}));
+        const summaries = await screen.findAllByText(/升级过程日志/);
+        const firstLog = summaries[0].closest('details') as HTMLElement;
+        const secondLog = summaries[1].closest('details') as HTMLElement;
+        expect(within(firstLog).getAllByRole('listitem').map(item => item.textContent)).toEqual([
+            expect.stringContaining('等待批次确认'),
+            expect.stringContaining('已排队'),
+            expect.stringContaining('下载中'),
+            expect.stringContaining('成功'),
+        ]);
+        expect(within(firstLog).getAllByRole('listitem')[1].querySelector('time')).toHaveAttribute(
+            'datetime', new Date(1002 * 1000).toISOString(),
+        );
+        expect(within(secondLog).getAllByRole('listitem').map(item => item.textContent)).toEqual([
+            expect.stringContaining('等待批次确认'),
+            expect.stringContaining('正在提交授权'),
+            expect.stringContaining('失败'),
+        ]);
+        expect(within(secondLog).getByText('upgrade_delivery_unconfirmed')).toBeInTheDocument();
+        expect(within(secondLog).getByText('未收到节点阶段记录；以上为主控已确认的过程。')).toBeInTheDocument();
+
+        view.unmount();
+        service.upgradeBatch.mockResolvedValue({
+            ...loggedBatch,
+            error_code: 'authorization_expired',
+            nodes: [loggedBatch.nodes[0], {
+                ...loggedBatch.nodes[1], error_code: 'authorization_expired',
+            }],
+        });
+        const staleView = render(<ComputeClusterPopup language={Language.CHINESE}/>);
+        await user.click(await screen.findByRole('button', {name: '节点升级 1'}));
+        const staleLog = (await screen.findAllByText(/升级过程日志/))[1].closest('details') as HTMLElement;
+        expect(within(staleLog).getByText('正在提交授权')).toBeInTheDocument();
+
+        staleView.unmount();
+        service.upgradeBatch.mockResolvedValue({
+            ...loggedBatch,
+            state: 'approval_submitting',
+            error_code: 'upgrade_delivery_uncertain',
+            nodes: [loggedBatch.nodes[0], {
+                ...loggedBatch.nodes[1], state: 'approval_submitting', error_code: 'upgrade_delivery_uncertain',
+            }],
+        });
+        const uncertainView = render(<ComputeClusterPopup language={Language.CHINESE}/>);
+        await user.click(await screen.findByRole('button', {name: '节点升级 1'}));
+        const uncertainLog = (await screen.findAllByText(/升级过程日志/))[1].closest('details') as HTMLElement;
+        expect(within(uncertainLog).getByText('等待节点确认')).toBeInTheDocument();
+        expect(within(uncertainLog).getByText(/尚未确认节点是否已收到升级任务/)).toBeInTheDocument();
+        expect(within(uncertainLog).getByText('upgrade_delivery_uncertain')).toBeInTheDocument();
+
+        uncertainView.unmount();
+        service.upgradeBatch.mockResolvedValue({
+            ...loggedBatch,
+            error_code: 'authorization_user_unknown',
+            nodes: [loggedBatch.nodes[0], {
+                ...loggedBatch.nodes[1], error_code: 'authorization_user_unknown',
+            }],
+        });
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+        await user.click(await screen.findByRole('button', {name: '节点升级 1'}));
+        const rejectedLog = (await screen.findAllByText(/升级过程日志/))[1].closest('details') as HTMLElement;
+        expect(within(rejectedLog).getByText(/审批身份未登记到目标节点/)).toBeInTheDocument();
+        expect(within(rejectedLog).getByText('authorization_user_unknown')).toBeInTheDocument();
+    });
+
+    it('shows an empty Main catalog and can retry a catalog failure', async () => {
+        const user = userEvent.setup();
+        service.upgradeReleases.mockRejectedValueOnce(new Error('Main unavailable'));
+        render(<ComputeClusterPopup language={Language.CHINESE}/>);
+        await user.click(await screen.findByRole('button', {name: '节点升级 1'}));
+        expect(await screen.findByText('Main unavailable')).toHaveAttribute('role', 'alert');
+        expect(screen.getByRole('button', {name: '创建升级批次'})).toBeDisabled();
+        await user.click(screen.getByRole('button', {name: '刷新版本'}));
+        expect(await screen.findByText('当前 Main 尚未发布可用安装包。请先在 16 上发布目标版本，再刷新列表。')).toBeInTheDocument();
+        expect(screen.getByRole('button', {name: '创建升级批次'})).toBeDisabled();
+    });
+
+    it('creates an OTA batch from a Main version without uploading a manifest', async () => {
+        const user = userEvent.setup();
+        const manifest = {
+            version: 1 as const,
+            purpose: 'model-work-node.ota-release.v1' as const,
+            release_version: '1.0.5', minimum_node_version: '0.1.0', source_revision: 'b'.repeat(40),
+            platform: 'windows' as const, architecture: 'x86_64' as const,
+            artifact_url: 'https://releases.example/model-work-node-1.0.5-windows-x86_64.zip',
+            sha256: 'c'.repeat(64), size_bytes: 4096, signature: `${'A'.repeat(86)}==`,
+        };
+        const nodes = await service.nodes();
+        service.nodes.mockResolvedValue(nodes.map(node => ({...node, resources: {...node.resources, platform: 'windows', architecture: 'amd64'}})));
+        service.upgradeReleases.mockResolvedValue({source: 'main', releases: [manifest]});
+        service.createMainUpgradeBatch.mockResolvedValue({
             batch_id: 'batch-1', release_version: '1.0.5', state: 'awaiting_authorization',
             current_index: 0, created_at: 1, updated_at: 1, error_code: null,
             drain_timeout_seconds: 300, ttl_seconds: 14400, expires_at: Date.now() / 1000 + 14400,
@@ -972,19 +1100,17 @@ describe('ComputeClusterPopup', () => {
 
         render(<ComputeClusterPopup language={Language.CHINESE}/>);
         await user.click(await screen.findByRole('button', {name: '节点升级 1'}));
-        const releaseFile = new File([JSON.stringify(manifest)], 'release.json', {type: 'application/json'});
-        Object.defineProperty(releaseFile, 'text', {value: async () => JSON.stringify(manifest)});
-        await user.upload(screen.getByLabelText('选择签名发布清单'), releaseFile);
+        await screen.findByRole('option', {name: 'v1.0.5'});
+        expect(screen.queryByLabelText('选择签名发布清单')).not.toBeInTheDocument();
+        await user.selectOptions(screen.getByLabelText('本机 Main 的升级版本'), '1.0.5');
         await user.click(screen.getByRole('checkbox', {name: /edge-01/}));
         await user.click(screen.getByRole('button', {name: '创建升级批次'}));
 
-        await waitFor(() => expect(service.createUpgradeBatch).toHaveBeenCalledWith([
-            {node_id: 'node-12345678', manifest},
-        ]));
+        await waitFor(() => expect(service.createMainUpgradeBatch).toHaveBeenCalledWith(['node-12345678'], '1.0.5'));
         expect((await screen.findAllByText('等待批次确认')).length).toBeGreaterThan(0);
         const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
         service.approveUpgradeBatch.mockResolvedValue({
-            ...(await service.createUpgradeBatch.mock.results[0].value), state: 'authorized',
+            ...(await service.createMainUpgradeBatch.mock.results[0].value), state: 'authorized',
         });
         await user.click(screen.getByRole('button', {name: '确认整个升级批次'}));
         await waitFor(() => expect(service.approveUpgradeBatch).toHaveBeenCalledTimes(1));

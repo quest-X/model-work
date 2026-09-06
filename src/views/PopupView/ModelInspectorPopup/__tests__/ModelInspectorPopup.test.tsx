@@ -114,6 +114,20 @@ describe('ModelInspectorPopup', () => {
         EditorModel.playbackImageData = null;
     });
 
+    it('maximizes and restores without recreating the inspection session', async () => {
+        render(<ModelInspectorPopup language={Language.CHINESE} activeImage={activeImage} activeModelTask='detect'/>);
+        await screen.findByTestId('inspector-view-a');
+        const shell = screen.getByRole('region', {name: '模型透视'});
+        fireEvent.click(screen.getByRole('button', {name: '放大透视窗口'}));
+        expect(shell).toHaveClass('maximized');
+        expect(screen.getByRole('button', {name: '还原透视窗口'})).toHaveAttribute('aria-pressed', 'true');
+        fireEvent.click(screen.getByRole('button', {name: '还原透视窗口'}));
+        expect(shell).not.toHaveClass('maximized');
+        expect(screen.getByRole('button', {name: '放大透视窗口'})).toHaveAttribute('aria-pressed', 'false');
+        expect(ModelInspectorAPI.createSession).toHaveBeenCalledTimes(1);
+        expect(ModelInspectorAPI.deleteSession).not.toHaveBeenCalled();
+    });
+
     it('automatically captures semantic stages, exposes comparison, and cleans the session on unmount', async () => {
         const view = render(<ModelInspectorPopup language={Language.CHINESE} activeImage={activeImage} activeModelTask='detect'/>);
 

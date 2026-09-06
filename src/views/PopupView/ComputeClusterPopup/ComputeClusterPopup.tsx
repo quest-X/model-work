@@ -1,9 +1,11 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {connect} from 'react-redux';
 import {Language} from '../../../data/LanguageConfig';
-import {PopupActions} from '../../../logic/actions/PopupActions';
 import {
     ComputeClusterNode,
+    computeNodeState,
+    computeNodeLabel,
+    computeNodeNormal,
     ComputeClusterService,
     ComputeClusterStatus,
     ComputeLanDiscoveryResult,
@@ -209,10 +211,10 @@ interface NodeCardProps {
 
 // Resource, network, GPU, and device variants are one presentational node boundary.
 // eslint-disable-next-line complexity
-const NodeCard: React.FC<NodeCardProps> = ({node, zh}) => <article className={`ComputeNodeCard ${node.online ? 'online' : 'offline'}`}>
+const NodeCard: React.FC<NodeCardProps> = ({node, zh}) => <article className={`ComputeNodeCard ${computeNodeState(node)}`}>
     <div className='ComputeNodeHeading'>
         <div className='ComputeNodeIdentity'>
-            <span className='ComputeNodeStatus'><i/>{healthLabel(node.online, zh)}</span>
+            <span className='ComputeNodeStatus'><i/>{computeNodeLabel(node, zh)}</span>
             <h3>{node.name}</h3>
             <code>{node.node_id.slice(0, 8)}</code>
         </div>
@@ -559,12 +561,8 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
 
     const totals = useMemo(() => ({
         total: status?.nodes.total ?? nodes.length,
-        online: status?.nodes.online ?? nodes.filter(node => node.online).length,
-        gpus: status?.nodes.gpu_total ?? nodes.reduce((sum, node) => sum + node.resources.gpus.length, 0),
-        devices: status?.nodes.device_total ?? nodes.reduce((sum, node) => sum + node.device_inventory.devices.length, 0),
-        cpu: nodes.reduce((sum, node) => sum + node.resources.cpu_logical, 0),
-        activeTasks: tasks.filter(task => task.state === 'queued' || task.state === 'running').length,
-    }), [nodes, status, tasks]);
+        online: nodes.filter(computeNodeNormal).length,
+    }), [nodes, status]);
 
     const sortedNodes = useMemo(() => {
         const regionByNode = new Map(
@@ -617,13 +615,18 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
         : (zh ? '放大计算群窗口' : 'Maximize compute cluster window');
     const serviceNormal = !error && status?.state === 'ready';
     const serviceStateLabel = healthLabel(serviceNormal, zh);
-    const serviceVersion = status ? `v${status.version}` : '';
+    const nodeVersion = nodes.map(node => node.agent_version)
+        .sort((left, right) => right.localeCompare(left, undefined, {numeric: true}))[0];
+    const serviceVersion = nodeVersion ? `v${nodeVersion}` : '';
     const operationsGraphEntityCount = resourceGraph?.entities.filter(entity =>
         entity.kind === 'compute_node' || entity.kind === 'managed_device',
     ).length ?? 0;
 
-    return <div className={`ComputeClusterBackdrop${maximized ? ' maximized' : ''}${embedded ? ' embedded' : ''}`}>
-        <section className={`ComputeClusterPopup${maximized ? ' maximized' : ''}${embedded ? ' embedded' : ''}`} aria-label={zh ? '计算群' : 'Compute Cluster'}>
+    return <div
+        className={`ComputeClusterBackdrop${maximized ? ' maximized' : ''}${embedded ? ' embedded' : ''}`}
+        data-popup-backdrop={embedded ? undefined : ''}
+    >
+        <section className={`ComputeClusterPopup${maximized ? ' maximized' : ''}${embedded ? ' embedded' : ''}`} aria-label={zh ? '计算群' : 'Compute Cluster'} data-popup-surface>
             {!embedded && <>
             <header>
                 <div>
@@ -651,19 +654,15 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                         title={windowToggleLabel}
                         onClick={() => setMaximized(current => !current)}
                     ><i aria-hidden='true'/></button>
-                    <button type='button' className='close' onClick={() => PopupActions.close()} aria-label={zh ? '关闭计算群' : 'Close compute cluster'}>×</button>
                 </div>
             </header>
 
             <div className='ComputeClusterSummary'>
-                <div>
-                    <span>{zh ? '正常节点 / 总节点' : 'Normal / Total nodes'}</span>
-                    <strong className='online'>{totals.online} / {totals.total}</strong>
-                </div>
-                <div><span>{zh ? '逻辑 CPU' : 'Logical CPUs'}</span><strong>{totals.cpu}</strong></div>
-                <div><span>GPU</span><strong>{totals.gpus}</strong></div>
-                <div><span>{zh ? '设备' : 'Devices'}</span><strong>{totals.devices}</strong></div>
-                <div><span>{zh ? '运行任务' : 'Active tasks'}</span><strong>{totals.activeTasks}</strong></div>
+                <div><span>{zh ? '地域' : 'Regions'}</span><strong>{resourceGraph?.summary.regions ?? 0}</strong></div>
+                <div><span>{zh ? '主节点' : 'Main nodes'}</span><strong>{totals.total}</strong></div>
+                <div><span>{zh ? '正常' : 'Normal'}</span><strong className='online'>{totals.online}</strong></div>
+                <div><span>{zh ? '故障' : 'Fault'}</span><strong>{nodes.filter(node => computeNodeState(node) === 'fault').length}</strong></div>
+                <div><span>{zh ? '异常' : 'Abnormal'}</span><strong>{nodes.filter(node => computeNodeState(node) === 'abnormal').length}</strong></div>
             </div>
             </>}
 
@@ -709,21 +708,22 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                         </div>
                         <div className='ComputeSchedulerPolicy'>
                             <strong>{zh ? '优先选择余量充足节点' : 'Most available node'}</strong>
-                            <span>{scheduler.policy} · {scheduler.online_nodes} {zh ? '个正常成员' : 'Normal members'}</span>
+                            <span>{scheduler.policy} · {nodes.filter(computeNodeNormal).length} {zh ? '个正常成员' : 'Normal members'}</span>
                         </div>
                     </div>
                     <div className='ComputeSchedulerCapacity'>
-                        <div><span>CPU</span><strong>{scheduler.available.cpu_cores} / {scheduler.totals.cpu_cores}</strong><small>{zh ? '核可用' : 'cores available'}</small></div>
-                        <div><span>{zh ? '内存' : 'Memory'}</span><strong>{bytes(scheduler.available.memory_bytes, zh)}</strong><small>/ {bytes(scheduler.totals.memory_bytes, zh)}</small></div>
-                        <div><span>{zh ? '磁盘' : 'Disk'}</span><strong>{bytes(scheduler.available.disk_bytes, zh)}</strong><small>/ {bytes(scheduler.totals.disk_bytes, zh)}</small></div>
-                        <div><span>GPU</span><strong>{scheduler.available.gpu_count} / {scheduler.totals.gpu_count}</strong><small>{bytes(scheduler.available.gpu_memory_mb * 1024 ** 2, zh)} {zh ? '显存' : 'VRAM'}</small></div>
-                        <div><span>{zh ? '活动预留' : 'Allocations'}</span><strong>{scheduler.active_allocations}</strong><small>{zh ? '随任务终态释放' : 'released at terminal state'}</small></div>
+                        <div><span>{zh ? '中央处理器' : 'CPU'}</span><strong>{scheduler.available.cpu_cores} / {scheduler.totals.cpu_cores}</strong><small>{zh ? '核可用' : 'cores available'}</small></div>
+                        <div><span>{zh ? '内存' : 'MEM'}</span><strong>{bytes(scheduler.available.memory_bytes, zh)}</strong><small>/ {bytes(scheduler.totals.memory_bytes, zh)}</small></div>
+                        <div><span>{zh ? '图像处理器' : 'GPU'}</span><strong>{scheduler.available.gpu_count} / {scheduler.totals.gpu_count}</strong><small>{bytes(scheduler.available.gpu_memory_mb * 1024 ** 2, zh)} {zh ? '显存' : 'VRAM'}</small></div>
+                        <div><span>{zh ? '磁盘' : 'DISK'}</span><strong>{bytes(scheduler.available.disk_bytes, zh)}</strong><small>/ {bytes(scheduler.totals.disk_bytes, zh)}</small></div>
+                        <div><span>{zh ? '活动任务' : 'TASK'}</span><strong>{scheduler.active_allocations}</strong><small>{zh ? '正在运行的任务' : 'running tasks'}</small></div>
                     </div>
                     </section>}
                     {resourceGraph && <ResourceKnowledgeGraph
                         graph={resourceGraph}
                         nodes={nodes}
                         zh={zh}
+                        fitWindow
                         selectedTaskType={graphSelection?.taskType}
                         onSelectWorkAgent={selectWorkAgent}
                     />}
@@ -785,7 +785,7 @@ export const ComputeClusterPopup: React.FC<IProps> = ({
                             }}>
                                 {orchestrationEnabled && !discoveryTask && <option value={AUTO_PLACEMENT}>{zh ? '计算群自动调度（推荐）' : 'Automatic group placement (recommended)'}</option>}
                                 {nodes.map(node => <option value={node.node_id} key={node.node_id} disabled={!node.online}>
-                                    {node.name}{node.online ? '' : (zh ? '（故障）' : ' (Fault)')}
+                                    {node.name}（{computeNodeLabel(node, zh)}）
                                 </option>)}
                             </select>
                         </label>

@@ -4,9 +4,10 @@
   position: fixed;
   z-index: 1550;
   bottom: 6px;
-  left: 4px;
+  left: 0;
   display: flex;
-  width: 24px;
+  box-sizing: border-box;
+  width: $sideNavigationBarCompanionWidth;
   height: 24px;
   align-items: center;
   justify-content: center;

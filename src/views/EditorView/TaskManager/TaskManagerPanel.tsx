@@ -5,6 +5,7 @@ import {ManagedTask, TaskPriority, TaskStatus, TaskType} from '../../../store/ta
 import {Language, LanguageConfig} from '../../../data/LanguageConfig';
 import {TaskRow} from './TaskRow';
 import {getEngineBaseUrl} from '../../../utils/DefaultBackendUrl';
+import {useEscapeToClose} from '../../../hooks/useEscapeToClose';
 import './TaskManagerPanel.scss';
 
 interface ResourceStats {
@@ -65,7 +66,7 @@ const ResourceChip: React.FC<{label: string; value: string; pct: number}> = ({la
     );
 };
 
-export const TaskManagerPanelComponent: React.FC<IProps> = ({tasks, language, onClose, excludeRef, anchorRef, pinned}) => {
+export const TaskManagerPanelComponent: React.FC<IProps> = ({tasks, language, onClose, excludeRef, anchorRef}) => {
     const panelRef = useRef<HTMLDivElement>(null);
     const t = LanguageConfig[language].taskManager;
 
@@ -168,7 +169,6 @@ export const TaskManagerPanelComponent: React.FC<IProps> = ({tasks, language, on
     // 否则会出现"点按钮关→onClick 又开"的来回切换。
     useEffect(() => {
         const handler = (e: MouseEvent) => {
-            if (pinned) return;
             const target = e.target as Node;
             if (panelRef.current && panelRef.current.contains(target)) return;
             if (excludeRef?.current && excludeRef.current.contains(target)) return;
@@ -178,14 +178,7 @@ export const TaskManagerPanelComponent: React.FC<IProps> = ({tasks, language, on
         return () => document.removeEventListener('mousedown', handler);
     }, [onClose, excludeRef]);
 
-    // Esc 关闭
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
-        };
-        document.addEventListener('keydown', handler);
-        return () => document.removeEventListener('keydown', handler);
-    }, [onClose]);
+    useEscapeToClose(onClose, true, 15);
 
     // 过滤掉已完成的任务（当开关关闭时）
     const allTasks = [...tasks, ...trainingTasks];
@@ -212,14 +205,6 @@ export const TaskManagerPanelComponent: React.FC<IProps> = ({tasks, language, on
         <div className='TaskManagerPanel' ref={panelRef} style={anchorStyle ?? undefined}>
             <div className='TaskManagerPanel__header'>
                 <span className='TaskManagerPanel__title'>{t.title}</span>
-                <button
-                    className='TaskManagerPanel__close'
-                    onClick={onClose}
-                    type='button'
-                    aria-label='close'
-                >
-                    ×
-                </button>
             </div>
             <div className='TaskManagerPanel__body'>
                 {isEmpty ? (

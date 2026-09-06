@@ -1,7 +1,5 @@
 import React, {useEffect, useState} from 'react';
 import './ChangelogPopup.scss';
-import {GenericYesNoPopup} from '../GenericYesNoPopup/GenericYesNoPopup';
-import {PopupActions} from '../../../logic/actions/PopupActions';
 import {ContextManager} from '../../../logic/hotkey/ContextManager';
 import {ContextType} from '../../../data/enums/ContextType';
 import {AppState} from '../../../store';
@@ -1434,10 +1432,6 @@ const ChangelogPopup: React.FC<IProps> = ({language}) => {
         }
     }, [status]);
 
-    const onClose = () => {
-        PopupActions.close();
-    };
-
     const visibleEntries = CHANGELOG_DATA.slice(0, visibleCount);
     const hasMore = visibleCount < CHANGELOG_DATA.length;
 
@@ -1473,11 +1467,10 @@ const ChangelogPopup: React.FC<IProps> = ({language}) => {
     };
 
     return (
-        <div className="ChangelogPopup">
-            <div className="ChangelogPanel">
+        <div className="ChangelogPopup" data-popup-backdrop>
+            <div className="ChangelogPanel" data-popup-surface>
                 <div className="PanelHeader">
                     <span className="PanelTitle">{currentTexts.changelog.title}</span>
-                    <div className="CloseButton" onClick={onClose}>✕</div>
                 </div>
                 <div
                     className="PanelBody"

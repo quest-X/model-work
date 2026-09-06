@@ -6,6 +6,7 @@ import {resolve} from 'path';
 import {
     ApprovalRequest, SignedApproval, authorizationChallenge, canonicalAuthorizationJson, clearApprovalIdentity,
     currentApprovalUser, getApprovalIdentity, importApprovalIdentity, sensitiveRequestDigest, signAuthorization,
+    useAccountApprovalIdentity,
 } from '../ApprovalIdentityService';
 import {ComputeClusterService, ComputeUpgradeBatch, ComputeUpgradeBatchNode, ComputeUpgradeManifest} from '../ComputeClusterService';
 
@@ -113,6 +114,48 @@ describe('personal approvals with native WebCrypto', () => {
         expect(() => getApprovalIdentity()).toThrow(/Import/);
         await importApprovalIdentity(JSON.stringify(document));
         expect(currentApprovalUser()).toEqual(document.user);
+    });
+
+    it('uses the logged-in account signer without sending a private key to the browser', async () => {
+        const user = {
+            user_id: '00000000-0000-4000-8000-000000000099',
+            user_name: 'admin',
+            user_public_key: `${'A'.repeat(43)}=`,
+        };
+        useAccountApprovalIdentity(user);
+        const approval = await challenge();
+        globalThis.fetch = jest.fn(async () => ({
+            ok: true, json: async () => ({signature: 'server-signature'}),
+        } as Response));
+
+        await expect(signAuthorization(approval)).resolves.toBe('server-signature');
+        expect(fetch).toHaveBeenCalledWith('/core_service/account/authorization/sign', expect.objectContaining({
+            method: 'POST', credentials: 'same-origin',
+        }));
+        const body = String((fetch as jest.Mock).mock.calls[0][1].body);
+        expect(body).toContain(approval.authorization_id);
+        expect(body).not.toContain('private_key');
+        expect(getApprovalIdentity().privateKey).toBeNull();
+    });
+
+    it('approves account-backed OTA without WebCrypto on an HTTP origin', async () => {
+        useAccountApprovalIdentity({
+            user_id: '00000000-0000-4000-8000-000000000099',
+            user_name: 'admin',
+            user_public_key: `${'A'.repeat(43)}=`,
+        });
+        const batch = await upgradeBatch();
+        globalThis.fetch = jest.fn()
+            .mockResolvedValueOnce({ok: true, json: async () => ({signature: 'server-signature-1'})} as Response)
+            .mockResolvedValueOnce({ok: true, json: async () => ({signature: 'server-signature-2'})} as Response)
+            .mockResolvedValueOnce({ok: true, json: async () => ({...batch, state: 'authorized'})} as Response);
+        Object.defineProperty(globalThis.crypto, 'subtle', {configurable: true, value: undefined});
+        try {
+            await expect(ComputeClusterService.approveUpgradeBatch(batch)).resolves.toMatchObject({state: 'authorized'});
+            expect(fetch).toHaveBeenCalledTimes(3);
+        } finally {
+            Object.defineProperty(globalThis.crypto, 'subtle', {configurable: true, value: webcrypto.subtle});
+        }
     });
 
     it('rejects mismatched keys, invalid identity files and expired or changed requests', async () => {

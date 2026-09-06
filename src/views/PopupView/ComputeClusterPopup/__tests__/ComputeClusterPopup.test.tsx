@@ -253,9 +253,9 @@ describe('ComputeClusterPopup', () => {
         expect(screen.getByText('16')).toBeInTheDocument();
         const summary = Array.from(document.querySelectorAll('.ComputeClusterSummary > div'));
         expect(summary.map(item => item.querySelector('span')?.textContent))
-            .toEqual(['地域', '主节点', '正常', '故障', '异常']);
+            .toEqual(['地域', '主节点', '正常', '故障']);
         expect(summary.map(item => item.querySelector('strong')?.textContent))
-            .toEqual(['0', '1', '1', '0', '0']);
+            .toEqual(['0', '1', '1', '0']);
         expect(summary[2].querySelector('strong')).toHaveClass('online');
         expect(screen.queryByRole('button', {name: '刷新'})).not.toBeInTheDocument();
         expect(screen.getByRole('status', {name: '正常 · v0.1.0'})).toBeInTheDocument();
@@ -491,16 +491,16 @@ describe('ComputeClusterPopup', () => {
         expect(graphPanel?.querySelector('[data-entity-kind="work_agent"]')).not.toBeInTheDocument();
         const graphStats = graphPanel?.querySelector('.ComputeKnowledgeStats');
         expect(graphStats?.querySelector('.online strong')).toHaveTextContent('1');
-        expect(graphStats?.querySelector('.offline strong')).toHaveTextContent('1');
+        expect(graphStats?.querySelector('.warning strong')).toHaveTextContent('1');
         expect(graphStats?.querySelector('.online')).toHaveTextContent('正常');
-        expect(graphStats?.querySelector('.warning')).toHaveTextContent('0故障');
-        expect(graphStats?.querySelector('.offline')).toHaveTextContent('异常');
+        expect(graphStats?.querySelector('.warning')).toHaveTextContent('1故障');
+        expect(graphStats?.querySelector('.offline')).not.toBeInTheDocument();
         expect(Array.from(graphStats?.querySelectorAll(':scope > div > span') || []).map(item => item.textContent))
-            .toEqual(['边缘计算设备', '摄像头', '总数', '主节点', '正常', '故障', '异常']);
+            .toEqual(['边缘计算设备', '摄像头', '总数', '主节点', '正常', '故障']);
         expect(Array.from(graphStats?.querySelectorAll(':scope > div > strong') || []).map(item => item.textContent))
-            .toEqual(['1', '1', '4', '2', '1', '0', '1']);
+            .toEqual(['1', '1', '4', '2', '1', '1']);
         const offlineNode = screen.getByRole('button', {name: '查看 edge-offline 节点信息'});
-        expect(offlineNode).toHaveClass('node-offline');
+        expect(offlineNode).toHaveClass('node-warning');
         expect(offlineNode).toHaveAttribute('data-entity-kind', 'compute_node');
         expect(offlineNode).toHaveAttribute('data-entity-shape', 'circle');
         expect(offlineNode).toHaveAttribute('data-entity-state', 'unavailable');
@@ -556,7 +556,7 @@ describe('ComputeClusterPopup', () => {
 
         await user.hover(offlineNode);
         const offlineCard = screen.getByRole('status', {name: 'edge-offline 运维信息'});
-        expect(within(offlineCard).getByText('异常 · 最后心跳 20 小时前')).toBeInTheDocument();
+        expect(within(offlineCard).getByText('故障 · 最后心跳 20 小时前')).toHaveClass('warning');
 
         await user.unhover(offlineNode);
         await user.hover(camera);
@@ -652,7 +652,7 @@ describe('ComputeClusterPopup', () => {
         rerender(<ComputeClusterPopup language={Language.ENGLISH}/>);
 
         expect(Array.from(document.querySelectorAll('.ComputeClusterSummary span')).map(item => item.textContent))
-            .toEqual(['Regions', 'Main nodes', 'Normal', 'Fault', 'Abnormal']);
+            .toEqual(['Regions', 'Main nodes', 'Normal', 'Fault']);
         expect(await screen.findByText('shanghai')).toBeInTheDocument();
         expect(screen.queryByText('上海')).not.toBeInTheDocument();
     });

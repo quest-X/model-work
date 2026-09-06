@@ -94,10 +94,10 @@ describe('DeviceManagementPopup remote camera management', () => {
         expect(screen.queryByRole('button', {name: '删除'})).not.toBeInTheDocument();
     });
 
-    it('uses Normal, Fault, and Abnormal for English status filters and values', () => {
+    it('groups unavailable cameras and offline edge devices under Fault', () => {
         render(<DeviceManagementPopup
             language={Language.ENGLISH}
-            node={node}
+            node={{...node, communication_state: 'abnormal'}}
             cameras={[{
                 device_id: 'camera-1', kind: 'camera', provider: 'camera-connect',
                 name: 'Remote camera', model: 'DS-2CD2686', status: 'registered', channels: 1,
@@ -108,10 +108,15 @@ describe('DeviceManagementPopup remote camera management', () => {
                 capabilities: [],
             }, {
                 device_id: 'camera-3', kind: 'camera', provider: 'camera-connect',
-                name: 'Abnormal camera', model: 'DS-2CD2686', status: 'unavailable', channels: 1,
+                name: 'Unavailable camera', model: 'DS-2CD2686', status: 'unavailable', channels: 1,
                 capabilities: [],
             }]}
-            edgeDevices={[]}
+            edgeDevices={[true, false].map((online, index) => ({
+                asset_id: `edge-${index}`, node_id: node.node_id, node_name: node.name, cidr: '10.0.0.0/24',
+                address: `10.0.0.${index + 1}`, hostname: '', mac: '', display_name: `Edge ${index}`,
+                device_model: 'Orin', ports: [], online,
+                first_seen_at: 1, last_seen_at: 1, last_changed_at: 1, change_type: 'unchanged',
+            }))}
             initialTab='camera'
             onClose={jest.fn()}
             onAddCamera={jest.fn()}
@@ -123,12 +128,25 @@ describe('DeviceManagementPopup remote camera management', () => {
 
         expect(screen.getByRole('option', {name: 'Normal only'})).toBeInTheDocument();
         expect(screen.getByRole('option', {name: 'Fault only'})).toBeInTheDocument();
-        expect(screen.getByRole('option', {name: 'Abnormal only'})).toBeInTheDocument();
-        expect(screen.getByLabelText('Device summary')).toHaveTextContent('Total3Normal1Fault1Abnormal1');
+        expect(screen.queryByRole('option', {name: 'Abnormal only'})).not.toBeInTheDocument();
+        expect(screen.getByLabelText('Device summary')).toHaveTextContent('Total3Normal1Fault2');
         expect(screen.getAllByText('Normal').length).toBeGreaterThan(0);
         expect(screen.getAllByText('Fault').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('Abnormal').length).toBeGreaterThan(0);
+        expect(screen.queryByText('Abnormal')).not.toBeInTheDocument();
         expect(screen.queryByText('Healthy')).not.toBeInTheDocument();
+        fireEvent.change(screen.getByRole('combobox', {name: 'Filter device status'}), {target: {value: 'fault'}});
+        expect(screen.queryByText('Remote camera')).not.toBeInTheDocument();
+        expect(screen.getByText('Fault camera')).toBeInTheDocument();
+        expect(screen.getByText('Unavailable camera')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('tab', {name: /Edge devices/}));
+        expect(screen.getByLabelText('Device summary')).toHaveTextContent('Total2Normal1Fault1');
+        fireEvent.change(screen.getByRole('combobox', {name: 'Filter device status'}), {target: {value: 'fault'}});
+        expect(screen.queryByText('Edge 0')).not.toBeInTheDocument();
+        expect(screen.getByText('Edge 1').closest('.DeviceManagementRow')
+            ?.querySelector('.DeviceManagementStatus')).toHaveTextContent('Fault');
+        expect(screen.getByText('Edge 1').closest('.DeviceManagementRow')
+            ?.querySelector('.DeviceManagementStatus')).toHaveClass('fault');
     });
 
     it('opens camera live view and edge terminal only on double click', () => {

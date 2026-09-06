@@ -6,6 +6,7 @@ import {
     computeNodeState,
     computeLinkStates,
     aggregateCommunicationStates,
+    communicationStateLabel,
     computeNodeLabel,
 } from '../ComputeClusterService';
 
@@ -224,18 +225,27 @@ describe('node communication state', () => {
         network_dependencies: [{dependency_id: 'control_ssh', state: 'healthy'}],
         device_inventory: {state: 'unavailable', devices: [{status: 'offline'}]},
     } as ComputeClusterNode);
-    it('marks mixed paths faulty even though one control route works', () => {
-        expect(computeNodeState(node())).toBe('fault');
-        expect(computeLinkStates(node())).toEqual({lan: 'normal', tailscale: 'abnormal'});
+    it.each([
+        [true, false, 'normal', 'fault', 'fault'],
+        [false, true, 'fault', 'normal', 'fault'],
+        [false, false, 'fault', 'fault', 'fault'],
+        [true, true, 'normal', 'normal', 'normal'],
+    ] as const)('maps LAN %s and Tailscale %s to binary health', (lan, tailscale, lanState, tailscaleState, state) => {
+        const current = {...node(), network: {...node().network, lan_ssh_available: lan, tailscale_ssh_available: tailscale}};
+        expect(computeNodeState(current)).toBe(state);
+        expect(computeLinkStates(current)).toEqual({lan: lanState, tailscale: tailscaleState});
     });
-    it('treats missing or legacy offline evidence as uncertain', () => {
+    it('treats missing or legacy offline evidence as faulty', () => {
         expect(computeNodeState()).toBe('fault');
         expect(computeNodeState(node(false))).toBe('fault');
         expect(computeNodeState({...node(), network: {...node().network, error: 'refresh failed'}})).toBe('fault');
     });
-    it.each([['normal', '正常'], ['fault', '故障'], ['abnormal', '异常']] as const)(
+    it.each([['normal', '正常'], ['fault', '故障'], ['abnormal', '故障']] as const)(
         'uses authoritative %s state even with cached online flags', (state, label) => {
-            expect(computeNodeLabel({...node(), network: {...node().network, tailscale_ssh_available: true}, communication_state: state}, true)).toBe(label);
+            const current = {...node(), network: {...node().network, tailscale_ssh_available: true}, communication_state: state};
+            expect(computeNodeLabel(current, true)).toBe(label);
+            expect(communicationStateLabel(state, false)).toBe(state === 'normal' ? 'Normal' : 'Fault');
+            expect(current.communication_state).toBe(state);
         },
     );
 });
@@ -243,7 +253,7 @@ describe('node communication state', () => {
 describe('communication aggregation', () => {
     it.each([
         [['normal', 'normal'], 'normal'],
-        [['abnormal', 'abnormal'], 'abnormal'],
+        [['abnormal', 'abnormal'], 'fault'],
         [['normal', 'abnormal'], 'fault'],
         [['normal', 'normal', 'abnormal'], 'fault'],
         [['normal', 'fault'], 'fault'],

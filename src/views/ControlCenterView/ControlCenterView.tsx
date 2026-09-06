@@ -64,7 +64,7 @@ type Workspace = 'node' | 'network' | 'terminal' | 'groups';
 type MachineIconKind = 'jetson' | 'windows' | 'linux' | 'macos' | 'computer';
 type NodeGrouping = 'none' | 'region' | 'platform';
 type NodeOrdering = 'status' | 'activity' | 'name';
-type NodeVisibility = 'all' | 'normal' | 'fault' | 'abnormal';
+type NodeVisibility = 'all' | 'normal' | 'fault';
 type OverviewView = 'map' | 'graph';
 type MonitorView = 'performance' | 'processes' | 'startup' | 'tasks' | 'conversations';
 type ProcessSortKey = 'name' | 'pid' | 'cpu' | 'memory' | 'state';
@@ -305,7 +305,7 @@ const regionDisplayName = (name: string, zh: boolean): string => zh
     : name;
 
 const communicationTone = (state: 'normal' | 'fault' | 'abnormal'): Tone =>
-    state === 'normal' ? 'healthy' : state === 'abnormal' ? 'offline' : 'warning';
+    state === 'normal' ? 'healthy' : 'warning';
 const machineTone = (node: ComputeClusterNode): Tone => communicationTone(computeNodeState(node));
 
 const cameraTone = (status: ComputeManagedDevice['status']): Tone =>
@@ -567,7 +567,7 @@ export const ControlCenterView: React.FC<IProps> = ({
                 return left.heartbeat_age_seconds - right.heartbeat_age_seconds || left.name.localeCompare(right.name);
             }
             if (nodeOrdering === 'name') return left.name.localeCompare(right.name);
-            const rank = {normal: 0, fault: 1, abnormal: 2};
+            const rank = {normal: 0, fault: 1};
             return rank[computeNodeState(left)] - rank[computeNodeState(right)] || left.name.localeCompare(right.name);
         });
         if (nodeGrouping === 'none') return [['', visible] as [string, ComputeClusterNode[]]];
@@ -903,7 +903,6 @@ export const ControlCenterView: React.FC<IProps> = ({
                 <option value='all'>{zh ? '所有状态' : 'All states'}</option>
                 <option value='normal'>{zh ? '仅正常' : 'Normal only'}</option>
                 <option value='fault'>{zh ? '仅故障' : 'Fault only'}</option>
-                <option value='abnormal'>{zh ? '仅异常' : 'Abnormal only'}</option>
             </select>
         </div>
         <div className='ControlMachineList'>

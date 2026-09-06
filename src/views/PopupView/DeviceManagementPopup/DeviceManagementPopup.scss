@@ -142,7 +142,6 @@
   i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .normal { color: #68d58c; }
   .fault { color: #e7a640; }
-  .abnormal { color: #ed7770; }
 }
 
 .DeviceManagementMain {
@@ -211,7 +210,7 @@
 
 .DeviceManagementSummary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1px;
   overflow: hidden;
   margin-top: 17px;
@@ -233,7 +232,6 @@
   strong { font-size: 18px; font-weight: 600; }
   .normal { color: #68d58c; }
   .fault { color: #e7a640; }
-  .abnormal { color: #ed7770; }
 }
 
 .DeviceManagementTools {
@@ -354,7 +352,6 @@
   i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   &.normal { color: #68d58c; }
   &.fault { color: #e7a640; }
-  &.abnormal { color: #ed7770; }
 }
 
 .DeviceManagementEmpty {

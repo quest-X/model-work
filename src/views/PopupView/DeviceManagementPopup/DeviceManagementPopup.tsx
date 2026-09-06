@@ -6,12 +6,13 @@ import {
     ComputeLanAsset,
     ComputeManagedDevice,
     computeNodeState,
+    communicationStateLabel,
 } from '../../../services/ComputeClusterService';
 import './DeviceManagementPopup.scss';
 import {useEscapeToClose} from '../../../hooks/useEscapeToClose';
 
 type DeviceTab = 'camera' | 'edge';
-type DeviceTone = 'normal' | 'fault' | 'abnormal';
+type DeviceTone = 'normal' | 'fault';
 type DeviceStatusFilter = 'all' | DeviceTone;
 
 interface IProps {
@@ -31,8 +32,8 @@ interface IProps {
 const cameraTone = (camera: ComputeManagedDevice): DeviceTone =>
     camera.status === 'registered' || camera.status === 'online'
         ? 'normal'
-        : camera.status === 'offline' ? 'fault' : 'abnormal';
-const edgeTone = (device: ComputeLanAsset): DeviceTone => device.online ? 'normal' : 'abnormal';
+        : 'fault';
+const edgeTone = (device: ComputeLanAsset): DeviceTone => device.online ? 'normal' : 'fault';
 const valuesMatch = (query: string, values: (string | number | null | undefined)[]): boolean =>
     !query || values.some(value => String(value || '').toLocaleLowerCase().includes(query));
 
@@ -90,7 +91,6 @@ export const DeviceManagementPopup: React.FC<IProps> = (
     const tones = tab === 'camera' ? cameras.map(cameraTone) : edgeDevices.map(edgeTone);
     const normalCount = tones.filter(tone => tone === 'normal').length;
     const faultCount = tones.filter(tone => tone === 'fault').length;
-    const abnormalCount = tones.filter(tone => tone === 'abnormal').length;
     const visibleCount = tab === 'camera' ? filteredCameras.length : filteredEdgeDevices.length;
 
     const changeTab = (nextTab: DeviceTab) => {
@@ -144,9 +144,7 @@ export const DeviceManagementPopup: React.FC<IProps> = (
         }
     };
 
-    const statusLabel = (tone: DeviceTone): string => tone === 'normal'
-        ? (zh ? '正常' : 'Normal')
-        : tone === 'fault' ? (zh ? '故障' : 'Fault') : (zh ? '异常' : 'Abnormal');
+    const statusLabel = (tone: DeviceTone): string => communicationStateLabel(tone, zh);
     const lastSeen = (timestamp: number): string => timestamp
         ? new Date(timestamp * 1000).toLocaleString(zh ? 'zh-CN' : 'en-US')
         : '—';
@@ -229,7 +227,6 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                         <div><span>{zh ? '总数' : 'Total'}</span><strong>{devices.length}</strong></div>
                         <div><span>{zh ? '正常' : 'Normal'}</span><strong className='normal'>{normalCount}</strong></div>
                         <div><span>{zh ? '故障' : 'Fault'}</span><strong className='fault'>{faultCount}</strong></div>
-                        <div><span>{zh ? '异常' : 'Abnormal'}</span><strong className='abnormal'>{abnormalCount}</strong></div>
                     </div>
 
                     <div className='DeviceManagementTools'>
@@ -249,7 +246,6 @@ export const DeviceManagementPopup: React.FC<IProps> = (
                             <option value='all'>{zh ? '所有状态' : 'All statuses'}</option>
                             <option value='normal'>{zh ? '仅正常' : 'Normal only'}</option>
                             <option value='fault'>{zh ? '仅故障' : 'Fault only'}</option>
-                            <option value='abnormal'>{zh ? '仅异常' : 'Abnormal only'}</option>
                         </select>
                     </div>
 

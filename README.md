@@ -1,16 +1,14 @@
 # OpenSight Platform
 
-## 中文 | English
+**中文** | [English](README_EN.md)
 
-**中文：** OpenSight 是智能视觉标注平台，支持目标检测、实例分割与视频跟踪。
+OpenSight 是智能视觉标注平台，支持目标检测、实例分割与视频跟踪。
 
-**English:** OpenSight is an AI-powered visual annotation platform for object detection, instance segmentation, and video tracking.
-
-Built on [make-sense](https://github.com/SkalskiP/make-sense) by Skalski.
+基于 Skalski 的 [make-sense](https://github.com/SkalskiP/make-sense) 构建。
 
 ![OpenSight Platform](docs/preview.png)
 
-**Live Demo**: [https://model.work](https://model.work/)
+**在线演示**：[https://model.work](https://model.work/)
 
 ## Features
 

@@ -1,6 +1,10 @@
 # OpenSight Platform
 
-AI-powered visual annotation tool with object detection, instance segmentation, and video tracking.
+## 中文 | English
+
+**中文：** OpenSight 是智能视觉标注平台，支持目标检测、实例分割与视频跟踪。
+
+**English:** OpenSight is an AI-powered visual annotation platform for object detection, instance segmentation, and video tracking.
 
 Built on [make-sense](https://github.com/SkalskiP/make-sense) by Skalski.
 

@@ -10,58 +10,58 @@ OpenSight 是智能视觉标注平台，支持目标检测、实例分割与视�
 
 **在线演示**：[https://model.work](https://model.work/)
 
-## Features
+## 功能
 
-- **Object Detection** — YOLO family (v8/v9/v10/11/12/26), custom .pt/.onnx models
-- **Instance Segmentation** — SAM / SAM 2 / SAM 3, MobileSAM, FastSAM, YOLO-seg
-- **Video Mode** — frame extraction, timeline navigation, frame-level annotation
-- **Video Tracking** — SAM 2 propagation across frames
-- **Smart Annotation** — click-to-segment with SAM prompt mode
-- **Batch Inference** — multi-image detection in one pass
-- **Custom Scripts** — upload Python pre/post-process hooks for the inference pipeline
-- **Export** — YOLO, COCO, VOC, CSV, VGG formats
-- **Import** — COCO, YOLO, VOC annotations
+- **目标检测** — 支持 YOLO 系列（v8/v9/v10/11/12/26）及自定义 `.pt`/`.onnx` 模型
+- **实例分割** — 支持 SAM、SAM 2、SAM 3、MobileSAM、FastSAM 与 YOLO-seg
+- **视频模式** — 视频抽帧、时间线导航与逐帧标注
+- **视频跟踪** — 使用 SAM 2 跨帧传播标注
+- **智能标注** — 在 SAM 提示模式下点击分割
+- **批量推理** — 一次检测多张图片
+- **自定义脚本** — 上传用于推理流水线的 Python 前置/后置处理钩子
+- **导出** — 支持 YOLO、COCO、VOC、CSV 与 VGG 格式
+- **导入** — 支持 COCO、YOLO 与 VOC 标注
 
-## Quick Start
+## 快速开始
 
 ```bash
-# Frontend
+# 前端
 npm install
 npm start          # http://localhost:3001
 
-# Backend (required for AI inference)
+# 后端（AI 推理必需）
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-## Project Structure
+## 项目结构
 
 ```
 src/
-  ai/                 # AI detector/segmentation integrations
-  views/              # UI components (Editor, Popups, Timeline)
-  store/              # Redux state management
-  logic/              # Business logic, actions, hotkeys
-backend/              # FastAPI inference server (separate repo)
+  ai/                 # AI 检测与分割集成
+  views/              # 界面组件（编辑器、弹窗、时间线）
+  store/              # Redux 状态管理
+  logic/              # 业务逻辑、操作与快捷键
+backend/              # FastAPI 推理服务（独立仓库）
   app/
     api/routes.py     # /detect, /segment, /batch_detect, /health
     services/         # detection.py, segmentation.py, tracking.py
-    scripts/          # User-uploaded pre/post-process hooks
+    scripts/          # 用户上传的前置/后置处理钩子
 ```
 
-## Tech Stack
+## 技术栈
 
-- **Frontend**: React 18 + TypeScript + Redux + Vite + Canvas API
-- **Backend**: FastAPI + Ultralytics + PyTorch
-- **Segmentation**: SAM 2 / SAM 3 via Ultralytics
+- **前端**：React 18 + TypeScript + Redux + Vite + Canvas API
+- **后端**：FastAPI + Ultralytics + PyTorch
+- **分割**：通过 Ultralytics 使用 SAM 2 / SAM 3
 
-## Requirements
+## 环境要求
 
 - Node.js 18+
 - Python 3.10+
-- PyTorch (CUDA or MPS for GPU acceleration)
+- PyTorch（可使用 CUDA 或 MPS 进行 GPU 加速）
 
-## License
+## 许可证
 
-This project is licensed under [GPL-3.0](LICENSE), following the upstream [make-sense](https://github.com/SkalskiP/make-sense) license.
+本项目采用 [GPL-3.0](LICENSE) 许可证，并遵循上游 [make-sense](https://github.com/SkalskiP/make-sense) 的许可要求。
